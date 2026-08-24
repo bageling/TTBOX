@@ -12,6 +12,7 @@
 #include "mouse/MotionController.hpp"
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
+#include "aim/SmithPredictor.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -43,6 +44,8 @@ private:
     TargetSelector selector_;
     MotionController controller_;
     AimStateMachine state_machine_;
+    SmithPredictor smith_;
+    uint64_t last_timestamp_us_ = 0;
     mutable std::mutex status_mutex_;
     Status status_{};
 };

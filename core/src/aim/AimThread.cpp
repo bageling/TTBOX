@@ -24,6 +24,7 @@ void AimThread::loop() {
         AimTargetTask task;
         if (mailbox_->take_latest(&task, last_frame)) {
             last_frame = task.frame_number;
+            last_timestamp_us_ = task.timestamp_us;
             // 新控制链：目标选择 → 误差 → 纯 PID/P 控制 → OutputAction。
             TargetSelectorConfig scfg;
             scfg.roi_w = task.frame_width; scfg.roi_h = task.frame_height;
@@ -61,8 +62,14 @@ void AimThread::loop() {
                                                profile->mouse.vfov, profile->mouse.move_speed_y);
                     }
                 }
+                float dt = last_timestamp_us_ > 0 && task.timestamp_us > last_timestamp_us_
+                    ? static_cast<float>(task.timestamp_us - last_timestamp_us_) / 1000000.0f : 0.004f;
+                (void)dt; // 当前 MotionController 接口尚未接收 dt，先记录真实时基。
+                const auto pending = smith_.predicted(task.timestamp_us);
+                control_x -= pending.dx; control_y -= pending.dy;
                 const auto motion = controller_.update(control_x, control_y, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y);
                 move_x = static_cast<int16_t>(motion.out_x); move_y = static_cast<int16_t>(motion.out_y);
+                smith_.record(task.frame_number, static_cast<float>(move_x), static_cast<float>(move_y), task.timestamp_us);
             }
             output_->send(output::OutputAction{move_x, move_y, 0, 0, task.frame_number, task.timestamp_us});
             std::lock_guard<std::mutex> lk(status_mutex_);
