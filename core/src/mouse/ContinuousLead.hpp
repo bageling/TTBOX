@@ -2,7 +2,7 @@
 //
 // 对齐 YU 语义：AI 输出同向累计距离超 enter 后，附加 X 方向偏置
 // （scale × |dx| × 0.5），渐入渐出。C 桥已有近似实现；本模块在
-// C++ 侧提供（MouseScheduler 输出链调用），避免重复叠加。
+// C++ 侧提供（AimThread 控制链调用），避免重复叠加。
 #pragma once
 
 #include <cmath>

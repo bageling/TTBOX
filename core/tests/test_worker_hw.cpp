@@ -160,8 +160,7 @@ int run_group(const std::string& model_path, int n_workers,
     std::printf("  V4L2 实际时序: %ux%u fourcc=%s\n", fmt.width, fmt.height,
                 fmt.fourcc_str().c_str());
 
-    // A11：共享最新检测结果（worker 发布；预览线程叠加真实推理框）
-    aim::LatestDetections latest_dets;
+    // A11：新架构 AimTargetMailbox 是唯一控制数据入口。
     std::atomic<uint32_t> frame_dets{0};  // 当前帧目标个数（预览线程更新，METRICS 上报）
 
     // Web 实时画面：预览保存线程（CPU 拷贝中心 ROI → 平铺 BMP；~1ms/帧，远快于 RGA）
@@ -301,7 +300,7 @@ int run_group(const std::string& model_path, int n_workers,
                     adapter.metadata().color_order == ColorOrder::kRgb ? "RGB" : "BGR");
     }
 
-    // A11：新架构独立 AimThread。控制逻辑不再由旧 MouseScheduler 承担。
+    // A11：新架构独立 AimThread。控制逻辑不再由旧调度器 承担。
     aim::AimTargetMailbox aim_mailbox(worker_cores.size());
     auto aim_output = mouse_fifo.empty()
         ? std::shared_ptr<output::IHidOutput>(std::make_shared<output::NullHidOutput>())
@@ -328,7 +327,6 @@ int run_group(const std::string& model_path, int n_workers,
     pp.color_order = static_cast<int>(acfg.color_order);
     pp.adapter = adapter_ptr;
     pp.runtime_config = runtime_config;
-    pp.latest_dets = &latest_dets;  // 预览兼容：仅用于显示检测框，不参与控制
     pp.aim_mailbox = &aim_mailbox;
     if (!pool.start(pp, &err)) {
         std::printf("[FAIL] worker pool(%d): %s\n", n_workers, err.c_str());

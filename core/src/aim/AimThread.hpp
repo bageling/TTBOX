@@ -1,5 +1,5 @@
 // AimThread.hpp — 独立瞄准控制线程骨架。
-// 当前阶段只验证 Worker -> Mailbox -> AimThread 的数据链路，不改变现有 MouseScheduler 行为。
+// 当前阶段只验证 Worker -> Mailbox -> AimThread 的数据链路，不改变现有采集/推理行为。
 #pragma once
 #include <atomic>
 #include <cstdint>

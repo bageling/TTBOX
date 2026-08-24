@@ -27,7 +27,6 @@
 #include "model/Decoder.hpp"
 #include "model/ModelAdapter.hpp"
 #include "model/RuntimeProfile.hpp"
-#include "mouse/LatestDetections.hpp"
 #include "pipeline/AimTargetMailbox.hpp"
 #include "rga/RgaProcessor.hpp"
 #include "rknn/DecodeNMS.hpp"
@@ -78,7 +77,6 @@ public:
         int color_order = 0;        // RGA 输出颜色（模型输入要求）：0=BGR, 1=RGB
         ModelAdapter* adapter = nullptr;  // A-7：可选统一适配器
         RuntimeConfig* runtime_config = nullptr;  // A-8：可选内存热更新配置（禁逐帧 JSON）
-        aim::LatestDetections* latest_dets = nullptr;  // 兼容旧 MouseScheduler 的最新检测发布
         aim::AimTargetMailbox* aim_mailbox = nullptr;  // 新架构：Worker -> AimThread 目标邮箱
     };
 
@@ -107,7 +105,7 @@ private:
     std::vector<std::vector<uint8_t>> raw_outputs_;  // 原生输出 buffer（want_float=0）
     std::vector<void*> raw_buf_ptrs_;
     std::vector<size_t> raw_sizes_;
-    std::vector<DetectionBox> detections_; // 本帧检测结果（仅统计，A-6 不接 Aim）
+    std::vector<DetectionBox> detections_; // 本帧检测结果，转换为 AimTargetTask
     uint32_t last_seq_ = 0;
     int id_ = -1;
     WorkerStats stats_;
@@ -133,7 +131,6 @@ public:
         int color_order = 0;        // RGA 输出颜色（模型输入要求）：0=BGR, 1=RGB
         ModelAdapter* adapter = nullptr;  // A-7：可选统一适配器
         RuntimeConfig* runtime_config = nullptr;  // A-8：可选内存热更新配置（禁逐帧 JSON）
-        aim::LatestDetections* latest_dets = nullptr;  // 兼容旧 MouseScheduler 的最新检测发布
         aim::AimTargetMailbox* aim_mailbox = nullptr;  // 新架构：Worker -> AimThread 目标邮箱
     };
 

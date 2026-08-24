@@ -2,7 +2,7 @@
 //
 // 对齐 YU humanize 语义：目标输出附加正弦抖动（jitter_px 幅度、
 // jitter_frequency 频率），curve_strength 保留用于曲线混合。
-// 在 MouseScheduler 输出链 quantize 之前调用。
+// 在 AimThread 输出链 quantize 之前调用。
 #pragma once
 
 #include <cmath>

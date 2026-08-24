@@ -53,7 +53,7 @@ PRESETS_DIR = TTBOX / "config" / "presets"         # 预设参数目录
 CONVERT_SCRIPT = TTBOX / "scripts" / "convert_onnx_to_rknn.py"
 CONVERT_DIR = TTBOX / "run" / "convert"
 MOUSE_STATS_FILE = Path("/run/ttbox-mouse-stats.json")  # A10：C 桥 AI 注入统计
-TARGET_STATE_FILE = Path("/run/ttbox-target.json")      # A10.3：C++ MouseScheduler 200ms 高频目标状态
+TARGET_STATE_FILE = Path("/run/ttbox-target.json")      # A10.3：C++ AimThread 高频目标状态
 MOUSE_HW_FILE = TTBOX / "config" / "hardware_mouse.json"   # USB 鼠标身份配置（合成模式自定义）
 MOUSE_APPLY_SCRIPT = TTBOX / "scripts" / "apply_mouse_identity.sh"
 # 前端页面：优先读取同目录 index.html（设计稿对接版），缺失回退内嵌 INDEX_HTML
@@ -1020,7 +1020,7 @@ def read_profile() -> dict:
 
 def _sync_ai_controller_to_mouse(data: dict) -> None:
     """前端 collectProfile 把 YU controller 参数放在 features.ai_controller；
-    C++ MouseScheduler 从 profile.mouse 读取。这里做双写，保证两条链都有。"""
+    C++ AimThread 从 profile.mouse 读取。这里做双写，保证两条链都有。"""
     try:
         feats = (data or {}).get("features") or {}
         ac = feats.get("ai_controller") or {}
@@ -1072,7 +1072,7 @@ def write_profile(data: dict, protect_enabled: bool = True) -> tuple[bool, str]:
     if not isinstance(data, dict):
         return False, "body 必须为 JSON object"
     # 把 features.ai_controller（前端收集的 YU controller 插件参数）同步到 mouse 段，
-    # 供 C++ RuntimeProfile（MouseScheduler 输出链）读取
+    # 供 C++ RuntimeProfile（AimThread 控制链）读取
     _sync_ai_controller_to_mouse(data)
     try:
         if protect_enabled and "mouse" in data and isinstance(data["mouse"], dict) \
@@ -1518,7 +1518,7 @@ def calibration_state() -> dict:
 
 
 def _read_target_state() -> dict | None:
-    """读 C++ MouseScheduler 200ms 高频目标状态（/run/ttbox-target.json）。"""
+    """读 C++ AimThread 高频目标状态（/run/ttbox-target.json）。"""
     try:
         return json.loads(TARGET_STATE_FILE.read_text())
     except Exception:  # noqa: BLE001

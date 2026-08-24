@@ -89,8 +89,7 @@ if(UNIX AND NOT APPLE)
       src/rknn/RKNNEngine.cpp
       src/rknn/NpuMonitor.cpp
       src/rknn/WorkerPool.cpp
-      src/mouse/MouseScheduler.cpp  # A10：POSIX 调度器（FIFO），仅 UNIX
-    )
+        )
     set(TTBOX_CORE_HAS_RKNN TRUE)
     message(STATUS "librknnrt found: lib=${RKNNRT_LIBRARY} include=${RKNN_INCLUDE_DIR}")
   else()

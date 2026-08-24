@@ -48,8 +48,7 @@ HID/FIFO
 当前并行链路：
 
 ```text
-旧链路：Worker → LatestDetections → MouseScheduler → FIFO
-新链路：Worker → AimTargetMailbox → AimThread → OutputAction
+新链路：Worker → AimTargetMailbox → AimThread → OutputAction → FIFO
 ```
 
 新 AimThread 当前只验证数据流和误差方向，暂未接管 PID/FOV/Smith，也暂不改变真实鼠标输出。
@@ -65,7 +64,7 @@ core/src/model/     ModelAdapter、模型元数据、Runtime 配置
 core/src/pipeline/  Frame/AimTarget 数据通道
 core/src/aim/       AimThread、目标误差和后续控制算法
 core/src/output/    AI 输出后端抽象与 FIFO 后端
-core/src/mouse/     旧 MouseScheduler 兼容链路
+core/src/mouse/     AimThread 控制链路
 core/src/hid/       HID 透传与 Gadget 管理
 core/src/ipc/       本地 IPC
 core/tests/         单元测试与硬件测试
@@ -96,7 +95,7 @@ ctest --test-dir core/build --output-on-failure
 2. Worker 不直接执行 PID 或 HID。
 3. AimThread 统一处理目标、FOV、预测、PID 和输出策略。
 4. 输出通过 `IHidOutput` 抽象，先保留 FIFO，后续再支持直接 FFS。
-5. 旧 MouseScheduler 在新链路验证前保持可回滚。
+5. 当前主线只使用 AimThread；旧调度器已移除。
 6. 高速链路不传逐帧 JSON，不复制图像。
 7. 所有架构模块必须写中文职责注释。
 8. 每个阶段必须编译、测试、提交并可回滚。

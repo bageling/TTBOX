@@ -280,10 +280,6 @@ void InferenceWorker::loop() {
         stats_.processed.fetch_add(1);
         const uint64_t now_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(clock::now().time_since_epoch()).count());
-        // 兼容旧 MouseScheduler：继续发布 LatestDetections。
-        if (params_.latest_dets) {
-            params_.latest_dets->publish(detections_, seq, now_us);
-        }
         if (params_.aim_mailbox) {
             aim::AimTargetTask task;
             task.frame_number = seq;

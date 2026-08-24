@@ -139,7 +139,7 @@ Pipeline 动态参数：
 
 ```text
 Worker
-├── LatestDetections → MouseScheduler → FIFO（兼容旧链路）
+└── AimTargetTask → AimTargetMailbox → AimThread → OutputAction → FIFO
 └── AimTargetTask → AimTargetMailbox → AimThread（新链路）
 ```
 
