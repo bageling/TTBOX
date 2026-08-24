@@ -27,7 +27,9 @@
 #include "common/Stats.hpp"
 #include "config/ConfigManager.hpp"
 #include "model/RuntimeProfile.hpp"
-#include "mouse/MouseScheduler.hpp"
+#include "aim/AimThread.hpp"
+#include "output/FifoHidOutput.hpp"
+#include "pipeline/AimTargetMailbox.hpp"
 #include "rknn/NpuMonitor.hpp"
 #include "rknn/WorkerPool.hpp"
 
@@ -299,23 +301,17 @@ int run_group(const std::string& model_path, int n_workers,
                     adapter.metadata().color_order == ColorOrder::kRgb ? "RGB" : "BGR");
     }
 
-    // A10：AI 鼠标注入（可选 --mouse-fifo）
-    aim::MouseScheduler mouse_sched;
-    if (!mouse_fifo.empty()) {
-        aim::MouseScheduler::Params mp;
-        mp.fifo_path = mouse_fifo;
-        mp.runtime_config = runtime_config;
-        mp.latest = &latest_dets;
-        mp.frame_w = fmt.width;
-        mp.frame_h = fmt.height;
-        std::string merr;
-        if (!mouse_sched.start(mp, &merr)) {
-            std::printf("[WARN] mouse scheduler 启动失败: %s\n", merr.c_str());
-        } else {
-            std::printf("  MouseScheduler: fifo=%s 启动（AI 注入；未启用时物理透传不变）\n",
-                        mouse_fifo.c_str());
-        }
+    // A11：新架构独立 AimThread。控制逻辑不再由旧 MouseScheduler 承担。
+    aim::AimTargetMailbox aim_mailbox(worker_cores.size());
+    auto aim_output = mouse_fifo.empty()
+        ? std::shared_ptr<output::IHidOutput>(std::make_shared<output::NullHidOutput>())
+        : std::shared_ptr<output::IHidOutput>(std::make_shared<output::FifoHidOutput>(mouse_fifo));
+    aim::AimThread aim_thread;
+    if (!aim_thread.start(&aim_mailbox, aim_output, 4000)) {
+        std::printf("[FAIL] AimThread 启动失败\n");
+        cap.stop(); cap.close(); return 1;
     }
+    std::printf("  AimThread: 新架构启动（目标邮箱→独立控制线程→OutputAction）\n");
 
     WorkerPool pool;
     WorkerPool::Params pp;
@@ -332,7 +328,8 @@ int run_group(const std::string& model_path, int n_workers,
     pp.color_order = static_cast<int>(acfg.color_order);
     pp.adapter = adapter_ptr;
     pp.runtime_config = runtime_config;
-    pp.latest_dets = &latest_dets;  // A10：worker 发布检测结果供 Aim 消费
+    pp.latest_dets = &latest_dets;  // 预览兼容：仅用于显示检测框，不参与控制
+    pp.aim_mailbox = &aim_mailbox;
     if (!pool.start(pp, &err)) {
         std::printf("[FAIL] worker pool(%d): %s\n", n_workers, err.c_str());
         cap.stop();
@@ -402,49 +399,12 @@ int run_group(const std::string& model_path, int n_workers,
                     const double cap_ms = captured_now > 0
                                               ? elapsed_s * 1000.0 / static_cast<double>(captured_now)
                                               : 0.0;
-                    const auto ms = mouse_sched.status();
-                    std::printf(
-                        "  [METRICS] {\"t\":%.1f,\"capture_fps\":%.1f,\"pipeline_fps\":%.1f,"
-                        "\"processed\":%llu,\"captured\":%llu,\"errors\":%llu,\"skipped\":%llu,"
-                        "\"run_us\":%.1f,\"rga_us\":%.1f,\"e2e_us\":%.1f,\"decode_us\":%.1f,"
-                        "\"capture_ms\":%.1f,\"detections\":%llu,\"candidates\":%llu,"
-                        "\"npu0\":%.1f,\"npu1\":%.1f,\"npu2\":%.1f,"
-                        "\"dropped_latest\":%llu,\"poll_timeouts\":%llu,\"v4l2_errors\":%llu,"
-                        "\"mouse_enabled\":%s,\"mouse_state\":\"%s\",\"mouse_target_x\":%.1f,"
-                        "\"mouse_target_y\":%.1f,\"mouse_class\":%d,\"mouse_conf\":%.2f,"
-                        "\"mouse_det_count\":%u,\"mouse_aim_x\":%.1f,\"mouse_aim_y\":%.1f,"
-                        "\"mouse_pred_x\":%.1f,\"mouse_pred_y\":%.1f,"
-                        "\"mouse_err_x\":%.1f,\"mouse_err_y\":%.1f,"
-                        "\"mouse_vel_x\":%.1f,\"mouse_vel_y\":%.1f,\"mouse_ai_dx\":%d,\"mouse_ai_dy\":%d,"
-                        "\"frame_dets\":%u,\"mouse_frames\":%llu}\n",
-                        elapsed_s,
-                        captured_now > 0 ? static_cast<double>(captured_now) / elapsed_s : 0.0,
-                        processed_now > 0 ? static_cast<double>(processed_now) / elapsed_s : 0.0,
-                        (unsigned long long)processed_now, (unsigned long long)captured_now,
-                        (unsigned long long)errors_now, (unsigned long long)skipped_now,
-                        run_n > 0 ? run_sum / static_cast<double>(run_n) : 0.0,
-                        rga_n > 0 ? rga_sum / static_cast<double>(rga_n) : 0.0,
-                        e2e_n > 0 ? e2e_sum / static_cast<double>(e2e_n) : 0.0,
-                        decode_n > 0 ? decode_sum / static_cast<double>(decode_n) : 0.0,
-                        cap_ms, (unsigned long long)det_sum, (unsigned long long)cand_sum,
-                        npu_s.core0, npu_s.core1, npu_s.core2,
-                        (unsigned long long)vmm.dropped_latest_frames.load(),
-                        (unsigned long long)vmm.poll_timeouts.load(),
-                        (unsigned long long)vmm.errors.load(),
-                        ms.enabled ? "true" : "false",
-                        aim::aim_state_name(ms.state),
-                        static_cast<double>(ms.target_x), static_cast<double>(ms.target_y),
-                        ms.target_class, static_cast<double>(ms.target_confidence),
-                        ms.detection_count,
-                        static_cast<double>(ms.aim_x), static_cast<double>(ms.aim_y),
-                        static_cast<double>(ms.pred_x), static_cast<double>(ms.pred_y),
-                        static_cast<double>(ms.err_x), static_cast<double>(ms.err_y),
-                        static_cast<double>(ms.vel_x), static_cast<double>(ms.vel_y),
-                        static_cast<int>(ms.ai_dx), static_cast<int>(ms.ai_dy),
-                        frame_dets.load(),
-                        (unsigned long long)ms.frames);
-                }
-                std::fflush(stdout);
+                    const auto as = aim_thread.status();
+                    std::printf("  [AIM] running=%s last_frame=%llu consumed=%llu\n",
+                                as.running ? "true" : "false",
+                                (unsigned long long)as.last_frame,
+                                (unsigned long long)as.consumed);
+                    std::fflush(stdout);
             }
         }
         // A10：高频目标状态文件（供 Web 实时目标 + 自动标定闭环）。
@@ -455,311 +415,9 @@ int run_group(const std::string& model_path, int n_workers,
                                          .count();
             if (now_ms - last_target_ms >= 8) {
                 last_target_ms = now_ms;
-                const auto tms = mouse_sched.status();
+                const auto as = aim_thread.status();
                 char tbuf[512];
-                const int tl = std::snprintf(
-                    tbuf, sizeof(tbuf),
-                    "{\"t\":%.1f,\"enabled\":%s,\"state\":\"%s\",\"found\":%s,"
-                    "\"x\":%.1f,\"y\":%.1f,\"cls\":%d,\"conf\":%.2f,\"dets\":%u,"
-                    "\"aim_x\":%.1f,\"aim_y\":%.1f,\"err_x\":%.1f,\"err_y\":%.1f,"
-                    "\"ai_dx\":%d,\"ai_dy\":%d,\"frames\":%llu}\n",
-                    elapsed_s, tms.enabled ? "true" : "false",
-                    aim::aim_state_name(tms.state), (tms.target_class >= 0) ? "true" : "false",
-                    static_cast<double>(tms.target_x), static_cast<double>(tms.target_y),
-                    tms.target_class, static_cast<double>(tms.target_confidence),
-                    tms.detection_count,
-                    static_cast<double>(tms.aim_x), static_cast<double>(tms.aim_y),
-                    static_cast<double>(tms.err_x), static_cast<double>(tms.err_y),
-                    static_cast<int>(tms.ai_dx), static_cast<int>(tms.ai_dy),
-                    (unsigned long long)tms.frames);
-                FILE* tf = std::fopen("/run/ttbox-target.json", "wb");
-                if (tf) {
-                    std::fwrite(tbuf, 1, static_cast<size_t>(tl), tf);
-                    std::fclose(tf);
-                }
-            }
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    const auto t1 = std::chrono::steady_clock::now();
-    const double elapsed_s = std::chrono::duration<double>(t1 - t0).count();
-    npu.stop();
-    const uint64_t processed = pool.total_processed();
-    if (cpu_ok) read_cpu_total(&cpu_busy1, &cpu_total1);
-    const double cpu_pct = (cpu_ok && cpu_total1 > cpu_total0)
-                               ? 100.0 * static_cast<double>(cpu_busy1 - cpu_busy0) /
-                                     static_cast<double>(cpu_total1 - cpu_total0)
-                               : -1.0;
-
-    const V4L2Metrics& vm = cap.metrics();
-    const uint64_t captured = vm.capture_frames.load();
-    const uint64_t errors = pool.total_errors();
-    const uint64_t skipped = pool.total_skipped();
-    const uint64_t dropped = captured >= processed ? captured - processed : 0;
-
-    // ---- 各 worker 明细 ----
-    std::printf("  --- Worker 明细 ---\n");
-    const auto& workers = pool.workers();
-    uint64_t e2e_samples = 0;
-    double e2e_sum_us = 0.0, convert_sum_us = 0.0, total_sum_us = 0.0;
-    uint64_t stage_samples = 0;
-    uint64_t cand_sum = 0, det_sum = 0;
-    for (size_t i = 0; i < workers.size(); ++i) {
-        const WorkerStats& ws = workers[i]->stats();
-        std::printf("  Worker[%zu] (core_mask=%d): processed=%llu errors=%llu skipped=%llu\n",
-                    i, worker_cores[i],
-                    (unsigned long long)ws.processed.load(),
-                    (unsigned long long)ws.errors.load(),
-                    (unsigned long long)ws.skipped.load());
-        print_stage("  set_input", ws.stages.set_input);
-        print_stage("  run", ws.stages.run);
-        print_stage("  output", ws.stages.output);
-        print_stage("  total", ws.stages.total);
-        print_stage("  rga", ws.rga);
-        print_stage("  convert", ws.convert);
-        print_stage("  decode", ws.decode_stages.decode);
-        print_stage("  nms", ws.decode_stages.nms);
-        print_stage("  decode_total", ws.decode_stages.total);
-        print_stage("  E2E", ws.e2e);
-        std::printf("    candidates=%llu detections=%llu\n",
-                    (unsigned long long)ws.candidates.load(),
-                    (unsigned long long)ws.detections.load());
-        cand_sum += ws.candidates.load();
-        det_sum += ws.detections.load();
-        const uint64_t n = ws.stages.total.count();
-        stage_samples += n;
-        total_sum_us += ws.stages.total.avg() * static_cast<double>(n);
-        convert_sum_us += ws.convert.avg() * static_cast<double>(ws.convert.count());
-        e2e_samples += ws.e2e.count();
-        e2e_sum_us += ws.e2e.avg() * static_cast<double>(ws.e2e.count());
-    }
-
-    // ---- 汇总 ----
-    std::printf("  --- 汇总 ---\n");
-    std::printf("  capture FPS=%.1f (captured=%llu / %.2fs)\n",
-                captured / elapsed_s, (unsigned long long)captured, elapsed_s);
-    std::printf("  Worker FPS: 池吞吐=%.1f (processed=%llu / %.2fs) | 每 worker 平均=%.1f\n",
-                processed / elapsed_s, (unsigned long long)processed, elapsed_s,
-                processed / elapsed_s / static_cast<double>(workers.size()));
-    std::printf("  总吞吐 FPS=%.1f\n", processed / elapsed_s);
-    if (stage_samples > 0) {
-        std::printf("  total(加权) avg=%.1f us | convert(加权) avg=%.1f us\n",
-                    total_sum_us / static_cast<double>(stage_samples),
-                    convert_sum_us / static_cast<double>(stage_samples));
-    }
-    if (e2e_samples > 0) {
-        std::printf("  E2E(加权) avg=%.1f us (%llu 样本)\n",
-                    e2e_sum_us / static_cast<double>(e2e_samples),
-                    (unsigned long long)e2e_samples);
-    }
-    std::printf("  候选总数=%llu (%.1f/帧) | 目标总数=%llu (%.1f/帧)\n",
-                (unsigned long long)cand_sum,
-                processed > 0 ? static_cast<double>(cand_sum) / static_cast<double>(processed) : 0.0,
-                (unsigned long long)det_sum,
-                processed > 0 ? static_cast<double>(det_sum) / static_cast<double>(processed) : 0.0);
-    const NpuLoadSummary npu_s = npu.summary();
-    std::printf("  NPU 利用率(%zu 次采样): Core0=%.1f%% Core1=%.1f%% Core2=%.1f%%\n",
-                npu_s.samples, npu_s.core0, npu_s.core1, npu_s.core2);
-    if (cpu_pct >= 0.0) {
-        std::printf("  CPU 使用率(总体)=%.1f%%\n", cpu_pct);
-    } else {
-        std::printf("  CPU 使用率: /proc/stat 不可读\n");
-    }
-    std::printf("  context 数量=%zu | 丢帧=%llu (captured=%llu - processed=%llu) | 错误=%llu | skipped=%llu\n",
-                pool.worker_count(), (unsigned long long)dropped,
-                (unsigned long long)captured, (unsigned long long)processed,
-                (unsigned long long)errors, (unsigned long long)skipped);
-    std::printf("  V4L2: dqbuf=%llu qbuf=%llu dropped_latest=%llu errors=%llu poll_timeouts=%llu\n",
-                (unsigned long long)vm.dqbuf_frames.load(),
-                (unsigned long long)vm.qbuf_frames.load(),
-                (unsigned long long)vm.dropped_latest_frames.load(),
-                (unsigned long long)vm.errors.load(),
-                (unsigned long long)vm.poll_timeouts.load());
-
-    pool.stop();
-    mouse_sched.stop();
-    preview_stop.store(true);
-    if (preview_thread.joinable()) preview_thread.join();
-    cap.stop();
-    cap.close();
-    return processed >= static_cast<uint64_t>(frames) ? 0 : 2;
-}
-
-}  // namespace
-
-int main(int argc, char** argv) {
-    std::string model = kDefaultModel;
-    int frames = 300;
-    double duration_guard = 180.0;
-    int only_workers = 0;          // 0 = 依次跑 1/2/3
-    std::string cores_arg;         // 自定义 core 绑定，如 "1,2" / "0,0"（覆盖默认）
-    uint32_t num_buffers = 4;
-    bool use_adapter = false;      // A-7：走统一 ModelAdapter（metadata + Decoder）
-    uint32_t in_w_override = 0;    // A-7：覆盖 config 的模型输入尺寸（如黄瓦 320）
-    uint32_t in_h_override = 0;
-    double report_every_s = 0.0;   // A10：定期输出 [REPORT] 汇总（供 Web 实时 FPS，0=关闭）
-    std::string color_arg;         // A-7：覆盖 config 的颜色顺序（如 v26m=rgb）
-    std::string profile_arg;       // A-8：RuntimeProfile JSON 路径（热更新，可选）
-    std::string mouse_fifo;        // A10：AI 鼠标注入 FIFO 路径（可选，空=不启用）
-
-    for (int i = 1; i < argc; ++i) {
-        std::string a = argv[i];
-        auto next = [&](const char* name) -> std::string {
-            if (i + 1 >= argc) {
-                std::fprintf(stderr, "缺少参数: %s\n", name);
-                std::exit(1);
-            }
-            return argv[++i];
-        };
-        if (a == "--model") model = next("--model");
-        else if (a == "--frames") frames = std::atoi(next("--frames").c_str());
-        else if (a == "--duration") duration_guard = std::atof(next("--duration").c_str());
-        else if (a == "--workers") only_workers = std::atoi(next("--workers").c_str());
-        else if (a == "--cores") cores_arg = next("--cores");
-        else if (a == "--buffers") num_buffers = static_cast<uint32_t>(std::atoi(next("--buffers").c_str()));
-        else if (a == "--adapter") use_adapter = true;
-        else if (a == "--inw") in_w_override = static_cast<uint32_t>(std::atoi(next("--inw").c_str()));
-        else if (a == "--inh") in_h_override = static_cast<uint32_t>(std::atoi(next("--inh").c_str()));
-        else if (a == "--report-every") report_every_s = std::atof(next("--report-every").c_str());
-        else if (a == "--color") color_arg = next("--color");
-        else if (a == "--profile") profile_arg = next("--profile");
-        else if (a == "--mouse-fifo") mouse_fifo = next("--mouse-fifo");
-        else { std::fprintf(stderr, "未知参数: %s\n", a.c_str()); return 1; }
-    }
-
-    // 配置（core_mask / 模型输入尺寸来自 config，不写死）
-    ConfigManager cfg;
-    std::string cerr;
-    const std::string cfg_path = std::string(TTBOX_PROJECT_ROOT) + "/config/default.json";
-    if (!cfg.load(cfg_path, &cerr)) {
-        std::printf("[FAIL] 配置加载失败: %s\n", cerr.c_str());
-        return 1;
-    }
-    const int cfg_core_mask = static_cast<int>(cfg.get_int("core_mask", 0));
-    const int64_t iw_cfg = cfg.get_int("model_input_width", 0);
-    const int64_t ih_cfg = cfg.get_int("model_input_height", 0);
-    if (iw_cfg <= 0 || ih_cfg <= 0) {
-        std::printf("[FAIL] config 模型输入尺寸无效\n");
-        return 1;
-    }
-    // 用户/运行时配置（A-7 ModelAdapterConfig：conf/iou/color/class_filter/max_detections）
-    ModelAdapterConfig acfg;
-    const std::string cfg_color = color_arg.empty() ? cfg.get_string("model_color_order", "bgr") : color_arg;
-    acfg.color_order = (cfg_color == "rgb") ? ColorOrder::kRgb : ColorOrder::kBgr;
-    acfg.conf_thres = static_cast<float>(cfg.get_double("conf", 0.25));
-    acfg.iou_thres = static_cast<float>(cfg.get_double("nms", 0.45));
-    acfg.max_detections = static_cast<int>(cfg.get_int("max_detections", 0));
-    {
-        const std::string cf = cfg.get_string("class_filter_text", "");
-        size_t p = 0;
-        while (p < cf.size()) {
-            const size_t c = cf.find(',', p);
-            const std::string tok = cf.substr(p, c == std::string::npos ? std::string::npos : c - p);
-            if (!tok.empty()) acfg.class_filter.push_back(std::atoi(tok.c_str()));
-            if (c == std::string::npos) break;
-            p = c + 1;
-        }
-    }
-    std::printf("=== ttbox_core 多 Worker 并发推理硬件验收（model=%s, in=%lldx%lld, frames=%d, cfg core_mask=%d, conf=%.2f iou=%.2f%s）===\n",
-                model.c_str(), (long long)iw_cfg, (long long)ih_cfg, frames, cfg_core_mask,
-                acfg.conf_thres, acfg.iou_thres, use_adapter ? ", A7-adapter" : "");
-
-    // 各 Worker 数对应的 NPU core 绑定（显式绑定便于验证三核利用率）
-    // 1 Worker = 基线（沿用 config core_mask）；2/3 Worker 分别绑 2/3 个 core
-    struct Group {
-        int n;
-        std::vector<int> cores;
-    };
-    std::vector<Group> groups;
-    if (!cores_arg.empty()) {
-        // 自定义绑定，如 "1,2"、"0,0"（诊断/对照用）
-        std::vector<int> cores;
-        size_t pos = 0;
-        while (pos < cores_arg.size()) {
-            const size_t comma = cores_arg.find(',', pos);
-            const std::string tok = cores_arg.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
-            if (!tok.empty()) cores.push_back(std::atoi(tok.c_str()));
-            if (comma == std::string::npos) break;
-            pos = comma + 1;
-        }
-        if (cores.empty()) {
-            std::fprintf(stderr, "无效 --cores: %s\n", cores_arg.c_str());
-            return 1;
-        }
-        groups.push_back({static_cast<int>(cores.size()), cores});
-    } else if (only_workers >= 1 && only_workers <= 3) {
-        if (only_workers == 1) groups.push_back({1, {cfg_core_mask}});
-        if (only_workers == 2) groups.push_back({2, {1, 2}});
-        if (only_workers == 3) groups.push_back({3, {1, 2, 4}});
-    } else {
-        groups.push_back({1, {cfg_core_mask}});
-        groups.push_back({2, {1, 2}});
-        groups.push_back({3, {1, 2, 4}});
-    }
-
-    int rc = 0;
-    // 模型输入尺寸：--inw/--inh 覆盖 > config（A-7：黄瓦 320 用 --inw 320 --inh 320）
-    const uint32_t iw = in_w_override > 0 ? in_w_override : static_cast<uint32_t>(iw_cfg);
-    const uint32_t ih = in_h_override > 0 ? in_h_override : static_cast<uint32_t>(ih_cfg);
-    std::printf("  模型输入尺寸: %ux%u (config=%lldx%lld%s)\n",
-                iw, ih, (long long)iw_cfg, (long long)ih_cfg,
-                (in_w_override > 0 || in_h_override > 0) ? ", CLI 覆盖" : "");
-
-    // A-8：可选的 RuntimeProfile 热更新配置（--profile <json>）
-    //   RuntimeConfig 持有 shared_ptr<const RuntimeProfile>，worker 每帧取只读快照，
-    //   更新 = 原子替换（无逐帧 JSON/IPC）。后台线程轮询 JSON 文件 mtime，
-    //   变化即重新加载并原子替换（Web 端只需重写 JSON 文件即可热更新）。
-    RuntimeConfig runtime_config;
-    std::thread profile_watcher;
-    std::atomic<bool> profile_watch_stop{false};
-    if (!profile_arg.empty()) {
-        std::string perr;
-        RuntimeProfile prof = RuntimeProfile::from_json_file(profile_arg, &perr);
-        if (!perr.empty()) {
-            std::printf("[FAIL] --profile 解析失败: %s\n", perr.c_str());
-            return 1;
-        }
-        runtime_config.update(std::make_shared<const RuntimeProfile>(std::move(prof)));
-        std::printf("  RuntimeProfile 已加载: %s（热更新启用）\n", profile_arg.c_str());
-        profile_watcher = std::thread([&] {
-            struct stat last {};
-            ::stat(profile_arg.c_str(), &last);
-            while (!profile_watch_stop.load()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                struct stat cur {};
-                if (::stat(profile_arg.c_str(), &cur) != 0) continue;
-                if (cur.st_mtime == last.st_mtime && cur.st_size == last.st_size) continue;
-                last = cur;
-                std::string werr;
-                RuntimeProfile np = RuntimeProfile::from_json_file(profile_arg, &werr);
-                if (!werr.empty()) {
-                    std::printf("  [WARN] --profile 重载失败: %s\n", werr.c_str());
-                    continue;
-                }
-                runtime_config.update(std::make_shared<const RuntimeProfile>(std::move(np)));
-                std::printf("  [PROFILE] 热更新已应用\n");
-                std::fflush(stdout);
-            }
-        });
-    }
-
-    for (const auto& g : groups) {
-        const int r = run_group(model, g.n, g.cores,
-                                iw, ih,
-                                frames, duration_guard, num_buffers, acfg, use_adapter,
-                                report_every_s,
-                                profile_arg.empty() ? nullptr : &runtime_config,
-                                mouse_fifo);
-        if (r != 0) {
-            std::printf("  [WARN] worker=%d 组未完成 %d 帧（rc=%d），请检查上面输出\n",
-                        g.n, frames, r);
-            rc = rc == 0 ? r : rc;
-        }
-    }
-    if (profile_watcher.joinable()) {
-        profile_watch_stop.store(true);
-        profile_watcher.join();
-    }
-    std::printf("\n=== 多 Worker 对比测试结束（1/2/3 Worker 各组数据见上）===\n");
-    return rc;
-}
+                const int tl = std::snprintf(tbuf, sizeof(tbuf),
+                    "{\"t\":%.1f,\"enabled\":%s,\"found\":%s,\"frame\":%llu,\"consumed\":%llu}\n",
+                    elapsed_s, as.running ? "true" : "false", as.has_task ? "true" : "false",
+                    (unsigned long long)as.last_frame, (unsigned long long)as.consumed);
