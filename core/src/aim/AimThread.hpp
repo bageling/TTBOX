@@ -36,6 +36,11 @@ public:
         float control_y = 0.0f;
         float smith_dx = 0.0f;
         float smith_dy = 0.0f;
+        int16_t min_move_x = 0;
+        int16_t max_move_x = 0;
+        int16_t min_move_y = 0;
+        int16_t max_move_y = 0;
+        uint64_t clipped_frames = 0;
     };
     AimThread() = default;
     ~AimThread() { stop(); }

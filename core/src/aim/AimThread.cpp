@@ -89,8 +89,18 @@ void AimThread::loop() {
                 }
                 float dt = last_timestamp_us_ > 0 && task.timestamp_us > last_timestamp_us_
                     ? static_cast<float>(task.timestamp_us - last_timestamp_us_) / 1000000.0f : 0.004f;
-                const auto pending = smith_.predicted(task.timestamp_us);
-                control_x -= pending.dx; control_y -= pending.dy;
+                // Smith 的在途量单位是最终输出 count；只有 FOV 换算后的控制域与其一致时才扣除。
+                // 非 FOV 模式下 control 是像素误差，不能直接减 HID count，避免量纲混用导致振荡。
+                SmithPredictor::Summary pending{};
+                bool smith_enabled = false;
+                if (runtime_config_) {
+                    auto profile = runtime_config_->snapshot();
+                    smith_enabled = profile && profile->mouse.fov_mode;
+                }
+                if (smith_enabled) {
+                    pending = smith_.predicted(task.timestamp_us);
+                    control_x -= pending.dx; control_y -= pending.dy;
+                }
                 trace_smith_dx = pending.dx; trace_smith_dy = pending.dy;
                 trace_control_x = control_x; trace_control_y = control_y;
                 const auto motion = controller_.update(control_x, control_y, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y, dt);

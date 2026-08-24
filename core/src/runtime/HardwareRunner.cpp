@@ -55,6 +55,11 @@ HardwareRunner::Status HardwareRunner::status() const {
     s.aim_control_y=a.control_y;
     s.aim_smith_dx=a.smith_dx;
     s.aim_smith_dy=a.smith_dy;
+    s.aim_min_move_x=a.min_move_x;
+    s.aim_max_move_x=a.max_move_x;
+    s.aim_min_move_y=a.min_move_y;
+    s.aim_max_move_y=a.max_move_y;
+    s.aim_clipped_frames=a.clipped_frames;
     return s;
 }
 }

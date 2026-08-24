@@ -45,6 +45,11 @@ public:
         float aim_control_y = 0.0f;
         float aim_smith_dx = 0.0f;
         float aim_smith_dy = 0.0f;
+        int16_t aim_min_move_x = 0;
+        int16_t aim_max_move_x = 0;
+        int16_t aim_min_move_y = 0;
+        int16_t aim_max_move_y = 0;
+        uint64_t aim_clipped_frames = 0;
         uint32_t width = 0;
         uint32_t height = 0;
     };
