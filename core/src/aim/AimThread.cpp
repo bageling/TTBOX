@@ -58,6 +58,8 @@ void AimThread::loop() {
             event.now_ms = task.timestamp_us / 1000ULL;
             if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); smith_.reset(); abg_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
+            float trace_control_x = 0.0f, trace_control_y = 0.0f;
+            float trace_smith_dx = 0.0f, trace_smith_dy = 0.0f;
             if (selected.valid && task.frame_width > 0 && task.frame_height > 0) {
                 const float tx = (selected.box.x1 + selected.box.x2) * 0.5f;
                 const float ty = (selected.box.y1 + selected.box.y2) * 0.5f;
@@ -87,6 +89,8 @@ void AimThread::loop() {
                     ? static_cast<float>(task.timestamp_us - last_timestamp_us_) / 1000000.0f : 0.004f;
                 const auto pending = smith_.predicted(task.timestamp_us);
                 control_x -= pending.dx; control_y -= pending.dy;
+                trace_smith_dx = pending.dx; trace_smith_dy = pending.dy;
+                trace_control_x = control_x; trace_control_y = control_y;
                 const auto motion = controller_.update(control_x, control_y, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y, dt);
                 // 保留小数余量，避免小幅连续误差被整数 HID count 截断。
                 remainder_x_ += motion.out_x; remainder_y_ += motion.out_y;
@@ -104,6 +108,10 @@ void AimThread::loop() {
             status_.predicted_y = selected.valid ? (selected.box.y1 + selected.box.y2) * 0.5f : 0.0f;
             status_.error_x = ex;
             status_.error_y = ey;
+            status_.control_x = trace_control_x;
+            status_.control_y = trace_control_y;
+            status_.smith_dx = trace_smith_dx;
+            status_.smith_dy = trace_smith_dy;
             status_.move_x = move_x;
             status_.move_y = move_y;
             status_.last_frame = task.frame_number;

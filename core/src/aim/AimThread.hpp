@@ -32,6 +32,10 @@ public:
         uint64_t no_target_frames = 0;
         float predicted_x = 0.0f;
         float predicted_y = 0.0f;
+        float control_x = 0.0f;
+        float control_y = 0.0f;
+        float smith_dx = 0.0f;
+        float smith_dy = 0.0f;
     };
     AimThread() = default;
     ~AimThread() { stop(); }

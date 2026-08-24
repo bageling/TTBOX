@@ -51,6 +51,10 @@ HardwareRunner::Status HardwareRunner::status() const {
     s.aim_last_frame=a.last_frame;
     s.aim_predicted_x=a.predicted_x;
     s.aim_predicted_y=a.predicted_y;
+    s.aim_control_x=a.control_x;
+    s.aim_control_y=a.control_y;
+    s.aim_smith_dx=a.smith_dx;
+    s.aim_smith_dy=a.smith_dy;
     return s;
 }
 }

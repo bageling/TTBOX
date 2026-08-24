@@ -41,6 +41,10 @@ public:
         uint64_t aim_last_frame = 0;
         float aim_predicted_x = 0.0f;
         float aim_predicted_y = 0.0f;
+        float aim_control_x = 0.0f;
+        float aim_control_y = 0.0f;
+        float aim_smith_dx = 0.0f;
+        float aim_smith_dy = 0.0f;
         uint32_t width = 0;
         uint32_t height = 0;
     };
