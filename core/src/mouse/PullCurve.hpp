@@ -15,7 +15,7 @@ class PullCurve {
 public:
     // err_x/err_y：当前像素误差；out_x/out_y：当前缩放后输出（count）。
     // 返回附加的 Y 弧线量（count）；直接修改 out_y 亦可由调用方处理。
-    float apply(float err_x, float err_y, float out_x, float out_y,
+    float apply(float err_x, float err_y, float out_x, [[maybe_unused]] float out_y,
                 const PullCurveConfig& cfg, float dt_ms) {
         if (!cfg.enabled) return 0.0f;
         const float dist = std::hypot(err_x, err_y);

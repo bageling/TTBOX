@@ -14,7 +14,7 @@ int main() {
     AimTargetTask task; task.frame_number = 7; task.timestamp_us = 123;
     assert(mailbox.offer(0, task));
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    auto status = thread.status();
+    [[maybe_unused]] auto status = thread.status();
     thread.stop();
     assert(status.has_task && status.last_frame == 7);
     assert(status.has_target == false);
