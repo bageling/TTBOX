@@ -68,7 +68,11 @@ void AimThread::loop() {
                 const auto pending = smith_.predicted(task.timestamp_us);
                 control_x -= pending.dx; control_y -= pending.dy;
                 const auto motion = controller_.update(control_x, control_y, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y, dt);
-                move_x = static_cast<int16_t>(motion.out_x); move_y = static_cast<int16_t>(motion.out_y);
+                // 保留小数余量，避免小幅连续误差被整数 HID count 截断。
+                remainder_x_ += motion.out_x; remainder_y_ += motion.out_y;
+                move_x = static_cast<int16_t>(remainder_x_);
+                move_y = static_cast<int16_t>(remainder_y_);
+                remainder_x_ -= static_cast<float>(move_x); remainder_y_ -= static_cast<float>(move_y);
                 smith_.record(task.frame_number, static_cast<float>(move_x), static_cast<float>(move_y), task.timestamp_us);
             }
             output_->send(output::OutputAction{move_x, move_y, 0, 0, task.frame_number, task.timestamp_us});

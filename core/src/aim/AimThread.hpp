@@ -46,6 +46,8 @@ private:
     AimStateMachine state_machine_;
     SmithPredictor smith_;
     uint64_t last_timestamp_us_ = 0;
+    float remainder_x_ = 0.0f;
+    float remainder_y_ = 0.0f;
     mutable std::mutex status_mutex_;
     Status status_{};
 };
