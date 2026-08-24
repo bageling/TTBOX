@@ -1,0 +1,29 @@
+{
+  "device": {
+    "keyboard_hidraw": "",
+    "mouse_hidraw": "",
+    "report_rate_hz": 500
+  },
+  "mouse": {
+    "enabled": true,
+    "buttons_enabled": true,
+    "wheel_enabled": true
+  },
+  "keyboard": {
+    "enabled": true
+  },
+  "thread": {
+    "cpu_affinity": -1,
+    "queue_size": 1024
+  },
+  "gadget": {
+    "name": "ttbox-hid",
+    "udc": "fc000000.usb",
+    "keyboard_hidg": "/dev/hidg0",
+    "mouse_hidg": "/dev/hidg1"
+  },
+  "descriptor": {
+    "keyboard_descriptor": "keyboard.desc",
+    "mouse_descriptor": "mouse.desc"
+  }
+}

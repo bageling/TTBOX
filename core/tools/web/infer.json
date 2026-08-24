@@ -1,0 +1,8 @@
+{
+  "model": "/opt/ttbox/models/registry/installed/huangwa.rknn",
+  "workers": 3,
+  "cores": "1,2,4",
+  "buffers": 8,
+  "in_w": 320,
+  "in_h": 320
+}

@@ -1,0 +1,1231 @@
+{
+  "mainline_root": "C:\\Users\\Administrator\\Desktop\\ttbox\\MAINLINE_SOURCE",
+  "core_root": "C:\\Users\\Administrator\\Desktop\\ttbox\\MAINLINE_SOURCE\\core",
+  "files": 227,
+  "bytes": 1561007,
+  "script_classification": {
+    "deploy": [
+      "ttbox_build_deploy.sh",
+      "ttbox_deploy2.sh",
+      "ttbox_deploy3.sh",
+      "ttbox_multi_inject.sh",
+      "ttbox_restore_defaults.sh",
+      "scripts/a9_cpu_affinity_matrix.sh",
+      "scripts/a9_pkg_install.sh",
+      "scripts/a9_pkg_rollback_demo.sh",
+      "scripts/a9_setup_hid_gadget.sh",
+      "scripts/aibox-firstboot.sh",
+      "scripts/ttbox-firstboot.sh",
+      "scripts/edid/edid_apply.sh",
+      "scripts/edid/edid_load.sh",
+      "ttbox/core/tools/web/a10_deploy.sh",
+      "ttbox/core/tools/web/inject_edid.sh",
+      "ttbox/core/tools/web/setup_freq.sh",
+      "ttbox/core/tools/web/ttbox-firstboot.sh",
+      "ttbox/core/tools/web/ttbox-perf.sh"
+    ],
+    "test_diag": [
+      "ttbox_calib_diag.sh",
+      "ttbox_calib_diag2.sh",
+      "ttbox_calib_diag3.sh",
+      "ttbox_calib_retest.sh",
+      "ttbox_calib_retest2.sh",
+      "ttbox_calib_verify.sh",
+      "ttbox_calib_watch.sh",
+      "ttbox_cbridge_diag.sh",
+      "ttbox_check2.sh",
+      "ttbox_check3.sh",
+      "ttbox_check4.sh",
+      "ttbox_check5.sh",
+      "ttbox_check_state.sh",
+      "ttbox_fifo_test.sh",
+      "ttbox_fifo_test2.sh",
+      "ttbox_verify_sync.sh",
+      "scripts/a9_hidg_write_test.sh",
+      "scripts/a9_hw_survey.sh",
+      "scripts/a9_pkg_guard_verify.sh",
+      "scripts/a9_stress_check.sh",
+      "scripts/a9_udc_check.sh",
+      "scripts/a9_verify_gadget.sh",
+      "ttbox/core/tools/web/a10_probe.sh",
+      "ttbox/core/tools/web/a10_verify_image.sh",
+      "ttbox/core/tools/web/a10_web_test.sh",
+      "ttbox/core/tools/web/ttbox-diagnostic.sh",
+      "ttbox/core/tools/web/ttbox-hid-watchdog.sh"
+    ],
+    "legacy": [
+      "vendor/legacy/scripts/check_rknn_runtime.sh",
+      "vendor/legacy/scripts/deploy.sh",
+      "vendor/legacy/scripts/deploy_new_system.sh",
+      "vendor/legacy/scripts/enable_boot_start.sh",
+      "vendor/legacy/scripts/enable_hdmirx_overlay.sh",
+      "vendor/legacy/scripts/hdmirx_edid.sh",
+      "vendor/legacy/scripts/hdmirx_ready.sh",
+      "vendor/legacy/scripts/install_rknn_runtime.sh",
+      "vendor/legacy/scripts/install_start_all_autostart.sh",
+      "vendor/legacy/scripts/km_passthrough.sh",
+      "vendor/legacy/scripts/perf_mode.sh",
+      "vendor/legacy/scripts/setup_hid_gadget.sh",
+      "vendor/legacy/scripts/start_all.sh",
+      "vendor/legacy/scripts/watch_perf.sh"
+    ],
+    "other": [
+      "ttbox_target_rate.sh",
+      "ttbox_target_rate2.sh",
+      "scripts/a9_ai_isolation.sh",
+      "scripts/a9_loopback_rates.sh",
+      "scripts/hid-gadget.sh",
+      "scripts/edid/v4l2_timing.sh",
+      "ttbox/core/tools/web/a10_acceptance.sh",
+      "ttbox/core/tools/web/a10_build_image.sh",
+      "ttbox/core/tools/web/a10_build_rootfs.sh",
+      "ttbox/core/tools/web/a10_build_v2.sh",
+      "ttbox/core/tools/web/a10_coldboot_accept.sh",
+      "ttbox/core/tools/web/a10_concurrency.sh",
+      "ttbox/core/tools/web/a10_fix_manifest.sh",
+      "ttbox/core/tools/web/a10_manifest.sh",
+      "ttbox/core/tools/web/a10_package.sh",
+      "ttbox/core/tools/web/a10_release.sh",
+      "ttbox/core/tools/web/golden_info.sh",
+      "ttbox/core/tools/web/ttbox-hid-init.sh",
+      "ttbox/core/tools/web/ttbox-infer.sh"
+    ]
+  },
+  "files_manifest": [
+    {
+      "path": "MAINLINE_README.md",
+      "bytes": 637,
+      "sha256": "285835bc4181adc51ff46c811977d6a70cbd4eb55b1e7405ff12cf36659288b2"
+    },
+    {
+      "path": "pyproject.toml",
+      "bytes": 475,
+      "sha256": "4a94b5609036ca5be1459fddb96d3da3205261decb171dbfc473df40e72d8a7b"
+    },
+    {
+      "path": "README.md",
+      "bytes": 1608,
+      "sha256": "c04c2526007fc2db74bb8599680066ab00859df7fbf97d6b070ff392d50320ae"
+    },
+    {
+      "path": "ttbox-hid-bridge.c",
+      "bytes": 30675,
+      "sha256": "d57557ce3ef5d9f733463b71aec6906ff0bf5e2a5019ad52e01fd140858af98d"
+    },
+    {
+      "path": "config/default.json",
+      "bytes": 1752,
+      "sha256": "d42887e6f4aba7c32fc13b1d3051a21cc5b83aa5f673ec9e4b3e27f743de6947"
+    },
+    {
+      "path": "config/hardware_display.json",
+      "bytes": 204,
+      "sha256": "ccb0d9c20ecf8746b242703e29ff2049cd048ff23dc5c795182a2ddd9fd35a4f"
+    },
+    {
+      "path": "config/hdmirx_edid_identity.json",
+      "bytes": 121,
+      "sha256": "1003fe5e3c14868770c6928f0233745c91f9d856727264e3af7cc160ca149e11"
+    },
+    {
+      "path": "config/yolo261n-rk3588.json",
+      "bytes": 1001,
+      "sha256": "e8e9a036582d16d1be2f11a2237b01e8b786e035a508acb949c2c6773004d406"
+    },
+    {
+      "path": "core/CMakeLists.txt",
+      "bytes": 10423,
+      "sha256": "543da789e56c4d843df5b24e9eb647f3e10f3eacf86652782bd0d2bfbed10eb7"
+    },
+    {
+      "path": "docs/a9-hid-architecture.md",
+      "bytes": 6219,
+      "sha256": "7518e3eb2be38f439e87a84fff3e011cda4f3171949a09c823f2fe4f97f4cae4"
+    },
+    {
+      "path": "docs/a9-hid-package-v0.0.1.md",
+      "bytes": 10087,
+      "sha256": "3de9433182249bed81b8de687f72a6cc6b4b95d835d28ca67f1ce11199c314e7"
+    },
+    {
+      "path": "docs/a9-hid-project-comparison.md",
+      "bytes": 8393,
+      "sha256": "d07652d599cbba387f2789a950e70b7db8a7f54ee588a790cc2b65aa276f0d61"
+    },
+    {
+      "path": "docs/code-inventory-v0.0.1.md",
+      "bytes": 14506,
+      "sha256": "0cada7cca30f5290ca050fedfa3212777c0e82c7542445fb305addcf36928c1a"
+    },
+    {
+      "path": "docs/image-spec.md",
+      "bytes": 11590,
+      "sha256": "1c8776a170d84f3b3bdc5cc523a5eb4d8602f6d4769cb3680a00a41e320b284a"
+    },
+    {
+      "path": "docs/ipc-protocol.md",
+      "bytes": 3055,
+      "sha256": "ea2be19854f1960c02bddf743bef7caf9312333331d80fd97d5590a03d2ba172"
+    },
+    {
+      "path": "docs/performance-rk3588-1080p240-a7-modeladapter.md",
+      "bytes": 9458,
+      "sha256": "e51c306dcd0792bcd664c2d31767ebe7bf911754bccfabaf23aa23e3d199cc02"
+    },
+    {
+      "path": "docs/performance-rk3588-1080p240-a8-model-registry.md",
+      "bytes": 9053,
+      "sha256": "a58864e2ebd8b36a1f890c1c7610cfea9f72bf5c960c6f5899012cc7c1cc1190"
+    },
+    {
+      "path": "docs/performance-rk3588-1080p240-a9-hid-pass-through.md",
+      "bytes": 8360,
+      "sha256": "a5bb95d7e1d164434f0223672cc9acff15ad9e0b0a10c9e8757ecda6802656b7"
+    },
+    {
+      "path": "docs/performance-rk3588-1080p240-p1-hardware-load.md",
+      "bytes": 4617,
+      "sha256": "38832e12dd946dd8891f5c84721594fcba6ef34dfb97bd32ac45027915da8293"
+    },
+    {
+      "path": "docs/performance-rk3588-1080p240-p1-report.md",
+      "bytes": 12502,
+      "sha256": "96e21c9274169666a33271d5dba5941df034c55fd78f87be2ab8c409c97b0ba3"
+    },
+    {
+      "path": "docs/performance-rk3588-1080p240-p1-round1.md",
+      "bytes": 6041,
+      "sha256": "4f31df261cf20e6396c3485b5a38c82cf9c23944c550afc6fd815fd18f787a6a"
+    },
+    {
+      "path": "docs/performance-rk3588-1080p240-p1-scheduler.md",
+      "bytes": 6772,
+      "sha256": "595b90ded3bdad11974aea1646c6775b5503094a210c4dcd723a6336be007559"
+    },
+    {
+      "path": "docs/performance-rk3588-1080p240-p1-v26m-640.md",
+      "bytes": 7831,
+      "sha256": "8e43422f140d72a6c0423cdaffbc2613e026b213fcd244db9a448904249f1e2b"
+    },
+    {
+      "path": "docs/performance-rk3588-2k144-report.md",
+      "bytes": 9623,
+      "sha256": "7eae421cd9407e5a40ac40fbd9511a23cfb13ac3be644941d0faf8071b835e11"
+    },
+    {
+      "path": "docs/performance-rk3588.md",
+      "bytes": 17313,
+      "sha256": "fdeea62d59446cfd8f27b6b80fbf4e6c6abfee0d4ac92c4638fd1b7c47cd4f0f"
+    },
+    {
+      "path": "hid/manifest.json",
+      "bytes": 417,
+      "sha256": "2382189d941bc7365368d3ff38cc3243dbbfd9d88be572e424f4fdc05ab67bc0"
+    },
+    {
+      "path": "hid/VERSION",
+      "bytes": 6,
+      "sha256": "e6635045e1d2478ec4ca712d8c0e1dfcef8bb7b5b1e8e3bb560d37fe399a9e72"
+    },
+    {
+      "path": "scripts/a9_ai_isolation.sh",
+      "bytes": 1309,
+      "sha256": "5555d7c336bb6a0278ce7f832e96dc32c8ba47e28fb5a0ae06f175fe7ebf7c56"
+    },
+    {
+      "path": "scripts/a9_cpu_affinity_matrix.sh",
+      "bytes": 820,
+      "sha256": "89b55516fea773083ab0df60a22f266c7c1edecde9e3ae26826b3c89cc20c31a"
+    },
+    {
+      "path": "scripts/a9_hidg_write_test.sh",
+      "bytes": 1460,
+      "sha256": "476583867c8822096e1b3404edb802534de621a6c3e5d14c99bc1f2083a6e2b9"
+    },
+    {
+      "path": "scripts/a9_hw_survey.sh",
+      "bytes": 1996,
+      "sha256": "5dec1b1087444afe03b617c187609c90b3597bc15ce7818dafbab27fd95f6f59"
+    },
+    {
+      "path": "scripts/a9_loopback_rates.sh",
+      "bytes": 299,
+      "sha256": "52fbf7b731720ef4e32700f1b8e7b41e8d6c8b81bb0d14b7f653d745bc623c97"
+    },
+    {
+      "path": "scripts/a9_pkg_guard_verify.sh",
+      "bytes": 652,
+      "sha256": "af6d40b106aa75557aec82799510204e7409f9f3f9ca1d0c38faa73cd17f27a4"
+    },
+    {
+      "path": "scripts/a9_pkg_install.sh",
+      "bytes": 1366,
+      "sha256": "e86d9ec086a292797f61fdc0a6225ac77f36a415efbfe22135b32988ee32649c"
+    },
+    {
+      "path": "scripts/a9_pkg_rollback_demo.sh",
+      "bytes": 1921,
+      "sha256": "bfa03539e529159eb8662bbe781a04a205b49ec37e616a9396ade3a737fe6e61"
+    },
+    {
+      "path": "scripts/a9_setup_hid_gadget.sh",
+      "bytes": 6825,
+      "sha256": "8c4570fb3d05c827130d5cc22f163bc607e59ec9529fdac3a2104770c938248b"
+    },
+    {
+      "path": "scripts/a9_stress_check.sh",
+      "bytes": 966,
+      "sha256": "f46aadf2234b0701f98c151aa0aefae066db595ef0a9b5da1c7d2d61e58ca267"
+    },
+    {
+      "path": "scripts/a9_udc_check.sh",
+      "bytes": 1404,
+      "sha256": "b81dc59125cc3fbdf4d25906c44a57a8b7b15b42443feccb580965a3d304ed70"
+    },
+    {
+      "path": "scripts/a9_verify_gadget.sh",
+      "bytes": 1301,
+      "sha256": "23bc0c924b77e8353ff1d6d485055298d785f000fe0dbce365064cc302284b9c"
+    },
+    {
+      "path": "scripts/aibox-firstboot.sh",
+      "bytes": 1941,
+      "sha256": "f0ab42573831951e942a644f1efee20c24e897ef6c38d45dee80b83add5ecb69"
+    },
+    {
+      "path": "scripts/convert_onnx_to_rknn.py",
+      "bytes": 9052,
+      "sha256": "30d121b2ef3c638f6573fa73dba8bf5f5c0146acbafc3b41eb28b44260f51385"
+    },
+    {
+      "path": "scripts/hid-gadget.sh",
+      "bytes": 3339,
+      "sha256": "96f082fd7b2ec4ad1813a0127d66991bfa4aa8579d993e824dcfde63e552cb0e"
+    },
+    {
+      "path": "scripts/ttbox-firstboot.sh",
+      "bytes": 1941,
+      "sha256": "a68c27ca464d8805b2447ef1e0aac0119be44934242922dd728020faac1d6de1"
+    },
+    {
+      "path": "core/src/main.cpp",
+      "bytes": 751,
+      "sha256": "4ff323190b5417e3650dc51c1d839eb8e8b6cc1c247a658966a15c24c78e35ad"
+    },
+    {
+      "path": "core/tests/test_application.cpp",
+      "bytes": 2395,
+      "sha256": "7187e14fde05ca4ff2456bcebcee6af17932d1be95c380be7b22adbd585017be"
+    },
+    {
+      "path": "core/tests/test_capture_hw.cpp",
+      "bytes": 6350,
+      "sha256": "9cabfbf5833f778ad056a19842c9093a63ff38935e3cd0b441c61ff5de3d3423"
+    },
+    {
+      "path": "core/tests/test_config.cpp",
+      "bytes": 2662,
+      "sha256": "e274a12c07bf9b11fc65d52e67c47c5dba05ca346673f5d5af24aa272b48e1ff"
+    },
+    {
+      "path": "core/tests/test_decode.cpp",
+      "bytes": 13088,
+      "sha256": "599bc5486ced3f6e554157a1e2e2ff0fb937b16bca932e5f00cf07e3ea652d22"
+    },
+    {
+      "path": "core/tests/test_decoder_dispatch.cpp",
+      "bytes": 4923,
+      "sha256": "78d500935654591c16489fa809059bb1e4b7dd63cf6dff2f688a23d84118e464"
+    },
+    {
+      "path": "core/tests/test_decode_align.cpp",
+      "bytes": 10833,
+      "sha256": "08e8c4dacf1146a9f7ca0afaaee2339d38c0604276ab5b7fc66fb445ff67ce9f"
+    },
+    {
+      "path": "core/tests/test_fov_roi.cpp",
+      "bytes": 8144,
+      "sha256": "f658bbd4e67f0e980d250abcd3691aee66333c1c8c05cb902e711f5f7ec90dd1"
+    },
+    {
+      "path": "core/tests/test_hid.cpp",
+      "bytes": 3864,
+      "sha256": "8497033719c57580ea2e085228af987e195a101033df4163e700013a7fd93fff"
+    },
+    {
+      "path": "core/tests/test_hid_forward_hw.cpp",
+      "bytes": 6480,
+      "sha256": "b47aec58004de728c36b05317926c5bfdae8d61bb5283e77f81d8880e8f63ad9"
+    },
+    {
+      "path": "core/tests/test_hid_load_sim.cpp",
+      "bytes": 4653,
+      "sha256": "fc17e4039debab4cdd3d82c004159d817214217c0cdfa22ef2409aa319c2555e"
+    },
+    {
+      "path": "core/tests/test_hid_loopback.cpp",
+      "bytes": 4325,
+      "sha256": "f0bd73fe6cd26b14bca1bac9d007e6ef21c5da06a9662322c50af366113cd42b"
+    },
+    {
+      "path": "core/tests/test_hid_package.cpp",
+      "bytes": 7461,
+      "sha256": "826a8514065f83644785aeb8cc5ab7f09d494026905cdfe2260a9de5fa1fcaae"
+    },
+    {
+      "path": "core/tests/test_ipc.cpp",
+      "bytes": 5193,
+      "sha256": "1da39fe48a8c83b29d22579668364daf5dad276a78f11538cf4c635884c9c9e8"
+    },
+    {
+      "path": "core/tests/test_latestframe.cpp",
+      "bytes": 2115,
+      "sha256": "b58594eafa9c6f24644270099a7c66c07e7bf4586469a5377f96bd142f0a09d5"
+    },
+    {
+      "path": "core/tests/test_logger.cpp",
+      "bytes": 2224,
+      "sha256": "bd985982f7feec94002e63de2b52fdbb651ad816077d54a8f8eb323d316c0aec"
+    },
+    {
+      "path": "core/tests/test_main.cpp",
+      "bytes": 314,
+      "sha256": "4a486df21b0f2593519739354084378cea4ab708f9eb43ccb3a6aeb891bfcf73"
+    },
+    {
+      "path": "core/tests/test_model_adapter.cpp",
+      "bytes": 3675,
+      "sha256": "3c8a4eb98557f990361ca5b9aec19c97f9fb55d29d4b244dee586933464ff7ea"
+    },
+    {
+      "path": "core/tests/test_model_metadata.cpp",
+      "bytes": 2572,
+      "sha256": "cf80fc42237a42192b7bd523c7ac851bc3078f88340895f2e7fcfa77fbcfba90"
+    },
+    {
+      "path": "core/tests/test_model_registry.cpp",
+      "bytes": 6592,
+      "sha256": "b4aa4aa7ecb5e64e2841eda423b358417b1c5868add839483a6e202c5e0d49fc"
+    },
+    {
+      "path": "core/tests/test_model_runtime.cpp",
+      "bytes": 6100,
+      "sha256": "489435f20bf01cc214cd2d88d919d99e6e61c71933b4ed86a96f1909760b7903"
+    },
+    {
+      "path": "core/tests/test_model_switch_hw.cpp",
+      "bytes": 10233,
+      "sha256": "6f095ae4f3722590aedf6e4f37fb9c519370d3897d97a739d836e0279c427c21"
+    },
+    {
+      "path": "core/tests/test_mouse.cpp",
+      "bytes": 21043,
+      "sha256": "742e33911151b5aa43ddf5a8d08fdad0006c933f503973ec7fedddec8f7ae671"
+    },
+    {
+      "path": "core/tests/test_rga.cpp",
+      "bytes": 1605,
+      "sha256": "0a060135c5e133f15e9d47ca6c492ea2bb5282f2a7c264f864ac208787bea616"
+    },
+    {
+      "path": "core/tests/test_rga_hw.cpp",
+      "bytes": 10349,
+      "sha256": "1524ce87c852ec641c0ced5c4fc8208f27a10b98983c9c293a86c42a36083316"
+    },
+    {
+      "path": "core/tests/test_rga_roi_hw.cpp",
+      "bytes": 5842,
+      "sha256": "7c38ad5680220a156e1b631c47c33033662dfae5ec437f5216fb39ea5967e2a8"
+    },
+    {
+      "path": "core/tests/test_rknn_hw.cpp",
+      "bytes": 14298,
+      "sha256": "65bce1cb325e9e4d407129b0b4eae4cd254aff81bbad7a6a74fc65f92d07e72e"
+    },
+    {
+      "path": "core/tests/test_runtime_profile.cpp",
+      "bytes": 4076,
+      "sha256": "e7dbdd6782562b535308d5d0810eb8bd563baeb1afb4ed5bb85a5069fb4ebb8e"
+    },
+    {
+      "path": "core/tests/test_target_selector_mt.cpp",
+      "bytes": 3107,
+      "sha256": "39fb95e85c0f019c93ac11839e75f2f64d0313ce536a9622e515bdd12d246bcb"
+    },
+    {
+      "path": "core/tests/test_util.hpp",
+      "bytes": 2358,
+      "sha256": "92a70c27020ad3fc3253d1ac187b7f7ba3b00d38dc60317061daf009d7e31d89"
+    },
+    {
+      "path": "core/tests/test_worker_hw.cpp",
+      "bytes": 39453,
+      "sha256": "536d4210be26a19daf03da302545b4b1ca82412fce9547dc691c8f07cc8cc758"
+    },
+    {
+      "path": "core/tests/ttbox_hid_test.cpp",
+      "bytes": 12245,
+      "sha256": "225b9de0ad10f5b332077d9814d371538872422d1a9f74c9239c3a09179026af"
+    },
+    {
+      "path": "core/tools/ipc_ping.cpp",
+      "bytes": 1853,
+      "sha256": "4d3147565a9b94c31733c899d6de00c9f8ec00c3dc292ced6a4c310056cba5c8"
+    },
+    {
+      "path": "core/tools/ttbox_hid_forward.cpp",
+      "bytes": 2349,
+      "sha256": "73a7e7ece941c956857d2addec7a03cb47636ee0e09a82d0a5568cf596866703"
+    },
+    {
+      "path": "core/tools/ttbox_hid_health.cpp",
+      "bytes": 7835,
+      "sha256": "3ce85eb46fe13aa7488fd74c3021e5945b366d00be04d091d9d7ed27e694ff30"
+    },
+    {
+      "path": "core/tools/ttbox_hid_pkg.cpp",
+      "bytes": 4555,
+      "sha256": "61b185f964f60d9b54e7e9e36c4501dc1716373cc4dc87d248821a3ec1968f04"
+    },
+    {
+      "path": "core/include/ttbox/core/version.hpp",
+      "bytes": 248,
+      "sha256": "d6268e3d57b5b1b416753bcfcbead7e639f4ba9807644d68d423e4790fde389d"
+    },
+    {
+      "path": "core/src/app/Application.cpp",
+      "bytes": 5528,
+      "sha256": "a86ba118f0a0c4f6b3a32ce128d8c7d7dbd91cd38aac739a4150b954b824f8ed"
+    },
+    {
+      "path": "core/src/app/Application.hpp",
+      "bytes": 1359,
+      "sha256": "c6306147a63d9558a3dd6524daeef3f298be19ab56b8bbf5fa252deddd947b41"
+    },
+    {
+      "path": "core/src/capture/DmaBuf.cpp",
+      "bytes": 422,
+      "sha256": "56d22718aae67243ce0903d434c47fa8ac74f1491b9a5608446ebbada4cead60"
+    },
+    {
+      "path": "core/src/capture/DmaBuf.hpp",
+      "bytes": 1226,
+      "sha256": "02d91177fea496c76189cc05e41b19f557d83b07c76d2f00f95e3ab98bf1ddf6"
+    },
+    {
+      "path": "core/src/capture/V4L2Capture.cpp",
+      "bytes": 19971,
+      "sha256": "c136bf0d715528e72f10c40163d70185e45c83d531274a463c4960b0635ec8a5"
+    },
+    {
+      "path": "core/src/capture/V4L2Capture.hpp",
+      "bytes": 5096,
+      "sha256": "d6a382fdc0ab1a16bf6515bb09f0d671ad17b473eecaa1ce041473260a284519"
+    },
+    {
+      "path": "core/src/common/Json.cpp",
+      "bytes": 14978,
+      "sha256": "3be421808237124cec6654ddb45151438eb26000da4803dade9cc7872fd6b0f4"
+    },
+    {
+      "path": "core/src/common/Json.hpp",
+      "bytes": 2479,
+      "sha256": "32cb1cabcc45ea7764710a6ebc811a28c16755a891b3a4c4df6ee7ca30a73d70"
+    },
+    {
+      "path": "core/src/common/Logger.cpp",
+      "bytes": 2672,
+      "sha256": "67a4706acd450e7257b50195856f029971a652be100f6b18c5b8df04609f461f"
+    },
+    {
+      "path": "core/src/common/Logger.hpp",
+      "bytes": 2121,
+      "sha256": "6bd24789cbcaf8ac2fda01baf0f9078d24544c340f1f14ccd0c521d7fd4ed016"
+    },
+    {
+      "path": "core/src/common/Metrics.hpp",
+      "bytes": 1212,
+      "sha256": "0a5a877bbb8a2683677414aaa26ce44c9a0b566000b65261ef50ec550ff676a3"
+    },
+    {
+      "path": "core/src/common/Stats.hpp",
+      "bytes": 2648,
+      "sha256": "2d70a79c1abac9bddded5af6f437339dfc9fb5271e067e82c7c6444a71b7c16e"
+    },
+    {
+      "path": "core/src/common/Types.hpp",
+      "bytes": 1889,
+      "sha256": "d3bcdbab5481c072502e9c6096757c06d56954407be2eb594c9f021a6b207079"
+    },
+    {
+      "path": "core/src/config/ConfigManager.cpp",
+      "bytes": 2440,
+      "sha256": "ac02e7e753e24ff3b8fb739c85f943dc47cdd86b0aecd14021c2f8c5f83020a4"
+    },
+    {
+      "path": "core/src/config/ConfigManager.hpp",
+      "bytes": 1565,
+      "sha256": "0c0e276d131d1b34289ea82d065962ff2c79044569706b06ee71376e3bd3b2e5"
+    },
+    {
+      "path": "core/src/hid/HidForwarder.cpp",
+      "bytes": 9229,
+      "sha256": "4940658c0eb90bc791ca8ce6aef3db94f435289262962ad945496aa618fe640e"
+    },
+    {
+      "path": "core/src/hid/HidForwarder.hpp",
+      "bytes": 3147,
+      "sha256": "7f6b5174e4979ac40e4904ce4f4aaf52d8329734bf224f687705b7b4fd228f16"
+    },
+    {
+      "path": "core/src/hid/HidPackageConfig.cpp",
+      "bytes": 4968,
+      "sha256": "ec9be03b562cf9d4b9f8ac3619d4f347e61eb5fa6dd8d387d59416d21fb9d7da"
+    },
+    {
+      "path": "core/src/hid/HidPackageConfig.hpp",
+      "bytes": 1585,
+      "sha256": "33342db8b8cdbd6b7303a9f099415fb009e0dcee674c0dced03a8399d3a8468c"
+    },
+    {
+      "path": "core/src/hid/HidPackageManifest.cpp",
+      "bytes": 3771,
+      "sha256": "173ab5c741f69f9edcb7504b767b1d6cc7c8be94e2ea478ebd9cb21553b9a289"
+    },
+    {
+      "path": "core/src/hid/HidPackageManifest.hpp",
+      "bytes": 2254,
+      "sha256": "20298249e6cb180ca1d466e392840624f94ddbe4bd2da6386665eed6863552ca"
+    },
+    {
+      "path": "core/src/hid/HidPackageRegistry.cpp",
+      "bytes": 11822,
+      "sha256": "37b3dc414be074fe93aa16c310ea280f64cd5ef55fa0591b58dc9df4bbf4eefc"
+    },
+    {
+      "path": "core/src/hid/HidPackageRegistry.hpp",
+      "bytes": 3787,
+      "sha256": "97f1166a923545778ca0977b834041544b6093098b0fe01ba0dd2dd2d53c6874"
+    },
+    {
+      "path": "core/src/hid/HidParser.cpp",
+      "bytes": 3618,
+      "sha256": "dc886fcbf24e811a937cc3b89a833b412ec129d993fc2b0effaa1e910a9af70a"
+    },
+    {
+      "path": "core/src/hid/HidParser.hpp",
+      "bytes": 647,
+      "sha256": "f824e4ef603484a621f4b21430249032b42e7a7f910de7f9535009dbad5aa85a"
+    },
+    {
+      "path": "core/src/hid/HidRuntime.cpp",
+      "bytes": 8921,
+      "sha256": "1151477f68eb06e844fe44aca55e167dfd7d73428fed03200ffc537ba7cfad56"
+    },
+    {
+      "path": "core/src/hid/HidRuntime.hpp",
+      "bytes": 1954,
+      "sha256": "2fea1a892491b04729602e9adf3ca52cad285cf7dbbaedc75b5f120130c7bfb1"
+    },
+    {
+      "path": "core/src/hid/HidTypes.hpp",
+      "bytes": 4661,
+      "sha256": "92ee151d6483de3a88935a10c4a57703dc518cb8af0b5b8767ba50d97e32113e"
+    },
+    {
+      "path": "core/src/hid/IHidPackageSource.cpp",
+      "bytes": 1651,
+      "sha256": "8e717b1d6d86f3833738a1bbe25262527e87e7dce15695d2bc03dc9c9e5111ed"
+    },
+    {
+      "path": "core/src/hid/IHidPackageSource.hpp",
+      "bytes": 2034,
+      "sha256": "2048b4c9130dd899c46357c734725f4bfc2c8b9eba9f3a9cb2504234ac3aa251"
+    },
+    {
+      "path": "core/src/hid/IHidRuntime.hpp",
+      "bytes": 1664,
+      "sha256": "fba38a934564e3c4e647ea93f0eb7ed5b010cf85bf2b6dbc04ded4cd28319550"
+    },
+    {
+      "path": "core/src/hid/SpscQueue.hpp",
+      "bytes": 2605,
+      "sha256": "7aa3623134b402a7243b31ccd7cb230a94846cd8be960fab5a2fcc3a4a741969"
+    },
+    {
+      "path": "core/src/ipc/IpcServer.cpp",
+      "bytes": 14832,
+      "sha256": "cc27c9c8d1524fad41ea74d8690af1e6ce5447a0912cb965f584fd620231a89b"
+    },
+    {
+      "path": "core/src/ipc/IpcServer.hpp",
+      "bytes": 2848,
+      "sha256": "aa8904f6ffab8f8a316027b2843cf0be23d67a70db4c63ce8d1f1284c56246f7"
+    },
+    {
+      "path": "core/src/model/Decoder.hpp",
+      "bytes": 3034,
+      "sha256": "a6eebd12dd769458bbc5dd121d5db7854d0720b549beb21b1484b061dbb8e564"
+    },
+    {
+      "path": "core/src/model/IModelSource.cpp",
+      "bytes": 1001,
+      "sha256": "f46ce46a097bc32663b9d155c24e0986c0ecbec98dd6307b8384f6e67465cbc1"
+    },
+    {
+      "path": "core/src/model/IModelSource.hpp",
+      "bytes": 1775,
+      "sha256": "afb9195239b8e0ea5f7526e3eb6da6f797d04e7b5f4f6e1dbbf9378a9c2327c7"
+    },
+    {
+      "path": "core/src/model/ModelAdapter.cpp",
+      "bytes": 9794,
+      "sha256": "de2fc32a9c3020811659a203879d706e9616ebddea54665ce564e32be32e7912"
+    },
+    {
+      "path": "core/src/model/ModelAdapter.hpp",
+      "bytes": 3064,
+      "sha256": "0901f516878fe0b92067e179eddd14301b13798cf7fc4d9711154a5fd6e1e6e4"
+    },
+    {
+      "path": "core/src/model/ModelMetadata.hpp",
+      "bytes": 3628,
+      "sha256": "1f395e4c0e482fa509496cb94832dc2ffa23cf426dc31c93a23b0054739edbeb"
+    },
+    {
+      "path": "core/src/model/ModelRegistry.cpp",
+      "bytes": 14495,
+      "sha256": "48efb5142938a5a7676ed5d065935bcd31260a1e064e7ced408e47d57816cf8a"
+    },
+    {
+      "path": "core/src/model/ModelRegistry.hpp",
+      "bytes": 5746,
+      "sha256": "dd4e2b0bd67db63dce8fd1592b1d77dcca0c35fe75eefac820b363e9e690397d"
+    },
+    {
+      "path": "core/src/model/RuntimeProfile.cpp",
+      "bytes": 23280,
+      "sha256": "e47640f9169840abbdc1467dbf34abdc75a8b5c0c7d899bd86acb10c708c9e3b"
+    },
+    {
+      "path": "core/src/model/RuntimeProfile.hpp",
+      "bytes": 5415,
+      "sha256": "733f83c21f9416f5f6ec44255085b2f8f024ff392d164928b78378c7ca901aad"
+    },
+    {
+      "path": "core/src/mouse/AimPointProfile.cpp",
+      "bytes": 1086,
+      "sha256": "e2bac95793e496774c68b80da8e61697a9c443dbbec3f08ff7003b993833cc97"
+    },
+    {
+      "path": "core/src/mouse/AimPointProfile.hpp",
+      "bytes": 1066,
+      "sha256": "e0ddb54c5513963d00256890be7b31284771d5e543029b4f3254d07c37111ed5"
+    },
+    {
+      "path": "core/src/mouse/AimStateMachine.cpp",
+      "bytes": 2325,
+      "sha256": "4144a49b2d94958848e3eac4aa3d7a4e0a1836b9fac0ba121d54cd6842c722ae"
+    },
+    {
+      "path": "core/src/mouse/AimStateMachine.hpp",
+      "bytes": 1238,
+      "sha256": "d148b532d0c7715a77c84d7c27e078fb6244c067fcee979ea6b9a26a2b237e85"
+    },
+    {
+      "path": "core/src/mouse/AimTracker.cpp",
+      "bytes": 1854,
+      "sha256": "65a8261945ba141b784265dde4368c029e52c10d9d0eb5cee1370d757661b018"
+    },
+    {
+      "path": "core/src/mouse/AimTracker.hpp",
+      "bytes": 1437,
+      "sha256": "5d45537d61fe990b7f214fb452809aab7cb8ba78f2c08c20e2d57eeafabbe980"
+    },
+    {
+      "path": "core/src/mouse/ContinuousLead.hpp",
+      "bytes": 1872,
+      "sha256": "b8bce1f46ad184bfe0dad3b6dc1b539c31227d6d9448d93dac9e7a753a58516f"
+    },
+    {
+      "path": "core/src/mouse/CoordinateTransform.cpp",
+      "bytes": 1070,
+      "sha256": "e1a52869c465ae62d61cb6983bfeb567a20e00782dd35436907cfd02d1f90039"
+    },
+    {
+      "path": "core/src/mouse/CoordinateTransform.hpp",
+      "bytes": 1375,
+      "sha256": "928fc4ac66eca5c68bc9d77cefc822a48d0683b444bf29ea01fe8c073fc61545"
+    },
+    {
+      "path": "core/src/mouse/Deadzone.hpp",
+      "bytes": 492,
+      "sha256": "ed01e3f483e7a5d13e64123692724d9b02ff9a59d3ee98f141c3a3fdddf17601"
+    },
+    {
+      "path": "core/src/mouse/FovAngle.hpp",
+      "bytes": 1859,
+      "sha256": "eda5870b2fa637dd4bf50e620244db79798081d6fb32b282b74452cb6b566477"
+    },
+    {
+      "path": "core/src/mouse/Humanize.hpp",
+      "bytes": 1125,
+      "sha256": "cfbb7faffd6b19fac14512bd67517012785caadfed3448772aee946520987a21"
+    },
+    {
+      "path": "core/src/mouse/LatestDetections.hpp",
+      "bytes": 1308,
+      "sha256": "9cac4add379f2cffba44c47a82c47bacb96e10ea2609a86ee9c7d9058cd5aa38"
+    },
+    {
+      "path": "core/src/mouse/MotionController.hpp",
+      "bytes": 1675,
+      "sha256": "ce20d93dcdf07b599f3e46a97ffa9aa143c7aead5b17147a65a7c52b57303f7f"
+    },
+    {
+      "path": "core/src/mouse/MotionMerge.hpp",
+      "bytes": 1845,
+      "sha256": "1c742180ccab69d9669e43a32bbb35eb759a12cbec4fe6d40a8ab85e80ff239f"
+    },
+    {
+      "path": "core/src/mouse/MouseProxyMode.hpp",
+      "bytes": 876,
+      "sha256": "48bec0c9dc5bb60268dad3f17cc633b44afa529f7d0265cdf35565324e7b1598"
+    },
+    {
+      "path": "core/src/mouse/MouseRouter.cpp",
+      "bytes": 1801,
+      "sha256": "f13bc1cff977799209e2ace96bacd77aa69ccef94a89e5cf996770463d4e6ffe"
+    },
+    {
+      "path": "core/src/mouse/MouseRouter.hpp",
+      "bytes": 1208,
+      "sha256": "79b7ccd287683c8c741b08f74c1639c1688793dfa65377c1e11c24ec9b6cd76a"
+    },
+    {
+      "path": "core/src/mouse/MouseScheduler.cpp",
+      "bytes": 25207,
+      "sha256": "5200682af53c1c223c07136f6a3cd2abd7ab3ae23b3e3cc8312b278a5e3da585"
+    },
+    {
+      "path": "core/src/mouse/MouseScheduler.hpp",
+      "bytes": 4646,
+      "sha256": "79820602d2138f9e953e7e28a344a61e7b2420095644b3f96a10e77a001652cf"
+    },
+    {
+      "path": "core/src/mouse/MouseTypes.hpp",
+      "bytes": 8276,
+      "sha256": "2266189a7615dd5137c720dc1c8f5fa34a1ba8e614b4d440155750989127a7c5"
+    },
+    {
+      "path": "core/src/mouse/OutputScale.hpp",
+      "bytes": 633,
+      "sha256": "784f2bc5d5b98d8d1a2cccf759f1a2fa7c0fa7d150a3e614c6c7d500391c248d"
+    },
+    {
+      "path": "core/src/mouse/PullCurve.hpp",
+      "bytes": 1684,
+      "sha256": "c5a15dc9b559909a8add7e168c8deede798b262bead5ff54b0e464ee89851758"
+    },
+    {
+      "path": "core/src/mouse/RateLimit.hpp",
+      "bytes": 1657,
+      "sha256": "96b6ed2ee96c185238b75c05aeaa5bc5d086853a662f693eab7b1720aceaaf43"
+    },
+    {
+      "path": "core/src/mouse/Smooth.hpp",
+      "bytes": 1218,
+      "sha256": "42b1c905a3f1c7a18e9b97d091cb8081b4e04ec89efb3b716b7b86fcafd74a9e"
+    },
+    {
+      "path": "core/src/mouse/TargetSelector.cpp",
+      "bytes": 8801,
+      "sha256": "6cbf5aaeb1573e17f62e1c876060367c036593fad10b4338fd15da27968f90d4"
+    },
+    {
+      "path": "core/src/mouse/TargetSelector.hpp",
+      "bytes": 3822,
+      "sha256": "478efd29d53d1e20f4255644b5a18eb69d9c0275f880f47a29f72ab437f3a3f8"
+    },
+    {
+      "path": "core/src/rga/RgaProcessor.cpp",
+      "bytes": 14580,
+      "sha256": "d5bf540a60266301820e132c50b3aa6c824de20f7f00d1abb88a82613872b9b9"
+    },
+    {
+      "path": "core/src/rga/RgaProcessor.hpp",
+      "bytes": 4489,
+      "sha256": "65393fdaf703f31590c72b488bfad7d204a775ab47dedf3c8853efd24b796143"
+    },
+    {
+      "path": "core/src/rknn/DecodeNMS.cpp",
+      "bytes": 31854,
+      "sha256": "b5eec1beb25110ee4bfef9942c90c13e3557ec8b531f472d0f0534bcf06d269d"
+    },
+    {
+      "path": "core/src/rknn/DecodeNMS.hpp",
+      "bytes": 7145,
+      "sha256": "45ab1695a00341675a6a3fd5a20649e19930af6a3eb5b48760c4e1ce2ea818c6"
+    },
+    {
+      "path": "core/src/rknn/NpuMonitor.cpp",
+      "bytes": 2568,
+      "sha256": "2ff0522dc4532c3229aacd8bb4624e1710a8f041dd85bec25baf2f049d4f0b0e"
+    },
+    {
+      "path": "core/src/rknn/NpuMonitor.hpp",
+      "bytes": 1232,
+      "sha256": "c78d2b7dd6ee3e815e4357e68367fa759349ae005d28f8efdc63494238719435"
+    },
+    {
+      "path": "core/src/rknn/RKNNEngine.cpp",
+      "bytes": 11634,
+      "sha256": "a976b05e6ad82924413ebfb91f05a86acb31e75320c9193a14ece83133134609"
+    },
+    {
+      "path": "core/src/rknn/RKNNEngine.hpp",
+      "bytes": 4782,
+      "sha256": "d18cc8047cdad3cf64a07212ca7a6ee4a38dd31307be7e85ce8b505d12c252a8"
+    },
+    {
+      "path": "core/src/rknn/WorkerPool.cpp",
+      "bytes": 15295,
+      "sha256": "9b850ff3a6c81a8336900657b1c4c597c5b69db2dbbe8ceedb14fac21b7f94d7"
+    },
+    {
+      "path": "core/src/rknn/WorkerPool.hpp",
+      "bytes": 6929,
+      "sha256": "2fd971da01ecc20c9bbc6ba8ad58f47d382b80a177e36e0f4690c016684f7677"
+    },
+    {
+      "path": "core/third_party/rknn/rknn_api.h",
+      "bytes": 35707,
+      "sha256": "c48e11a6f41b451a5fd1e4ad774ea60252d3d94f78bee9b21ea3d21b21deba9a"
+    },
+    {
+      "path": "core/tools/web/a10_acceptance.sh",
+      "bytes": 5013,
+      "sha256": "edff8aa3f195096bfa4cc283f92f4a73b39f42e369908c55881b3d5b28b32938"
+    },
+    {
+      "path": "core/tools/web/a10_build_image.sh",
+      "bytes": 1034,
+      "sha256": "287275edfcc1e3a0e7e9ebb9b4f5ee1cf62a57bbb80fff7c6491ab57d1edac3c"
+    },
+    {
+      "path": "core/tools/web/a10_build_rootfs.sh",
+      "bytes": 2238,
+      "sha256": "a4ef275b821e4419a91025af0d13da41a3de718adc510c5d12d18328cdb9cbed"
+    },
+    {
+      "path": "core/tools/web/a10_build_v2.sh",
+      "bytes": 7337,
+      "sha256": "df85ffa9b4f5adcbc77d2106a5caed011aedca08e21df9f819e3d649d0d1d277"
+    },
+    {
+      "path": "core/tools/web/a10_coldboot_accept.sh",
+      "bytes": 7000,
+      "sha256": "e511dcaf1144f58b01778c1d7965945e3bac2e7539628fab160cfc05be6ab3cd"
+    },
+    {
+      "path": "core/tools/web/a10_concurrency.sh",
+      "bytes": 941,
+      "sha256": "3b6ef742b12cdede559ebf44ae2e578b99d35440f18b12c34e4f16c7d4fae0a6"
+    },
+    {
+      "path": "core/tools/web/a10_deploy.sh",
+      "bytes": 3271,
+      "sha256": "ba1bbc5825e08ee30e10447e12ceedbd1ee1dbbc6fa6fd3b468b4184a64ad028"
+    },
+    {
+      "path": "core/tools/web/a10_fix_manifest.sh",
+      "bytes": 404,
+      "sha256": "38b1b539d7445f6d3f5d8ea2df3be5fb8ba92b8ac4080fdfbf32458d5fd34853"
+    },
+    {
+      "path": "core/tools/web/a10_manifest.sh",
+      "bytes": 1982,
+      "sha256": "aa177867653e3f57e6ffe5cce52a8aa3b352282bfa145d4e4e45a97d4bddcc9d"
+    },
+    {
+      "path": "core/tools/web/a10_package.sh",
+      "bytes": 1242,
+      "sha256": "3cb73097978ccf135256d00214713aa9def388783c4b062a99ffd0d1b117fe14"
+    },
+    {
+      "path": "core/tools/web/a10_probe.sh",
+      "bytes": 1256,
+      "sha256": "ec304f816ac68bfb075a96953c9d1d5638105479f709de0b32ba1ae84a50ca2b"
+    },
+    {
+      "path": "core/tools/web/a10_release.sh",
+      "bytes": 2089,
+      "sha256": "999ad42cdf9d71e21cccff56fa446a0f1a52d36896df6414a355fb3c71744728"
+    },
+    {
+      "path": "core/tools/web/a10_verify_image.sh",
+      "bytes": 1446,
+      "sha256": "d9b34b901dada430ca1aa25e9737024d75394532b6d1c364d78e8aa78c1f0d4a"
+    },
+    {
+      "path": "core/tools/web/a10_web_test.sh",
+      "bytes": 2045,
+      "sha256": "2e338fb33d2aff9650b94a897e6175ae93b9dc9d733d56858e9025e2ee74c1d6"
+    },
+    {
+      "path": "core/tools/web/golden_info.sh",
+      "bytes": 1356,
+      "sha256": "fd10809407c9a39032bf0b0acd1a851aa016337b9cf6d5c7195d74a21e272b8a"
+    },
+    {
+      "path": "core/tools/web/index.html",
+      "bytes": 114467,
+      "sha256": "1aba46dabd8d4a846c16ed22fa0ba80ce1d5916c4d0c583c26831bf62e701864"
+    },
+    {
+      "path": "core/tools/web/infer.json",
+      "bytes": 149,
+      "sha256": "e4edc41b6c1c91c8c0516a962df80179bf766213e63b67549f0870341bdfe963"
+    },
+    {
+      "path": "core/tools/web/inject_edid.sh",
+      "bytes": 273,
+      "sha256": "65f7a56d2dda4fc7020f8bc97cd74f24e979c06d47c2a0b59dd6f2cdf0892683"
+    },
+    {
+      "path": "core/tools/web/setup_freq.sh",
+      "bytes": 1071,
+      "sha256": "4bedbbe6940c0f1fa24d20764d4fa3527962ee5771bf6b44191e2b43061ee075"
+    },
+    {
+      "path": "core/tools/web/ttbox-diagnostic.sh",
+      "bytes": 5182,
+      "sha256": "9f89283d23e6eb40d07ad610e184c3047c6cb11dce46b18bf4d60678fb702627"
+    },
+    {
+      "path": "core/tools/web/ttbox-edid-apply.service",
+      "bytes": 299,
+      "sha256": "a1b1185af919b7774c444e7ed843a7c157201256e17baa3a7697040be0906688"
+    },
+    {
+      "path": "core/tools/web/ttbox-edid-inject.service",
+      "bytes": 240,
+      "sha256": "9fd97b751e0683324d5c91e6c1cc63188c11c415099873d9569fb9714faea36f"
+    },
+    {
+      "path": "core/tools/web/ttbox-firstboot.service",
+      "bytes": 283,
+      "sha256": "c7bbe16b1c7bfe6dba958cc0ad233fe0882cd98b85f3572abeb52c58a7ebb23c"
+    },
+    {
+      "path": "core/tools/web/ttbox-firstboot.sh",
+      "bytes": 1302,
+      "sha256": "1a33c61c4603b1ccd85d5b7a658f8ef75b47bd6f95c04920f87cbd8fb2f1d432"
+    },
+    {
+      "path": "core/tools/web/ttbox-hid-forward.service",
+      "bytes": 386,
+      "sha256": "70e035540ab43c9cc27c3575dc0997ae8094d483388941578fed32391647dc4d"
+    },
+    {
+      "path": "core/tools/web/ttbox-hid-init.sh",
+      "bytes": 826,
+      "sha256": "5df710698033dcfedfb650cdf7e5f9f253846f14ca8dfc0e3eadbeda7eba4aa1"
+    },
+    {
+      "path": "core/tools/web/ttbox-hid-watchdog.service",
+      "bytes": 294,
+      "sha256": "45fef0ec60e13d6499a23649b3cfd81480639d18a76ea2e530a760f8fb0f77fe"
+    },
+    {
+      "path": "core/tools/web/ttbox-hid-watchdog.sh",
+      "bytes": 1041,
+      "sha256": "9bb1fb87c002bd38c999d7e9487ca5b0d6ade02638e092ff37a19562bc798eee"
+    },
+    {
+      "path": "core/tools/web/ttbox-hid.service",
+      "bytes": 351,
+      "sha256": "cbbb3c84de873f4ed12fb38c6282db574dd15bb5601222bc238f317ae56e2e79"
+    },
+    {
+      "path": "core/tools/web/ttbox-infer.service",
+      "bytes": 246,
+      "sha256": "ae69d74c6f13cc35ab6c600ba231681e1c02a71cc4dbbaa924800d5cfe9a62c4"
+    },
+    {
+      "path": "core/tools/web/ttbox-infer.sh",
+      "bytes": 1585,
+      "sha256": "701e2998723dd987d38ac95947055fad4f9e5a36ca418aa3277ba14c2f47ae3d"
+    },
+    {
+      "path": "core/tools/web/ttbox-perf.service",
+      "bytes": 294,
+      "sha256": "a8a1f069dc4bcf4fcd02b54482d207776fbf70adbef813c0c56d696f579080a3"
+    },
+    {
+      "path": "core/tools/web/ttbox-perf.sh",
+      "bytes": 1289,
+      "sha256": "30f7fbc2c609f1186a3034b85fbf79ef038b997a4e347358a70f449fad1d7215"
+    },
+    {
+      "path": "core/tools/web/ttbox-runtime.service",
+      "bytes": 346,
+      "sha256": "3129bb99d5478763b90c1cb29884242fecce5edb5b991e53aecac9d9ff5778cf"
+    },
+    {
+      "path": "core/tools/web/ttbox-web.service",
+      "bytes": 256,
+      "sha256": "ec38a11e0b3a9f9b8d371615fe28766301f23059840e6bbf1721b55a7ee62c66"
+    },
+    {
+      "path": "core/tools/web/ttbox_web.py",
+      "bytes": 125494,
+      "sha256": "8a210a5e582d72db742a862e8554dfde040afde9c82066d8e9875ec04a954661"
+    },
+    {
+      "path": "core/tools/web/static/adapter.js",
+      "bytes": 89434,
+      "sha256": "42838911d40e6cc8daa027f7d0d7138acc007a5573b31fa492f863e4daac183a"
+    },
+    {
+      "path": "core/tools/web/static/motion_training.css",
+      "bytes": 4663,
+      "sha256": "2e066af2462cecdc19e49c5b5bd46c9181f8ced26ea2418229592fb8df8302fc"
+    },
+    {
+      "path": "core/tools/web/static/style.css",
+      "bytes": 131237,
+      "sha256": "f9810cffa4ec0bf02744cf4a038ca607d8ff68313a35e6e39b5022b462bd22e9"
+    },
+    {
+      "path": "docs/a10/boot-chain-verification.md",
+      "bytes": 2405,
+      "sha256": "1ea6611f9ca33caa9082eced9e874a1f486135a32f0cb58e904175e71c6ea73e"
+    },
+    {
+      "path": "docs/a10/first-boot.md",
+      "bytes": 2886,
+      "sha256": "432aa9f9cbb1bbccbea6fd06388de47036e38e7d179136ace14ace4c67f89973"
+    },
+    {
+      "path": "docs/a10/golden-vs-img-diff.txt",
+      "bytes": 4718,
+      "sha256": "1d612defc4a88a300427910474a50449e1a4f426800eb231aad8c3fbf019f846"
+    },
+    {
+      "path": "docs/a10/img-regression-report.md",
+      "bytes": 3433,
+      "sha256": "88e0695806f8aee082e4064c5dffd856db6a147c74670c6c8c229838a03808f3"
+    },
+    {
+      "path": "docs/a10/install-image.md",
+      "bytes": 3714,
+      "sha256": "d9869b540be55f55543780b1d6722688eec9d5bcebcb03113899a418ff404b69"
+    },
+    {
+      "path": "docs/a10/recovery.md",
+      "bytes": 2239,
+      "sha256": "31e1ce2294d5ed32d19d6ea04c0f7e099b4077ab22c0b3abcb4fe5255f49d82c"
+    },
+    {
+      "path": "docs/architecture/architecture-overview.md",
+      "bytes": 9066,
+      "sha256": "e30c2b44e6862d40ef32a6b83825f3c972697d989e5891d879dd9126c3e46c12"
+    },
+    {
+      "path": "docs/architecture/backend-api.md",
+      "bytes": 3859,
+      "sha256": "46777149833b3a99521270a1af7afea54781e7aa2ef634daf6c74d03c6afc388"
+    },
+    {
+      "path": "docs/architecture/development-roadmap.md",
+      "bytes": 9598,
+      "sha256": "06d8fb283c9e1580e9d3eb338cf3fd530f6a65ceb3ef5a3674b749351fd0b6d9"
+    },
+    {
+      "path": "docs/architecture/device-validation.md",
+      "bytes": 3700,
+      "sha256": "d25eafa641e47bff10bca7c14e2ad6e7745e59676e0b457c8e43dce07351350a"
+    },
+    {
+      "path": "docs/architecture/edid-and-input-timing.md",
+      "bytes": 5879,
+      "sha256": "f36ab3e1a98932bb603b6e8a12a663f6b58a4b6d76108ee5c7b299e036a9e3c0"
+    },
+    {
+      "path": "docs/architecture/module-boundaries.md",
+      "bytes": 10556,
+      "sha256": "a7b80b8bc191d495008d4ec3009985388878a73905d1deb719b2336a0758afe1"
+    },
+    {
+      "path": "docs/architecture/runtime-pipeline.md",
+      "bytes": 6884,
+      "sha256": "ff0d8fb8ea0679c0d9bd55c94f0461c7ae3ad85e74b07e9fa2cac9cb265dcaee"
+    },
+    {
+      "path": "docs/architecture/update-architecture.md",
+      "bytes": 4279,
+      "sha256": "b18a858dee6eea2fedf6d51fdd3fc2afa11298d93fa62d668e36807d4325e1f9"
+    },
+    {
+      "path": "hid/config/hid_config.json",
+      "bytes": 541,
+      "sha256": "c94fcfd47c9aaa5bf1b3184abb01dc0eca60b3ee7189cbe2f58b640792fbd31c"
+    },
+    {
+      "path": "hid/descriptors/keyboard.desc",
+      "bytes": 189,
+      "sha256": "8f4220c36d3a5e39b94d2fac63f014edb2037c04d55a235a3fb67a35286620f8"
+    },
+    {
+      "path": "hid/descriptors/mouse.desc",
+      "bytes": 172,
+      "sha256": "28359b669be6dae64470bcfa343db4baea57449d637a6ff066c13b9e4862f178"
+    },
+    {
+      "path": "scripts/edid/edid_apply.sh",
+      "bytes": 2988,
+      "sha256": "1d3c97d3584f2072c7f48fa0b455292ce99912a402be19fe3e5d51a81083d4d8"
+    },
+    {
+      "path": "scripts/edid/edid_info.py",
+      "bytes": 4213,
+      "sha256": "5a06eb63d9140ae9e00a79dfe1148309e9c44b4c5ea04e062403ba7cb116a3a4"
+    },
+    {
+      "path": "scripts/edid/edid_load.sh",
+      "bytes": 1705,
+      "sha256": "5d4f07d24ab8dcceb93a986f7c945b560a137475e62ffeeccf79164f28196c4e"
+    },
+    {
+      "path": "scripts/edid/edid_verify.py",
+      "bytes": 1832,
+      "sha256": "120da374bff7f9acc0c364dab92e2ca4562befb6a526558d26ffb3adc82e5462"
+    },
+    {
+      "path": "scripts/edid/generate_hdmirx_edid.py",
+      "bytes": 13450,
+      "sha256": "dab6c7ab8b3ab822ce491ce422127e453d9863e58039a8cc1bcc04c922a49769"
+    },
+    {
+      "path": "scripts/edid/gen_aibox_1080p240.py",
+      "bytes": 4474,
+      "sha256": "067ad48ca59db7f4716cc1eb02ae4de6b2f6334b7139cdaedb57225f450a7224"
+    },
+    {
+      "path": "scripts/edid/gen_ttbox_1080p240.py",
+      "bytes": 4474,
+      "sha256": "f56ea81851986c100ccfd24756c5ea71a2468cb433b0ffff4754dd833630c663"
+    },
+    {
+      "path": "scripts/edid/hdmirx_edid.py",
+      "bytes": 16657,
+      "sha256": "6672a9ffe4f23979f3c4338fbc1ae7e91af493f1a88b4a4a03e49b796c7d90c8"
+    },
+    {
+      "path": "scripts/edid/v4l2_timing.sh",
+      "bytes": 1433,
+      "sha256": "58325c2de317e06946e26be0b4e0c7080f6be46b21e5c5528839040e7f6f9d47"
+    }
+  ]
+}

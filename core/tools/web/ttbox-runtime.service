@@ -1,0 +1,13 @@
+[Unit]
+Description=TTBox Runtime daemon (C++ IPC, no auto inference)
+After=ttbox-firstboot.service
+Requires=ttbox-firstboot.service
+
+[Service]
+Type=simple
+ExecStart=/opt/ttbox/runtime/ttbox_core_main --config /opt/ttbox/config/default.json --ipc /opt/ttbox/runtime/ttbox.sock
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

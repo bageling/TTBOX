@@ -1,0 +1,12 @@
+[Unit]
+Description=Inject TTBox EDID into HDMI RX
+After=systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ttbox/edid/inject_edid.sh
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
