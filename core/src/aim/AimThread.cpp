@@ -2,6 +2,7 @@
 #include "aim/AimThread.hpp"
 #include <chrono>
 #include <utility>
+#include "aim/AimError.hpp"
 namespace ttbox::core::aim {
 bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us) {
     if (!mailbox || !output || running_.exchange(true)) return false;
@@ -22,6 +23,9 @@ void AimThread::loop() {
         AimTargetTask task;
         if (mailbox_->take_latest(&task, last_frame)) {
             last_frame = task.frame_number;
+            // 当前阶段只测量误差并输出零移动，PID/FOV 留到控制器接入阶段。
+            const AimError error = error_from_center(task);
+            (void)error;
             output_->send(output::OutputAction{0, 0, 0, 0, task.frame_number, task.timestamp_us});
             std::lock_guard<std::mutex> lk(status_mutex_);
             status_.has_task = true; status_.last_frame = task.frame_number; ++status_.consumed;
