@@ -5,9 +5,9 @@
 #include "aim/AimError.hpp"
 #include "mouse/FovAngle.hpp"
 namespace ttbox::core::aim {
-bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us, RuntimeConfig* runtime_config) {
+bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us, RuntimeConfig* runtime_config, std::atomic<uint16_t>* physical_buttons) {
     if (!mailbox || !output || running_.exchange(true)) return false;
-    mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000; runtime_config_ = runtime_config;
+    mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000; runtime_config_ = runtime_config; physical_buttons_ = physical_buttons;
     { std::lock_guard<std::mutex> lk(status_mutex_); status_ = {}; status_.running = true; }
     thread_ = std::thread(&AimThread::loop, this);
     return true;
@@ -38,13 +38,25 @@ void AimThread::loop() {
                     kp_x = profile->mouse.kp_x; kp_y = profile->mouse.kp_y;
                     ki_x = profile->mouse.ki_x; ki_y = profile->mouse.ki_y;
                     kd_x = profile->mouse.kd_x; kd_y = profile->mouse.kd_y;
+                    smith_.set_dead_ms(profile->mouse.smith_dead_ms);
+                    abg_.configure(profile->mouse.alpha, profile->mouse.beta, profile->mouse.gamma, profile->mouse.predict_dt_ms);
                 }
             }
             const auto selected = selector_.select(task.detections, scfg,
                 static_cast<uint32_t>(task.timestamp_us / 1000ULL));
-            AimStateEvent event; event.has_target = selected.valid; event.hotkey_active = true;
+            AimStateEvent event; event.has_target = selected.valid;
+            event.hotkey_active = true;
+            if (physical_buttons_ && runtime_config_) {
+                auto p = runtime_config_->snapshot();
+                if (p) {
+                    const uint16_t buttons = physical_buttons_->load(std::memory_order_acquire);
+                    const bool a = (buttons & p->mouse.aim_hotkey) != 0;
+                    const bool b = p->mouse.aim_hotkey2 != 0 && (buttons & p->mouse.aim_hotkey2) != 0;
+                    event.hotkey_active = p->mouse.aim_hotkey_mode == 1 ? (a && b) : (a || (p->mouse.aim_hotkey2 == 0 && a));
+                }
+            }
             event.now_ms = task.timestamp_us / 1000ULL;
-            if (state_machine_.update(event, scfg.lost_grace_ms)) controller_.reset();
+            if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); smith_.reset(); abg_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; }
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
             if (selected.valid && task.frame_width > 0 && task.frame_height > 0) {
                 const float tx = (selected.box.x1 + selected.box.x2) * 0.5f;

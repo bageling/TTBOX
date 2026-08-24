@@ -38,6 +38,7 @@ endif()
 set(CORE_SOURCES
   src/app/Application.cpp
   src/aim/AimThread.cpp
+  src/runtime/CoreRuntime.cpp
   src/output/FifoHidOutput.cpp
   src/common/Logger.cpp
   src/common/Json.cpp

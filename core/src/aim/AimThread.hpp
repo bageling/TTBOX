@@ -13,6 +13,7 @@
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "aim/SmithPredictor.hpp"
+#include "aim/AlphaBetaGammaFilter.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -30,7 +31,7 @@ public:
     };
     AimThread() = default;
     ~AimThread() { stop(); }
-    bool start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us = 4000, RuntimeConfig* runtime_config = nullptr);
+    bool start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us = 4000, RuntimeConfig* runtime_config = nullptr, std::atomic<uint16_t>* physical_buttons = nullptr);
     void stop();
     Status status() const;
 private:
@@ -41,10 +42,12 @@ private:
     std::thread thread_;
     int interval_us_ = 4000;
     RuntimeConfig* runtime_config_ = nullptr;
+    std::atomic<uint16_t>* physical_buttons_ = nullptr;
     TargetSelector selector_;
     MotionController controller_;
     AimStateMachine state_machine_;
     SmithPredictor smith_;
+    AlphaBetaGammaFilter abg_;
     uint64_t last_timestamp_us_ = 0;
     float remainder_x_ = 0.0f;
     float remainder_y_ = 0.0f;

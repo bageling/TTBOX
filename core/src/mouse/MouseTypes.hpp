@@ -137,7 +137,12 @@ struct MouseProfile {
     // 输出换算：count = kp×err / gain（px → count 正确换算，防单位错乱过冲）。
     float gain_x_px_per_count = 0.65f;          // X 轴（标定测得；默认 0.65 近似）
     float gain_y_px_per_count = 0.65f;          // Y 轴
-    float response_delay_ms = 0.0f;             // 输入→画面响应延迟（标定测得）
+    float response_delay_ms = 0.0f;             // 输入到画面反馈延迟
+    float smith_dead_ms = 28.4f;                 // Smith 在途窗口
+    float alpha = 0.8f;                          // α-β-γ 位置增益
+    float beta = 0.3f;
+    float gamma = 0.1f;
+    float predict_dt_ms = 50.0f;                 // 目标提前预测时间             // 输入→画面响应延迟（标定测得）
     float deadzone_x = 1.0f;                    // X 死区（count，|v|<dz → 0）
     float deadzone_y = 1.0f;
     float smooth = 0.0f;                        // 平滑低通 alpha（0~1；0=关闭；TTBox 自实现，非 YU 公式）
