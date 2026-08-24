@@ -67,7 +67,7 @@ void AimThread::loop() {
                 (void)dt; // 当前 MotionController 接口尚未接收 dt，先记录真实时基。
                 const auto pending = smith_.predicted(task.timestamp_us);
                 control_x -= pending.dx; control_y -= pending.dy;
-                const auto motion = controller_.update(control_x, control_y, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y);
+                const auto motion = controller_.update(control_x, control_y, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y, dt);
                 move_x = static_cast<int16_t>(motion.out_x); move_y = static_cast<int16_t>(motion.out_y);
                 smith_.record(task.frame_number, static_cast<float>(move_x), static_cast<float>(move_y), task.timestamp_us);
             }
