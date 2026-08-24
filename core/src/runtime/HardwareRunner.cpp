@@ -16,4 +16,10 @@ bool HardwareRunner::start(std::string* error){
  return true;
 }
 void HardwareRunner::stop(){if(!running_.exchange(false))return; aim_thread_.stop(); workers_->stop(); capture_->stop(); capture_->close();}
+HardwareRunner::Status HardwareRunner::status() const {
+    Status s; s.running = running_.load();
+    if (capture_) { s.capture_frames = capture_->metrics().capture_frames.load(); const auto& f=capture_->format(); s.width=f.width; s.height=f.height; }
+    if (workers_) { s.worker_processed=workers_->total_processed(); s.worker_errors=workers_->total_errors(); s.worker_skipped=workers_->total_skipped(); }
+    const auto a=aim_thread_.status(); s.aim_consumed=a.consumed; s.aim_last_frame=a.last_frame; return s;
+}
 }

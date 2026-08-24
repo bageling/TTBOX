@@ -21,7 +21,19 @@ public:
     bool initialize(const Params&,std::string* error=nullptr);
     bool start(std::string* error=nullptr);
     void stop();
+    struct Status {
+        bool running = false;
+        uint64_t capture_frames = 0;
+        uint64_t worker_processed = 0;
+        uint64_t worker_errors = 0;
+        uint64_t worker_skipped = 0;
+        uint64_t aim_consumed = 0;
+        uint64_t aim_last_frame = 0;
+        uint32_t width = 0;
+        uint32_t height = 0;
+    };
     bool running() const{return running_.load();}
+    Status status() const;
 private:
     Params params_{};
     std::unique_ptr<V4L2Capture> capture_;
