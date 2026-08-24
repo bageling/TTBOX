@@ -3,6 +3,7 @@
 #include <chrono>
 #include <utility>
 #include "aim/AimError.hpp"
+#include "mouse/FovAngle.hpp"
 namespace ttbox::core::aim {
 bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us, RuntimeConfig* runtime_config) {
     if (!mailbox || !output || running_.exchange(true)) return false;
@@ -48,7 +49,19 @@ void AimThread::loop() {
                 const float tx = (selected.box.x1 + selected.box.x2) * 0.5f;
                 const float ty = (selected.box.y1 + selected.box.y2) * 0.5f;
                 ex = tx - task.frame_width * 0.5f; ey = ty - task.frame_height * 0.5f;
-                const auto motion = controller_.update(ex, ey, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y);
+                float control_x = ex;
+                float control_y = ey;
+                if (runtime_config_) {
+                    auto profile = runtime_config_->snapshot();
+                    if (profile && profile->mouse.fov_mode) {
+                        // FOV 模式：先将像素误差转换为角度对应的鼠标移动量。
+                        control_x = fov_move_x(ex, static_cast<float>(task.frame_width),
+                                               profile->mouse.hfov, profile->mouse.move_speed_x);
+                        control_y = fov_move_y(ey, static_cast<float>(task.frame_height),
+                                               profile->mouse.vfov, profile->mouse.move_speed_y);
+                    }
+                }
+                const auto motion = controller_.update(control_x, control_y, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y);
                 move_x = static_cast<int16_t>(motion.out_x); move_y = static_cast<int16_t>(motion.out_y);
             }
             output_->send(output::OutputAction{move_x, move_y, 0, 0, task.frame_number, task.timestamp_us});

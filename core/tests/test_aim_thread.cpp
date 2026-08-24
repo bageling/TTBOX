@@ -17,5 +17,7 @@ int main() {
     auto status = thread.status();
     thread.stop();
     assert(status.has_task && status.last_frame == 7);
+    assert(status.has_target == false);
+    assert(status.move_x == 0 && status.move_y == 0);
     std::cout << "test_aim_thread: PASS\n";
 }

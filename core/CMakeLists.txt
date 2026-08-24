@@ -167,6 +167,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_aim_thread PRIVATE ttbox_core)
   add_test(NAME test_aim_thread COMMAND test_aim_thread)
 
+  # A11：FOV 分辨率与方向换算测试
+  add_executable(test_fov_angle tests/test_fov_angle.cpp)
+  target_link_libraries(test_fov_angle PRIVATE ttbox_core)
+  add_test(NAME test_fov_angle COMMAND test_fov_angle)
+
   # ---- 硬件验收测试（板端：-DTTBOX_CORE_BUILD_HW_TESTS=ON）----
   if(TTBOX_CORE_BUILD_HW_TESTS AND UNIX AND NOT APPLE)
     add_executable(test_capture_hw tests/test_capture_hw.cpp)
