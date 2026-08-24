@@ -451,6 +451,7 @@ bool DecodeNMS::process_dfl_pair_dist(const RknnModelInfo& info, const void* con
         for(uint32_t a=0;a<n;++a){ float best=-1; int bi=0; for(uint32_t c=0;c<nc;++c){float v=read_elem(co,cb,(size_t)c*n+a);float q=1.f/(1.f+std::exp(-v));if(q>best){best=q;bi=(int)c;}} if(best<params_.conf_thres)continue; float d[4]{}; for(uint32_t e=0;e<4;++e){float mx=-1e30f,sum=0;for(uint32_t b=0;b<bins;++b)mx=std::max(mx,read_elem(ro,rb,(size_t)e*bins*n+(size_t)b*n+a));for(uint32_t b=0;b<bins;++b)sum+=std::exp(read_elem(ro,rb,(size_t)e*bins*n+(size_t)b*n+a)-mx);for(uint32_t b=0;b<bins;++b)d[e]+=b*std::exp(read_elem(ro,rb,(size_t)e*bins*n+(size_t)b*n+a)-mx)/sum;}float sx=(float)params_.input_w/gw,sy=(float)params_.input_h/gh,cx=(a%gw+.5f)*sx,cy=(a/gw+.5f)*sy;DetectionBox x{cx-d[0]*sx,cy-d[1]*sy,cx+d[2]*sx,cy+d[3]*sy,best,bi};cands_.push_back(x);}
     }
     // 与其它 Decoder 一致：按类别执行 NMS、坐标映射和后过滤。
+    stats_.candidates.fetch_add(cands_.size());
     kept_.clear();
     if (params_.classwise) {
         std::vector<int> classes;

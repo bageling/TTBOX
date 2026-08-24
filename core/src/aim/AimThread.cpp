@@ -99,6 +99,9 @@ void AimThread::loop() {
             std::lock_guard<std::mutex> lk(status_mutex_);
             status_.has_task = true;
             status_.has_target = selected.valid;
+            if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
+            status_.predicted_x = selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f;
+            status_.predicted_y = selected.valid ? (selected.box.y1 + selected.box.y2) * 0.5f : 0.0f;
             status_.error_x = ex;
             status_.error_y = ey;
             status_.move_x = move_x;

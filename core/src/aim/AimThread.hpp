@@ -28,6 +28,10 @@ public:
         uint64_t last_frame = 0;
         uint64_t consumed = 0;
         uint64_t stale = 0;
+        uint64_t target_frames = 0;
+        uint64_t no_target_frames = 0;
+        float predicted_x = 0.0f;
+        float predicted_y = 0.0f;
     };
     AimThread() = default;
     ~AimThread() { stop(); }

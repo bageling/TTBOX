@@ -40,8 +40,17 @@ HardwareRunner::Status HardwareRunner::status() const {
             s.worker_inference_ok += ws.inference_ok.load();
             s.worker_decode_ok += ws.decode_ok.load();
             s.worker_published += ws.published.load();
+            s.worker_candidates += ws.candidates.load();
+            s.worker_detections += ws.detections.load();
         }
     }
-    const auto a=aim_thread_.status(); s.aim_consumed=a.consumed; s.aim_last_frame=a.last_frame; return s;
+    const auto a=aim_thread_.status();
+    s.aim_consumed=a.consumed;
+    s.aim_target_frames=a.target_frames;
+    s.aim_no_target_frames=a.no_target_frames;
+    s.aim_last_frame=a.last_frame;
+    s.aim_predicted_x=a.predicted_x;
+    s.aim_predicted_y=a.predicted_y;
+    return s;
 }
 }

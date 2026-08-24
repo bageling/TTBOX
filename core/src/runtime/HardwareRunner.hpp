@@ -31,10 +31,16 @@ public:
         uint64_t worker_inference_ok = 0;
         uint64_t worker_decode_ok = 0;
         uint64_t worker_published = 0;
+        uint64_t worker_candidates = 0;
+        uint64_t worker_detections = 0;
         uint64_t worker_errors = 0;
         uint64_t worker_skipped = 0;
         uint64_t aim_consumed = 0;
+        uint64_t aim_target_frames = 0;
+        uint64_t aim_no_target_frames = 0;
         uint64_t aim_last_frame = 0;
+        float aim_predicted_x = 0.0f;
+        float aim_predicted_y = 0.0f;
         uint32_t width = 0;
         uint32_t height = 0;
     };
