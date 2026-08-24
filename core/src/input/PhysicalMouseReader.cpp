@@ -20,7 +20,12 @@ bool PhysicalMouseReader::start(const std::string& requested,std::string* error)
 #if defined(_WIN32)
  (void)requested; if(error)*error="Windows 不支持 evdev"; return false;
 #else
- if(running_.exchange(true))return false; device_=requested; if(device_.empty()&&!find_device(&device_)){running_=false;if(error)*error="找不到物理鼠标 event 节点";return false;} fd_=open(device_.c_str(),O_RDONLY|O_NONBLOCK); if(fd_<0){running_=false;if(error)*error="无法打开物理鼠标: "+device_;return false;} thread_=std::thread(&PhysicalMouseReader::loop,this); return true;
+ if(running_.exchange(true))return false;
+ device_=requested;
+ if(device_.empty()&&!find_device(&device_)){running_=false;if(error)*error="找不到物理鼠标 event 节点";return false;}
+ fd_=open(device_.c_str(),O_RDONLY|O_NONBLOCK);
+ if(fd_<0){running_=false;if(error)*error="无法打开物理鼠标: "+device_;return false;}
+ thread_=std::thread(&PhysicalMouseReader::loop,this); return true;
 #endif
 }
 void PhysicalMouseReader::stop(){
