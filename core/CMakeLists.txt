@@ -119,6 +119,12 @@ if(WIN32)
   target_link_libraries(ttbox_core PUBLIC ws2_32)
 endif()
 
+# ---- 新架构硬件入口（默认 NullHidOutput，不接管真实鼠标）----
+if(UNIX AND NOT APPLE AND TTBOX_CORE_HAS_RKNN)
+  add_executable(hardware_runner_main tools/hardware_runner_main.cpp)
+  target_link_libraries(hardware_runner_main PRIVATE ttbox_core)
+endif()
+
 # ---- 主程序 ----
 add_executable(ttbox_core_main src/main.cpp)
 target_link_libraries(ttbox_core_main PRIVATE ttbox_core)
