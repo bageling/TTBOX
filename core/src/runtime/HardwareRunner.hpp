@@ -19,6 +19,8 @@ public:
         WorkerPool::Params workers;
         RuntimeConfig* runtime_config=nullptr;
         std::shared_ptr<output::IHidOutput> output;
+        // 仅 Trace/Null 仿真热键；真实 FIFO 模式禁止使用，避免绕过物理安全门。
+        uint16_t simulated_buttons = 0;
     };
     bool initialize(const Params&,std::string* error=nullptr);
     bool start(std::string* error=nullptr);
@@ -64,5 +66,6 @@ private:
     std::atomic<bool> running_{false};
     input::PhysicalMouseReader mouse_reader_;
     std::unique_ptr<ModelAdapter> adapter_;
+    std::atomic<uint16_t> simulated_buttons_{0};
 };
 }

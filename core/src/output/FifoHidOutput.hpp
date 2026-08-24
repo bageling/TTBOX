@@ -11,7 +11,9 @@ public:
     void close();
 private:
     bool open_if_needed();
+    bool send_control();
     std::string path_;
     int fd_ = -1;
+    bool control_sent_ = false;
 };
 }

@@ -4,7 +4,7 @@ namespace ttbox::core {
 bool HardwareRunner::initialize(const Params& p,std::string* error){
  if(!p.output){if(error)*error="HardwareRunner 输出后端为空";return false;}
  if(p.workers.worker_cores.empty()||p.workers.worker_cores.size()>aim::AimTargetMailbox::kMaxWorkers){if(error)*error="Worker 数量必须为 1~3";return false;}
- params_=p; capture_=std::make_unique<V4L2Capture>(); workers_=std::make_unique<WorkerPool>(); mailbox_=std::make_unique<aim::AimTargetMailbox>(p.workers.worker_cores.size());
+ params_=p; simulated_buttons_.store(p.simulated_buttons, std::memory_order_release); capture_=std::make_unique<V4L2Capture>(); workers_=std::make_unique<WorkerPool>(); mailbox_=std::make_unique<aim::AimTargetMailbox>(p.workers.worker_cores.size());
  return capture_->configure(p.capture,error);
 }
 bool HardwareRunner::start(std::string* error){
@@ -23,7 +23,7 @@ bool HardwareRunner::start(std::string* error){
  if(!workers_->start(wp,error)){capture_->stop();capture_->close();running_=false;return false;}
  std::string mouse_error;
  if(!mouse_reader_.start("", &mouse_error)){ if(error)*error="物理鼠标读取器启动失败: "+mouse_error; workers_->stop(); capture_->stop(); capture_->close(); running_=false; return false; }
- if(!aim_thread_.start(mailbox_.get(),params_.output,4000,params_.runtime_config, mouse_reader_.button_source())){workers_->stop();capture_->stop();capture_->close();running_=false;return false;}
+ if(!aim_thread_.start(mailbox_.get(),params_.output,4000,params_.runtime_config, params_.simulated_buttons ? &simulated_buttons_ : mouse_reader_.button_source())){workers_->stop();capture_->stop();capture_->close();running_=false;return false;}
  return true;
 }
 void HardwareRunner::stop(){if(!running_.exchange(false))return; aim_thread_.stop(); mouse_reader_.stop(); workers_->stop(); capture_->stop(); capture_->close();}
