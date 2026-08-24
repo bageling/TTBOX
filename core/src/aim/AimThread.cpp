@@ -52,7 +52,9 @@ void AimThread::loop() {
                     const uint16_t buttons = physical_buttons_->load(std::memory_order_acquire);
                     const bool a = (buttons & p->mouse.aim_hotkey) != 0;
                     const bool b = p->mouse.aim_hotkey2 != 0 && (buttons & p->mouse.aim_hotkey2) != 0;
-                    event.hotkey_active = p->mouse.aim_hotkey_mode == 1 ? (a && b) : (a || (p->mouse.aim_hotkey2 == 0 && a));
+                    // 鼠标五键统一位图：左1、右2、中4、侧1 8、侧2 16。
+                    // any 模式下主键命中即可；配置副键时，副键也可单独作为触发键。
+                    event.hotkey_active = p->mouse.aim_hotkey_mode == 1 ? (a && b) : (a || b);
                 }
             }
             event.now_ms = task.timestamp_us / 1000ULL;
@@ -114,6 +116,16 @@ void AimThread::loop() {
             status_.smith_dy = trace_smith_dy;
             status_.move_x = move_x;
             status_.move_y = move_y;
+            if (status_.consumed == 0) {
+                status_.min_move_x = status_.max_move_x = move_x;
+                status_.min_move_y = status_.max_move_y = move_y;
+            } else {
+                status_.min_move_x = std::min(status_.min_move_x, move_x);
+                status_.max_move_x = std::max(status_.max_move_x, move_x);
+                status_.min_move_y = std::min(status_.min_move_y, move_y);
+                status_.max_move_y = std::max(status_.max_move_y, move_y);
+            }
+            if (move_x <= -127 || move_x >= 127 || move_y <= -127 || move_y >= 127) ++status_.clipped_frames;
             status_.last_frame = task.frame_number;
             ++status_.consumed;
         }
