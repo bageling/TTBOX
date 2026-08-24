@@ -278,11 +278,30 @@ void InferenceWorker::loop() {
             continue;
         }
         stats_.processed.fetch_add(1);
-        // A10：发布最新检测结果（Aim 消费；空框也发布以支持"无目标"判定）
+        const uint64_t now_us = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(clock::now().time_since_epoch()).count());
+        // 兼容旧 MouseScheduler：继续发布 LatestDetections。
         if (params_.latest_dets) {
-            const uint64_t now_us = static_cast<uint64_t>(
-                std::chrono::duration_cast<std::chrono::microseconds>(clock::now().time_since_epoch()).count());
             params_.latest_dets->publish(detections_, seq, now_us);
+        }
+        if (params_.aim_mailbox) {
+            aim::AimTargetTask task;
+            task.frame_number = seq;
+            task.timestamp_us = now_us;
+            task.worker_id = id_;
+            task.frame_width = params_.frame_w;
+            task.frame_height = params_.frame_h;
+            task.detections = detections_;
+            if (!detections_.empty()) {
+                task.has_target = true;
+                task.target = detections_.front();
+                task.aim_point = {
+                    (task.target.x1 + task.target.x2) * 0.5f,
+                    (task.target.y1 + task.target.y2) * 0.5f};
+                task.target_width = task.target.x2 - task.target.x1;
+                task.target_height = task.target.y2 - task.target.y1;
+            }
+            params_.aim_mailbox->offer(static_cast<std::size_t>(id_), std::move(task));
         }
         // 帧级 total = set_input + run + output（与 A-4 infer() total 语义一致）
         stats_.stages.total.add(
@@ -350,7 +369,8 @@ bool WorkerPool::start(const Params& params, std::string* error) {
         wp.color_order = params.color_order;
         wp.adapter = params.adapter;
         wp.runtime_config = params.runtime_config;
-        wp.latest_dets = params.latest_dets;  // A10：修复——worker 未持有 latest_dets 导致 publish 从未执行
+        wp.latest_dets = params.latest_dets;
+        wp.aim_mailbox = params.aim_mailbox;
         std::string werr;
         if (!worker->start(wp, &werr)) {
             stop();

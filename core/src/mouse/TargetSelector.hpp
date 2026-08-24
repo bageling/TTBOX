@@ -59,7 +59,7 @@ public:
     // now_ms = 当前毫秒时钟（用于丢失宽限判定）。
     // 返回选择结果（valid=false 表示无目标）。
     TargetSelection select(const std::vector<DetectionBox>& dets,
-                           const TargetSelectorConfig& cfg, uint32_t now_ms);
+                           const TargetSelectorConfig& cfg, uint32_t now_ms = 0);
 
     // 最近一次选择的 reason（供外部观测）
     TargetSelection::Reason last_reason() const { return last_reason_; }

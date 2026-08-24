@@ -37,6 +37,7 @@ endif()
 # ---- 核心库 ----
 set(CORE_SOURCES
   src/app/Application.cpp
+  src/aim/AimThread.cpp
   src/common/Logger.cpp
   src/common/Json.cpp
   src/config/ConfigManager.cpp
@@ -155,6 +156,16 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_include_directories(ttbox_core_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
   target_link_libraries(ttbox_core_tests PRIVATE ttbox_core)
   add_test(NAME ttbox_core_tests COMMAND ttbox_core_tests)
+
+  # A11：Worker -> AimThread 无锁目标邮箱测试（不需要硬件）
+  add_executable(test_aim_target_mailbox tests/test_aim_target_mailbox.cpp)
+  target_link_libraries(test_aim_target_mailbox PRIVATE ttbox_core)
+  add_test(NAME test_aim_target_mailbox COMMAND test_aim_target_mailbox)
+
+  # A11：AimThread 线程生命周期与邮箱消费测试
+  add_executable(test_aim_thread tests/test_aim_thread.cpp)
+  target_link_libraries(test_aim_thread PRIVATE ttbox_core)
+  add_test(NAME test_aim_thread COMMAND test_aim_thread)
 
   # ---- 硬件验收测试（板端：-DTTBOX_CORE_BUILD_HW_TESTS=ON）----
   if(TTBOX_CORE_BUILD_HW_TESTS AND UNIX AND NOT APPLE)

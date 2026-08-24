@@ -4,7 +4,7 @@
 #if defined(_WIN32)
 namespace ttbox::core {
 const char* hid_runtime_status_name(HidRuntimeStatus) { return "unsupported"; }
-bool HidRuntime::start(std::string*, std::string* error) {
+bool HidRuntime::start(std::string* error) {
     if (error) *error = "Windows 不支持 HID Runtime";
     return false;
 }
