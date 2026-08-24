@@ -259,7 +259,11 @@ void IpcServer::stop() {
 
 #if defined(_WIN32)
     if (listen_fd_ >= 0) {
+        // Windows 下 shutdown() 不保证唤醒阻塞 accept；先关闭监听 socket，
+        // 让 accept 返回 INVALID_SOCKET，再回收 accept 线程。
         ::shutdown(static_cast<SOCKET>(listen_fd_), SD_BOTH);
+        ::closesocket(static_cast<SOCKET>(listen_fd_));
+        listen_fd_ = -1;
     }
 #else
     if (listen_fd_ >= 0) {

@@ -44,7 +44,7 @@ TEST(spsc_queue_wraparound_full) {
 TEST(spsc_queue_multithread) {
     SpscQueue<int, 1024> q;
     std::atomic<bool> done{false};
-    std::atomic<long> sum{0};
+    std::atomic<long long> sum{0};
     std::atomic<int> got{0};
 
     std::thread producer([&] {
@@ -67,7 +67,7 @@ TEST(spsc_queue_multithread) {
     producer.join();
     consumer.join();
     CHECK_EQ(got.load(), 100000);
-    CHECK_EQ(sum.load(), 100000L * 99999L / 2L);  // 0..99999 和
+    CHECK_EQ(sum.load(), 100000LL * 99999LL / 2LL);  // 0..99999 和
 }
 
 TEST(hid_parse_mouse) {

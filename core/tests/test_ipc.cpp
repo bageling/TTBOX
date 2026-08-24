@@ -14,7 +14,7 @@ namespace {
 
 std::string tmp_socket_path() {
 #if defined(_WIN32)
-    return "tcp:0";  // Windows 占位（当前阶段不在 Windows 运行）
+    return "tcp:39128";
 #else
     return "/tmp/ttbox_core_test_" + std::to_string(static_cast<long>(::getpid())) + ".sock";
 #endif

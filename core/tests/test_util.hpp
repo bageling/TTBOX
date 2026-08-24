@@ -44,6 +44,7 @@ inline int run_all() {
     for (const auto& tc : registry()) {
         const int before = failure_count();
         std::printf("== RUN: %s\n", tc.name);
+        std::fflush(stdout);
         tc.fn();
         const int after = failure_count();
         if (after > before) {

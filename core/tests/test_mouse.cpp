@@ -184,10 +184,10 @@ TEST(mouse_motion_controller_kd) {
     auto o1 = c.update(10.0f, 0.0f, 17.0f, 10.0f, 0.0f, 0.0f, 2.0f, 0.0f);
     (void)o1;
     auto o2 = c.update(8.0f, 0.0f, 17.0f, 10.0f, 0.0f, 0.0f, 2.0f, 0.0f);
-    CHECK_EQ(o2.out_x, 127.0f);
+    CHECK_EQ(o2.out_x, -127.0f);
     c.reset();
     auto o3 = c.update(8.0f, 0.0f, 17.0f, 10.0f, 0.0f, 0.0f, 2.0f, 0.0f);
-    CHECK_EQ(o3.out_x, 127.0f);  // reset 后无微分，但仍受 +127 限幅
+    CHECK_EQ(o3.out_x, 127.0f);  // reset 后无微分，误差为正时恢复正向输出
 }
 
 // ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ std::string real_config_path() {
 
 std::string tmp_socket_path() {
 #if defined(_WIN32)
-    return "tcp:0";
+    return "tcp:127.0.0.1:39127";
 #else
     return "/tmp/ttbox_core_app_test_" + std::to_string(static_cast<long>(::getpid())) + ".sock";
 #endif
