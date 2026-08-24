@@ -85,7 +85,6 @@ void AimThread::loop() {
                 }
                 float dt = last_timestamp_us_ > 0 && task.timestamp_us > last_timestamp_us_
                     ? static_cast<float>(task.timestamp_us - last_timestamp_us_) / 1000000.0f : 0.004f;
-                (void)dt; // 当前 MotionController 接口尚未接收 dt，先记录真实时基。
                 const auto pending = smith_.predicted(task.timestamp_us);
                 control_x -= pending.dx; control_y -= pending.dy;
                 const auto motion = controller_.update(control_x, control_y, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y, dt);
@@ -98,8 +97,14 @@ void AimThread::loop() {
             }
             output_->send(output::OutputAction{move_x, move_y, 0, 0, task.frame_number, task.timestamp_us});
             std::lock_guard<std::mutex> lk(status_mutex_);
-            status_.has_task = true; status_.has_target = selected.valid; status_.error_x = ex; status_.error_y = ey; status_.move_x = move_x; status_.move_y = move_y; status_.last_frame = task.frame_number; ++status_.consumed;
-            status_.has_task = true; status_.last_frame = task.frame_number; ++status_.consumed;
+            status_.has_task = true;
+            status_.has_target = selected.valid;
+            status_.error_x = ex;
+            status_.error_y = ey;
+            status_.move_x = move_x;
+            status_.move_y = move_y;
+            status_.last_frame = task.frame_number;
+            ++status_.consumed;
         }
         std::this_thread::sleep_for(std::chrono::microseconds(interval_us_));
     }

@@ -25,7 +25,9 @@ bool PhysicalMouseReader::start(const std::string& requested,std::string* error)
 }
 void PhysicalMouseReader::stop(){
 #if !defined(_WIN32)
- if(!running_.exchange(false))return; if(thread_.joinable())thread_.join(); if(fd_>=0){close(fd_);fd_=-1;}
+ if(!running_.exchange(false))return;
+ if(thread_.joinable())thread_.join();
+ if(fd_>=0){close(fd_);fd_=-1;}
 #endif
 }
 void PhysicalMouseReader::loop(){
