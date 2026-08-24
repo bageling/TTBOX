@@ -164,30 +164,30 @@ TEST(mouse_aim_tracker_velocity_and_switch) {
 TEST(mouse_motion_controller_p_only) {
     aim::MotionController c;
     auto o = c.update(10.0f, -4.0f, 17.0f, 10.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    CHECK_EQ(o.out_x, 170.0f);
+    CHECK_EQ(o.out_x, 127.0f);
     CHECK_EQ(o.out_y, -40.0f);
 }
 
 TEST(mouse_motion_controller_ki) {
     aim::MotionController c;
-    // ki=0.1：err=10 → 积分 +1；out = 17*10 + 1 = 171
+    // ki=0.1：积分会更新，但最终输出受 +127 限幅
     auto o1 = c.update(10.0f, 0.0f, 17.0f, 10.0f, 0.1f, 0.0f, 0.0f, 0.0f);
-    CHECK_EQ(o1.out_x, 171.0f);
+    CHECK_EQ(o1.out_x, 127.0f);
     // 持续 err=10：积分再 +1
     auto o2 = c.update(10.0f, 0.0f, 17.0f, 10.0f, 0.1f, 0.0f, 0.0f, 0.0f);
-    CHECK_EQ(o2.out_x, 172.0f);
+    CHECK_EQ(o2.out_x, 127.0f);
 }
 
 TEST(mouse_motion_controller_kd) {
     aim::MotionController c;
-    // kd=2：err 从 10 → 8，微分 = (8-10)*2 = -4；out = 17*8 - 4 = 132
+    // kd=2：微分会参与控制，但最终输出受 +127 限幅
     auto o1 = c.update(10.0f, 0.0f, 17.0f, 10.0f, 0.0f, 0.0f, 2.0f, 0.0f);
     (void)o1;
     auto o2 = c.update(8.0f, 0.0f, 17.0f, 10.0f, 0.0f, 0.0f, 2.0f, 0.0f);
-    CHECK_EQ(o2.out_x, 132.0f);
+    CHECK_EQ(o2.out_x, 127.0f);
     c.reset();
     auto o3 = c.update(8.0f, 0.0f, 17.0f, 10.0f, 0.0f, 0.0f, 2.0f, 0.0f);
-    CHECK_EQ(o3.out_x, 136.0f);  // reset 后无微分
+    CHECK_EQ(o3.out_x, 127.0f);  // reset 后无微分，但仍受 +127 限幅
 }
 
 // ---------------------------------------------------------------------------
