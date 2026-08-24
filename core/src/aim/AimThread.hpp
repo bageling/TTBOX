@@ -51,6 +51,7 @@ private:
     uint64_t last_timestamp_us_ = 0;
     float remainder_x_ = 0.0f;
     float remainder_y_ = 0.0f;
+    int last_target_id_ = -1;
     mutable std::mutex status_mutex_;
     Status status_{};
 };

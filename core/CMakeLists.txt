@@ -39,6 +39,7 @@ set(CORE_SOURCES
   src/app/Application.cpp
   src/aim/AimThread.cpp
   src/runtime/CoreRuntime.cpp
+  src/runtime/HardwareRunner.cpp
   src/output/FifoHidOutput.cpp
   src/common/Logger.cpp
   src/common/Json.cpp
@@ -194,11 +195,12 @@ if(TTBOX_CORE_BUILD_TESTS)
       # ctest 项使用短帧数快速回归；完整吞吐测试见 A-4 验收（--frames 300）
       add_test(NAME test_rknn_hw COMMAND test_rknn_hw --mode raw --model /opt/ttbox2/models/yolo261n-rk3588.rknn --frames 30)
 
-      add_executable(test_worker_hw tests/test_worker_hw.cpp)
-      target_include_directories(test_worker_hw PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-      target_link_libraries(test_worker_hw PRIVATE ttbox_core)
-      # ctest 项短跑（每组 30 帧回归）；完整 1/2/3×300 帧见 A-5 验收
-      add_test(NAME test_worker_hw COMMAND test_worker_hw --model /opt/ttbox2/models/yolo261n-rk3588.rknn --frames 30 --duration 60)
+      # A11：旧 test_worker_hw 已弃用。硬件链路由后续 HardwareRunner 独立入口承载。
+
+      # A11：HardwareRunner 只构建验证生命周期，不自动访问设备。
+      add_executable(test_hardware_runner tests/test_hardware_runner.cpp)
+      target_include_directories(test_hardware_runner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+      target_link_libraries(test_hardware_runner PRIVATE ttbox_core)
 
       add_executable(test_decode_align tests/test_decode_align.cpp)
       target_include_directories(test_decode_align PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)

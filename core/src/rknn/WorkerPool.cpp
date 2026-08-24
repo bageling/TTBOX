@@ -365,7 +365,6 @@ bool WorkerPool::start(const Params& params, std::string* error) {
         wp.color_order = params.color_order;
         wp.adapter = params.adapter;
         wp.runtime_config = params.runtime_config;
-        wp.latest_dets = params.latest_dets;
         wp.aim_mailbox = params.aim_mailbox;
         std::string werr;
         if (!worker->start(wp, &werr)) {
