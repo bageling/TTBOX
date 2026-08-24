@@ -131,3 +131,40 @@ Pipeline 动态参数：
 - RGA 失败 → 该帧跳过（不崩溃），计数 errors
 - RKNN 失败 → worker 隔离；连续失败触发 Runtime 重启模型
 - HID 端点丢失 → 重试（A-2 passthrough 已有类似逻辑）
+
+
+## 11. TTBOX 当前重构状态（A11）
+
+当前 Worker 到控制侧采用双链路，确保新架构验证期间旧行为不变：
+
+```text
+Worker
+├── LatestDetections → MouseScheduler → FIFO（兼容旧链路）
+└── AimTargetTask → AimTargetMailbox → AimThread（新链路）
+```
+
+### AimTargetTask 职责
+
+- 只传递帧号、时间戳、Worker 编号、目标框、瞄准点、目标尺寸和检测结果。
+- 不传图像、DMA-BUF、RKNN tensor 或逐帧 JSON。
+- `frame_number` 用于多 Worker 乱序帧过滤。
+
+### AimTargetMailbox 职责
+
+- 每个 Worker 保留一个最新任务槽位。
+- AimThread 扫描槽位并选择最新 `frame_number`。
+- Worker 不等待 AimThread，允许旧任务被新任务覆盖。
+
+### AimThread 当前边界
+
+AimThread 当前负责线程生命周期、任务消费和目标相对画面中心误差计算；当前暂不接管 PID、FOV、Smith、真实 HID 输出。
+
+### OutputAction 与输出后端
+
+控制线程只生成 `OutputAction`，通过 `IHidOutput` 输出。当前保留 FIFO 后端，协议为：
+
+```text
+0x01 + dx(int16 little-endian) + dy(int16 little-endian)
+```
+
+后续依次接入目标选择、热键门控、PID、FOV、Smith 和实机 HID。
