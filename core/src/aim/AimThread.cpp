@@ -4,9 +4,9 @@
 #include <utility>
 #include "aim/AimError.hpp"
 namespace ttbox::core::aim {
-bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us) {
+bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us, RuntimeConfig* runtime_config) {
     if (!mailbox || !output || running_.exchange(true)) return false;
-    mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000;
+    mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000; runtime_config_ = runtime_config;
     { std::lock_guard<std::mutex> lk(status_mutex_); status_ = {}; status_.running = true; }
     thread_ = std::thread(&AimThread::loop, this);
     return true;
@@ -23,11 +23,37 @@ void AimThread::loop() {
         AimTargetTask task;
         if (mailbox_->take_latest(&task, last_frame)) {
             last_frame = task.frame_number;
-            // 当前阶段只测量误差并输出零移动，PID/FOV 留到控制器接入阶段。
-            const AimError error = error_from_center(task);
-            (void)error;
-            output_->send(output::OutputAction{0, 0, 0, 0, task.frame_number, task.timestamp_us});
+            // 新控制链：目标选择 → 误差 → 纯 PID/P 控制 → OutputAction。
+            TargetSelectorConfig scfg;
+            scfg.roi_w = task.frame_width; scfg.roi_h = task.frame_height;
+            scfg.confidence = 0.0f;
+            float kp_x = 0.0f, kp_y = 0.0f, ki_x = 0.0f, ki_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
+            if (runtime_config_) {
+                auto profile = runtime_config_->snapshot();
+                if (profile) {
+                    scfg.fov_range = profile->fov.enabled ? profile->fov.radius * 2.0f : 1.0f;
+                    scfg.lost_grace_ms = profile->mouse.lost_grace_ms;
+                    kp_x = profile->mouse.kp_x; kp_y = profile->mouse.kp_y;
+                    ki_x = profile->mouse.ki_x; ki_y = profile->mouse.ki_y;
+                    kd_x = profile->mouse.kd_x; kd_y = profile->mouse.kd_y;
+                }
+            }
+            const auto selected = selector_.select(task.detections, scfg,
+                static_cast<uint32_t>(task.timestamp_us / 1000ULL));
+            AimStateEvent event; event.has_target = selected.valid; event.hotkey_active = true;
+            event.now_ms = task.timestamp_us / 1000ULL;
+            if (state_machine_.update(event, scfg.lost_grace_ms)) controller_.reset();
+            int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
+            if (selected.valid && task.frame_width > 0 && task.frame_height > 0) {
+                const float tx = (selected.box.x1 + selected.box.x2) * 0.5f;
+                const float ty = (selected.box.y1 + selected.box.y2) * 0.5f;
+                ex = tx - task.frame_width * 0.5f; ey = ty - task.frame_height * 0.5f;
+                const auto motion = controller_.update(ex, ey, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y);
+                move_x = static_cast<int16_t>(motion.out_x); move_y = static_cast<int16_t>(motion.out_y);
+            }
+            output_->send(output::OutputAction{move_x, move_y, 0, 0, task.frame_number, task.timestamp_us});
             std::lock_guard<std::mutex> lk(status_mutex_);
+            status_.has_task = true; status_.has_target = selected.valid; status_.error_x = ex; status_.error_y = ey; status_.move_x = move_x; status_.move_y = move_y; status_.last_frame = task.frame_number; ++status_.consumed;
             status_.has_task = true; status_.last_frame = task.frame_number; ++status_.consumed;
         }
         std::this_thread::sleep_for(std::chrono::microseconds(interval_us_));

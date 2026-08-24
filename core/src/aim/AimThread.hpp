@@ -8,19 +8,28 @@
 #include <thread>
 #include "pipeline/AimTargetMailbox.hpp"
 #include "output/IHidOutput.hpp"
+#include "mouse/AimStateMachine.hpp"
+#include "mouse/MotionController.hpp"
+#include "mouse/TargetSelector.hpp"
+#include "model/RuntimeProfile.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
     struct Status {
         bool running = false;
         bool has_task = false;
+        bool has_target = false;
+        float error_x = 0.0f;
+        float error_y = 0.0f;
+        int16_t move_x = 0;
+        int16_t move_y = 0;
         uint64_t last_frame = 0;
         uint64_t consumed = 0;
         uint64_t stale = 0;
     };
     AimThread() = default;
     ~AimThread() { stop(); }
-    bool start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us = 4000);
+    bool start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us = 4000, RuntimeConfig* runtime_config = nullptr);
     void stop();
     Status status() const;
 private:
@@ -30,6 +39,10 @@ private:
     std::atomic<bool> running_{false};
     std::thread thread_;
     int interval_us_ = 4000;
+    RuntimeConfig* runtime_config_ = nullptr;
+    TargetSelector selector_;
+    MotionController controller_;
+    AimStateMachine state_machine_;
     mutable std::mutex status_mutex_;
     Status status_{};
 };

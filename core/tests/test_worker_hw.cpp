@@ -306,7 +306,7 @@ int run_group(const std::string& model_path, int n_workers,
         ? std::shared_ptr<output::IHidOutput>(std::make_shared<output::NullHidOutput>())
         : std::shared_ptr<output::IHidOutput>(std::make_shared<output::FifoHidOutput>(mouse_fifo));
     aim::AimThread aim_thread;
-    if (!aim_thread.start(&aim_mailbox, aim_output, 4000)) {
+    if (!aim_thread.start(&aim_mailbox, aim_output, 4000, runtime_config)) {
         std::printf("[FAIL] AimThread 启动失败\n");
         cap.stop(); cap.close(); return 1;
     }
