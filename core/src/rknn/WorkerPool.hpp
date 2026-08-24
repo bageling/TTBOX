@@ -43,7 +43,11 @@ struct DecodeStageStats {
 
 // 单 Worker 统计（计数为原子，跨线程安全）
 struct WorkerStats {
-    std::atomic<uint64_t> processed{0};  // 成功推理帧数
+    std::atomic<uint64_t> processed{0};  // 成功完成解码的帧数
+    std::atomic<uint64_t> rga_ok{0};
+    std::atomic<uint64_t> inference_ok{0};
+    std::atomic<uint64_t> decode_ok{0};
+    std::atomic<uint64_t> published{0};
     std::atomic<uint64_t> errors{0};
     std::atomic<uint64_t> skipped{0};    // 认领判断跳过（分配给其他 worker 或时序落后）
     RknnStageStats stages;               // set_input / run / output / total

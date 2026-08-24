@@ -222,10 +222,12 @@ void InferenceWorker::loop() {
         const auto t_rga0 = clock::now();
         if (!rga_->process(*frame, &rga_out, &perr)) {
             stats_.errors.fetch_add(1);
+            if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] RGA: %s\n", id_, perr.c_str());
             continue;
         }
         stats_.rga.add(
             std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - t_rga0).count());
+        stats_.rga_ok.fetch_add(1);
 
         // ---- 输入类型分流（以模型实际输入类型为准，不猜）----
         //   INT8/UINT8（黄瓦 320x320）：RGA 输出 uint8 直喂，零转换
@@ -261,22 +263,28 @@ void InferenceWorker::loop() {
         const auto t_infer0 = clock::now();
         if (!engine_->set_input(input_ptr, input_bytes, &ierr)) {
             stats_.errors.fetch_add(1);
+            if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] set_input: %s\n", id_, ierr.c_str());
             continue;
         }
         if (!engine_->run(&ierr)) {
             stats_.errors.fetch_add(1);
+            if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] run: %s\n", id_, ierr.c_str());
             continue;
         }
         // want_float=0 原生输出（A-6：禁止无意义 float 转换，直供 decode）
+        stats_.inference_ok.fetch_add(1);
         if (!engine_->get_raw_outputs(raw_buf_ptrs_.data(), raw_sizes_.data(), &ierr)) {
             stats_.errors.fetch_add(1);
+            if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] raw_outputs: %s\n", id_, ierr.c_str());
             continue;
         }
         std::string derr;
         if (!decoder_->process(engine_->info(), raw_buf_ptrs_.data(), &detections_, &derr)) {
             stats_.errors.fetch_add(1);
+            if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] decode: %s\n", id_, derr.c_str());
             continue;
         }
+        stats_.decode_ok.fetch_add(1);
         stats_.processed.fetch_add(1);
         const uint64_t now_us = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::microseconds>(clock::now().time_since_epoch()).count());
@@ -298,6 +306,7 @@ void InferenceWorker::loop() {
                 task.target_height = task.target.y2 - task.target.y1;
             }
             params_.aim_mailbox->offer(static_cast<std::size_t>(id_), std::move(task));
+            stats_.published.fetch_add(1);
         }
         // 帧级 total = set_input + run + output（与 A-4 infer() total 语义一致）
         stats_.stages.total.add(

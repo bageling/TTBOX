@@ -38,6 +38,7 @@ endif()
 set(CORE_SOURCES
   src/app/Application.cpp
   src/aim/AimThread.cpp
+  src/input/PhysicalMouseReader.cpp
   src/runtime/CoreRuntime.cpp
   src/runtime/HardwareRunner.cpp
   src/output/FifoHidOutput.cpp

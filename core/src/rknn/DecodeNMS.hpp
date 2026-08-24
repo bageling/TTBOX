@@ -121,6 +121,7 @@ private:
     bool process_dfl(const RknnModelInfo& info, const void* const* out_bufs,
                      std::vector<DetectionBox>* detections, std::string* error);
     // 多输出 reg-bins DFL（大腕256：3 尺度 × [reg(1,64,H,W), cls(1,C,H,W), aux(1,1,H,W)]）
+    bool process_dfl_pair_dist(const RknnModelInfo&, const void* const*, std::vector<DetectionBox>*, std::string*);
     bool process_dfl_dist(const RknnModelInfo& info, const void* const* out_bufs,
                           std::vector<DetectionBox>* detections, std::string* error);
     // 端到端单输出（v26m：模型内已做 TopK 选择，输出 [1,N,F]，F=6: xyxy+score+class）

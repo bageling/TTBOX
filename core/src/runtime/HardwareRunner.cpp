@@ -10,16 +10,38 @@ bool HardwareRunner::initialize(const Params& p,std::string* error){
 bool HardwareRunner::start(std::string* error){
  if(running_.exchange(true)||!capture_||!workers_||!mailbox_)return false;
  if(!capture_->open(error)||!capture_->start(error)){running_=false;return false;}
- auto wp=params_.workers; const auto& f=capture_->format(); wp.latest=capture_->latest_frame_ref(); wp.frame_w=f.width; wp.frame_h=f.height; wp.aim_mailbox=mailbox_.get(); wp.runtime_config=params_.runtime_config;
+ const auto& fmt=capture_->format();
+ if(params_.workers.model_path.empty()){if(error)*error="模型路径为空";stop();return false;}
+ // 查询模型元数据：先用一个临时 RKNN context，适配器只读共享给全部 Worker。
+ RKNNEngine probe; RKNNEngine::Params ep; ep.model_path=params_.workers.model_path; ep.core_mask=params_.workers.worker_cores.front(); ep.pass_through=false;
+ if(!probe.init(ep,error)){stop();return false;}
+ const auto& mi=probe.info(); std::fprintf(stderr,"[MODEL] input=%ux%u type=%d fmt=%d outputs=%u\n",mi.input_width,mi.input_height,mi.input_type,mi.input_fmt,mi.n_outputs); for(uint32_t oi=0;oi<mi.n_outputs&&oi<mi.outputs.size();++oi){const auto& o=mi.outputs[oi]; std::fprintf(stderr,"[MODEL] output[%u] type=%d fmt=%d size=%u scale=%g zp=%d dims=",oi,o.type,o.fmt,o.size,o.scale,o.zp); for(auto d:o.dims)std::fprintf(stderr,"%u,",d); std::fprintf(stderr,"\n");}
+ ModelAdapterConfig acfg; acfg.color_order=ColorOrder::kBgr; acfg.conf_thres=params_.workers.conf_thres; acfg.iou_thres=params_.workers.iou_thres;
+ adapter_=std::make_unique<ModelAdapter>(); if(!adapter_->analyze(probe.info(),acfg,error)){probe.destroy();stop();return false;}
+ probe.destroy();
+ auto wp=params_.workers; wp.latest=capture_->latest_frame_ref(); wp.frame_w=fmt.width; wp.frame_h=fmt.height; wp.aim_mailbox=mailbox_.get(); wp.runtime_config=params_.runtime_config; wp.adapter=adapter_.get();
  if(!workers_->start(wp,error)){capture_->stop();capture_->close();running_=false;return false;}
- if(!aim_thread_.start(mailbox_.get(),params_.output,4000,params_.runtime_config)){workers_->stop();capture_->stop();capture_->close();running_=false;return false;}
+ std::string mouse_error;
+ if(!mouse_reader_.start("", &mouse_error)){ if(error)*error="物理鼠标读取器启动失败: "+mouse_error; workers_->stop(); capture_->stop(); capture_->close(); running_=false; return false; }
+ if(!aim_thread_.start(mailbox_.get(),params_.output,4000,params_.runtime_config, mouse_reader_.button_source())){workers_->stop();capture_->stop();capture_->close();running_=false;return false;}
  return true;
 }
-void HardwareRunner::stop(){if(!running_.exchange(false))return; aim_thread_.stop(); workers_->stop(); capture_->stop(); capture_->close();}
+void HardwareRunner::stop(){if(!running_.exchange(false))return; aim_thread_.stop(); mouse_reader_.stop(); workers_->stop(); capture_->stop(); capture_->close();}
 HardwareRunner::Status HardwareRunner::status() const {
     Status s; s.running = running_.load();
     if (capture_) { s.capture_frames = capture_->metrics().capture_frames.load(); const auto& f=capture_->format(); s.width=f.width; s.height=f.height; }
-    if (workers_) { s.worker_processed=workers_->total_processed(); s.worker_errors=workers_->total_errors(); s.worker_skipped=workers_->total_skipped(); }
+    if (workers_) {
+        s.worker_processed=workers_->total_processed();
+        s.worker_errors=workers_->total_errors();
+        s.worker_skipped=workers_->total_skipped();
+        for (const auto& w : workers_->workers()) {
+            const auto& ws = w->stats();
+            s.worker_rga_ok += ws.rga_ok.load();
+            s.worker_inference_ok += ws.inference_ok.load();
+            s.worker_decode_ok += ws.decode_ok.load();
+            s.worker_published += ws.published.load();
+        }
+    }
     const auto a=aim_thread_.status(); s.aim_consumed=a.consumed; s.aim_last_frame=a.last_frame; return s;
 }
 }

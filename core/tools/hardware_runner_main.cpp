@@ -22,6 +22,6 @@ int main(int argc,char** argv){
     if(!runner.initialize(p,&error)){std::fprintf(stderr,"[FAIL] initialize: %s\n",error.c_str());return 1;}
     if(!runner.start(&error)){std::fprintf(stderr,"[FAIL] start: %s\n",error.c_str());return 1;}
     std::printf("hardware_runner_main: running seconds=%d workers=%d output=null\n",seconds,workers);
-    for(int i=0;i<seconds;++i){ std::this_thread::sleep_for(std::chrono::seconds(1)); auto s=runner.status(); std::printf("[HW] t=%d format=%ux%u capture=%llu worker=%llu errors=%llu skipped=%llu aim=%llu last_frame=%llu\n", i+1,s.width,s.height,(unsigned long long)s.capture_frames,(unsigned long long)s.worker_processed,(unsigned long long)s.worker_errors,(unsigned long long)s.worker_skipped,(unsigned long long)s.aim_consumed,(unsigned long long)s.aim_last_frame); }
+    for(int i=0;i<seconds;++i){ std::this_thread::sleep_for(std::chrono::seconds(1)); auto s=runner.status(); std::printf("[HW] t=%d format=%ux%u capture=%llu rga=%llu infer=%llu decode=%llu publish=%llu worker=%llu errors=%llu skipped=%llu aim=%llu last_frame=%llu\n", i+1,s.width,s.height,(unsigned long long)s.capture_frames,(unsigned long long)s.worker_rga_ok,(unsigned long long)s.worker_inference_ok,(unsigned long long)s.worker_decode_ok,(unsigned long long)s.worker_published,(unsigned long long)s.worker_processed,(unsigned long long)s.worker_errors,(unsigned long long)s.worker_skipped,(unsigned long long)s.aim_consumed,(unsigned long long)s.aim_last_frame); }
     runner.stop(); std::printf("hardware_runner_main: stopped cleanly\n"); return 0;
 }

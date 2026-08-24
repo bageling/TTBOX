@@ -154,12 +154,24 @@ bool DecodeNMS::process(const RknnModelInfo& info,
         }
         return process_single(info, out_bufs, detections, error);
     }
+    // 多输出 reg-bins DFL：必须先于“偶数输出”的通用成对格式判断。
+    // 当前 sjz-XCSH 是 6 输出：3 个尺度 × (reg/cls)，每组 reg=64、cls=7。
+    if (info.n_outputs >= 6 && info.n_outputs % 2 == 0) {
+        bool pair_reg_cls = true;
+        for (uint32_t i = 0; i + 1 < info.n_outputs; i += 2) {
+            const auto& ro = info.outputs[i];
+            const auto& co = info.outputs[i + 1];
+            if (ro.dims.size() != 4 || co.dims.size() != 4 ||
+                ro.dims[1] < 32 || ro.dims[1] % 4 != 0 || co.dims[1] == 0 ||
+                ro.dims[2] != co.dims[2] || ro.dims[3] != co.dims[3]) {
+                pair_reg_cls = false;
+                break;
+            }
+        }
+        if (pair_reg_cls) return process_dfl_pair_dist(info, out_bufs, detections, error);
+    }
     if (info.n_outputs >= 2 && info.n_outputs % 2 == 0) {
         return process_dfl(info, out_bufs, detections, error);
-    }
-    // 多输出 reg-bins DFL（大腕256：3 尺度 × reg/cls/aux，9 输出）
-    if (info.n_outputs >= 6 && info.n_outputs % 3 == 0) {
-        return process_dfl_dist(info, out_bufs, detections, error);
     }
     if (error) *error = "不支持该输出数量";
     return false;
@@ -426,6 +438,41 @@ bool DecodeNMS::process_dfl(const RknnModelInfo& info,
 //   每边 DFL softmax 加权 → 距离（单位网格）
 //   cls → sigmoid → max/argmax；aux 若值域 (0,1) 且非恒定，作为 objectness 乘入
 // ---------------------------------------------------------------------------
+
+bool DecodeNMS::process_dfl_pair_dist(const RknnModelInfo& info, const void* const* out_bufs,
+                                      std::vector<DetectionBox>* detections, std::string* error) {
+    if (!detections || params_.input_w == 0 || params_.input_h == 0) { if(error)*error="DFL pair 参数无效"; return false; }
+    cands_.clear();
+    for (uint32_t p=0; p+1<info.n_outputs; p+=2) {
+        const auto& ro=info.outputs[p]; const auto& co=info.outputs[p+1];
+        if(ro.dims.size()!=4 || ro.dims[1]%4!=0 || co.dims.size()!=4 || ro.dims[2]!=co.dims[2] || ro.dims[3]!=co.dims[3]) { if(error)*error="DFL pair 输出格式无法解析"; return false; }
+        const uint32_t bins=ro.dims[1]/4, gh=ro.dims[2], gw=ro.dims[3], n=gh*gw, nc=co.dims[1];
+        const auto* rb=static_cast<const uint8_t*>(out_bufs[p]); const auto* cb=static_cast<const uint8_t*>(out_bufs[p+1]);
+        for(uint32_t a=0;a<n;++a){ float best=-1; int bi=0; for(uint32_t c=0;c<nc;++c){float v=read_elem(co,cb,(size_t)c*n+a);float q=1.f/(1.f+std::exp(-v));if(q>best){best=q;bi=(int)c;}} if(best<params_.conf_thres)continue; float d[4]{}; for(uint32_t e=0;e<4;++e){float mx=-1e30f,sum=0;for(uint32_t b=0;b<bins;++b)mx=std::max(mx,read_elem(ro,rb,(size_t)e*bins*n+(size_t)b*n+a));for(uint32_t b=0;b<bins;++b)sum+=std::exp(read_elem(ro,rb,(size_t)e*bins*n+(size_t)b*n+a)-mx);for(uint32_t b=0;b<bins;++b)d[e]+=b*std::exp(read_elem(ro,rb,(size_t)e*bins*n+(size_t)b*n+a)-mx)/sum;}float sx=(float)params_.input_w/gw,sy=(float)params_.input_h/gh,cx=(a%gw+.5f)*sx,cy=(a/gw+.5f)*sy;DetectionBox x{cx-d[0]*sx,cy-d[1]*sy,cx+d[2]*sx,cy+d[3]*sy,best,bi};cands_.push_back(x);}
+    }
+    // 与其它 Decoder 一致：按类别执行 NMS、坐标映射和后过滤。
+    kept_.clear();
+    if (params_.classwise) {
+        std::vector<int> classes;
+        for (const auto& c : cands_) if (std::find(classes.begin(), classes.end(), c.class_id) == classes.end()) classes.push_back(c.class_id);
+        for (int cls : classes) {
+            cands_cls_.clear();
+            for (const auto& c : cands_) if (c.class_id == cls) cands_cls_.push_back(c);
+            nms_boxes(cands_cls_, &keep_idx_);
+            for (int k : keep_idx_) kept_.push_back(cands_cls_[k]);
+        }
+    } else {
+        nms_boxes(cands_, &keep_idx_);
+        for (int k : keep_idx_) kept_.push_back(cands_[k]);
+    }
+    map_coords(&kept_);
+    apply_post_filter(&kept_);
+    apply_fov_filter(&kept_);
+    if (params_.max_detections > 0 && kept_.size() > static_cast<size_t>(params_.max_detections)) kept_.resize(params_.max_detections);
+    *detections = kept_;
+    stats_.detections.fetch_add(kept_.size());
+    return true;
+}
 bool DecodeNMS::process_dfl_dist(const RknnModelInfo& info,
                                  const void* const* out_bufs,
                                  std::vector<DetectionBox>* detections,

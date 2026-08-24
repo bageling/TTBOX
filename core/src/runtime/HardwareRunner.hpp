@@ -9,6 +9,8 @@
 #include "pipeline/AimTargetMailbox.hpp"
 #include "aim/AimThread.hpp"
 #include "output/IHidOutput.hpp"
+#include "input/PhysicalMouseReader.hpp"
+#include "model/ModelAdapter.hpp"
 namespace ttbox::core {
 class HardwareRunner {
 public:
@@ -25,6 +27,10 @@ public:
         bool running = false;
         uint64_t capture_frames = 0;
         uint64_t worker_processed = 0;
+        uint64_t worker_rga_ok = 0;
+        uint64_t worker_inference_ok = 0;
+        uint64_t worker_decode_ok = 0;
+        uint64_t worker_published = 0;
         uint64_t worker_errors = 0;
         uint64_t worker_skipped = 0;
         uint64_t aim_consumed = 0;
@@ -41,5 +47,7 @@ private:
     std::unique_ptr<aim::AimTargetMailbox> mailbox_;
     aim::AimThread aim_thread_;
     std::atomic<bool> running_{false};
+    input::PhysicalMouseReader mouse_reader_;
+    std::unique_ptr<ModelAdapter> adapter_;
 };
 }

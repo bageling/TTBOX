@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "model_name": "sjz_xcsh",
+  "model_file": "sjz-XCSH.rknn",
+  "status": "board_verified",
+  "verified_platform": "RK3588",
+  "input": {
+    "width": 256,
+    "height": 256,
+    "channels": 3,
+    "color_order": "BGR",
+    "runtime_type": 2,
+    "runtime_format": 1
+  },
+  "outputs": {
+    "count": 6,
+    "layout": "three_scales_reg_cls",
+    "class_count": 7,
+    "reg_channels": 64,
+    "dfl_bins": 16,
+    "scales": [
+      {
+        "reg_output": 0,
+        "cls_output": 1,
+        "grid": [
+          32,
+          32
+        ],
+        "stride": 8
+      },
+      {
+        "reg_output": 2,
+        "cls_output": 3,
+        "grid": [
+          16,
+          16
+        ],
+        "stride": 16
+      },
+      {
+        "reg_output": 4,
+        "cls_output": 5,
+        "grid": [
+          8,
+          8
+        ],
+        "stride": 32
+      }
+    ]
+  },
+  "decoder": {
+    "type": "dfl_pair_dist",
+    "quantized_outputs": true,
+    "classwise_nms": true,
+    "coordinate_format": "ltrb"
+  },
+  "board_verification": {
+    "device": "/dev/video0",
+    "capture_format": "2560x1440 BGR3 144Hz",
+    "workers_1_errors": 0,
+    "workers_2_errors": 0,
+    "workers_3_errors": 0,
+    "hid_output": "NullHidOutput"
+  },
+  "future": {
+    "user_selectable_decoder": true,
+    "onnx_source": "pending",
+    "golden_replay": "pending"
+  }
+}
