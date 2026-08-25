@@ -12,7 +12,7 @@ _ALLOWED={
  RuntimeState.RUNNING:{RuntimeState.STOPPING,RuntimeState.FAILED},
  RuntimeState.STOPPING:{RuntimeState.STOPPED,RuntimeState.FAILED},
  RuntimeState.FAILED:{RuntimeState.RECOVERING,RuntimeState.STOPPED},
- RuntimeState.RECOVERING:{RuntimeState.READY,RuntimeState.FAILED},
+ RuntimeState.RECOVERING:{RuntimeState.STARTING,RuntimeState.FAILED},
 }
 
 def transition(current: RuntimeState, target: RuntimeState) -> RuntimeState:
