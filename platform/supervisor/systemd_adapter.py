@@ -44,3 +44,18 @@ class MockServiceAdapter(ServiceAdapter):
     def start(self,n): self.calls.append(('start',n)); self.states[n]=True; return self.status(n)
     def stop(self,n): self.calls.append(('stop',n)); self.states[n]=False; return self.status(n)
     def restart(self,n): self.calls.append(('restart',n)); self.states[n]=True; return self.status(n)
+
+
+class SystemdProcessAdapter:
+    """将既有 systemd Core unit 适配为 RuntimeController 进程边界。"""
+    def __init__(self, services: SystemdServiceAdapter, unit: str): self.services=services; self.unit=unit; self._started_at=None
+    def start(self):
+        import time
+        status=self.services.start(self.unit)
+        if not status.active: raise RuntimeError(status.error or f"failed to start {self.unit}")
+        self._started_at=time.time()
+        from ..runtime.process_adapter import ProcessInfo
+        return ProcessInfo(status.main_pid,self._started_at)
+    def stop(self): self.services.stop(self.unit); self._started_at=None
+    def is_running(self): return self.services.status(self.unit).active
+    def health(self): return self.is_running()

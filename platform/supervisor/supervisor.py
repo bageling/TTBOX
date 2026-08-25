@@ -15,24 +15,22 @@ class Supervisor:
         self.runtime=runtime; self.services=services; self.health=health; self.core_service=core_service; self.auxiliary=tuple(auxiliary); self._recovered=False
     def start(self):
         for name in self.auxiliary: self.services.start(name)
-        self.services.start(self.core_service)
         snap=self.runtime.start()
         return self.status()
     def stop(self):
-        self.runtime.stop(); self.services.stop(self.core_service)
+        self.runtime.stop()
         for name in reversed(self.auxiliary): self.services.stop(name)
         return self.status()
     def restart(self):
         self.runtime.stop()
         for name in reversed(self.auxiliary): self.services.stop(name)
-        self.services.restart(self.core_service)
-        for name in self.auxiliary: self.services.start(name)
         self.runtime.start()
+        for name in self.auxiliary: self.services.start(name)
         return self.status()
     def recover(self):
         self._recovered=False
         if self.runtime.state.value not in ('FAILED','RUNNING'): return self.status()
-        self.services.restart(self.core_service); self.runtime.stop(); self.runtime.start(); self._recovered=True
+        self.runtime.stop(); self.runtime.start(); self._recovered=True
         return self.status()
     def status(self):
         service_states={n:self.services.status(n) for n in (self.core_service,*self.auxiliary)}
