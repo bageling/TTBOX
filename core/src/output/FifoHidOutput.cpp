@@ -21,7 +21,7 @@ bool FifoHidOutput::send_control() {
     return false;
 #else
     // 旧 bridge 协议：0x02 + flags + hotkey；bit0=AI enabled，默认右键 0x02。
-    const unsigned char frame[6] = {0x02, 0x01, 0x01, 0x00, 0x00, 0x00};
+    const unsigned char frame[6] = {0x02, 0x01, 0x03, 0x00, 0x00, 0x00};
     const ssize_t n = ::write(fd_, frame, sizeof(frame));
     if (n == static_cast<ssize_t>(sizeof(frame))) { control_sent_ = true; return true; }
     if (errno == EPIPE || errno == ENXIO) close();

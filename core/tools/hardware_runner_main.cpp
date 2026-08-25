@@ -24,7 +24,7 @@ int main(int argc,char** argv){
     ttbox::core::RuntimeProfile profile;
     profile.model_id = model;
     profile.mouse.enabled = false;
-    profile.mouse.aim_hotkey = 0x01;  // 与板端 bridge 配置一致：默认鼠标左键
+    profile.mouse.aim_hotkey = 0x03;  // 与板端 bridge 配置一致：默认鼠标左键
     profile.mouse.aim_hotkey2 = 0x00;
     profile.mouse.aim_hotkey_mode = 0;
     // Trace 阶段使用温和增益，避免大像素误差一开始就长期撞 ±127。
