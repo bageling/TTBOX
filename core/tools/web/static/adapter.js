@@ -316,73 +316,25 @@ document.querySelectorAll('input[type="range"]').forEach(r=>{
   });
 });
 
-/* ===== 启动按钮 → 推理服务（显示状态 + 点击切换） ===== */
-function updateStartButton(inferOn){
-  const startBtn=$('#startButton');
-  if(!startBtn)return;
-  if(inferOn){
-    startBtn.classList.add('running');
-    const s=startBtn.querySelector('strong'); if(s)s.textContent='停止';
-  } else {
-    startBtn.classList.remove('running');
-    const s=startBtn.querySelector('strong'); if(s)s.textContent='启动';
-  }
+/* ===== Platform V1 API Client + Dashboard ===== */
+const apiClient={
+ async request(path,opts={}){try{const r=await fetch(path,opts);let data=null;try{data=await r.json();}catch(e){}return {ok:r.ok,status:r.status,data};}catch(e){return {ok:false,status:0,data:null};}},
+ getStatus(){return this.request('/api/v1/status')}, getHealth(){return this.request('/api/v1/health')}, getRuntime(){return this.request('/api/v1/runtime')}, getInference(){return this.request('/api/v1/inference')}, getModel(){return this.request('/api/v1/model')},
+ startRuntime(){return this.request('/api/v1/runtime/start',{method:'POST'})}, stopRuntime(){return this.request('/api/v1/runtime/stop',{method:'POST'})}, restartRuntime(){return this.request('/api/v1/runtime/restart',{method:'POST'})}
+};
+window.ttboxApi=apiClient;
+function fmt(v,s=''){return v==null?'UNAVAILABLE':String(v)+s;}
+function setDash(id,v){const e=document.querySelector(id);if(e)e.textContent=v;}
+function renderPlatform(data){
+ const st=data&&data.status, h=data&&data.health; const inf=data&&data.inference&&data.inference.metrics||{}; const mdl=data&&data.model&&data.model.metrics||{}; const run=data&&data.runtime&&data.runtime.metrics||{};
+ const offline=!data; setDash('#statusBadge',offline?'OFFLINE':(h&&h.status)||'UNAVAILABLE'); const sb=document.querySelector('#statusBadge'); if(sb)sb.className='status-badge '+(offline?'idle':((h&&h.status)==='HEALTHY'?'ok':'warn'));
+ setDash('#mobileLatency',fmt(inf.e2e_latency_us!=null?(inf.e2e_latency_us/1000).toFixed(1):null,' ms')); setDash('#mobileCaptureFps',fmt(inf.capture_fps,' FPS')); setDash('#mobileFps',fmt(inf.inference_fps,' FPS'));
+ const rs=document.querySelector('#runtimeSummary'); if(rs){rs.innerHTML=[['Runtime',fmt(run.state)],['PID',fmt(run.pid)],['Restart',fmt(run.restart_count)],['Inference',fmt(inf.inference_fps,' FPS')],['Capture',fmt(inf.capture_fps,' FPS')],['E2E',fmt(inf.e2e_latency_us!=null?(inf.e2e_latency_us/1000).toFixed(1):null,' ms')],['RKNN',fmt(inf.rknn_latency_us!=null?(inf.rknn_latency_us/1000).toFixed(1):null,' ms')],['RGA',fmt(inf.rga_latency_us!=null?(inf.rga_latency_us/1000).toFixed(1):null,' ms')],['Decode',fmt(inf.decode_latency_us!=null?(inf.decode_latency_us/1000).toFixed(1):null,' ms')],['NPU',fmt(inf.npu_core0)+' / '+fmt(inf.npu_core1)+' / '+fmt(inf.npu_core2)],['Model',fmt(mdl.path)],['Errors',fmt(inf.errors)]].map(x=>'<div class="runtime-stat"><span>'+x[0]+'</span><strong>'+x[1]+'</strong></div>').join('');}
 }
-const startBtn=$('#startButton');
-if(startBtn)startBtn.addEventListener('click',async()=>{
-  if(!hasBackend){toast('本地预览：启动推理将调用板端 /api/inference');return;}
-  const running=startBtn.classList.contains('running');
-  const r=await api('/api/inference',{method:'POST',body:JSON.stringify({action:running?'stop':'start'})});
-  toast(r.ok?(running?'推理已停止':'推理已启动'):'操作失败');
-  setTimeout(refreshState,1000);
-});
-
-/* ===== 状态轮询（板端） ===== */
-let lastProfile={};
-async function refreshState(){
-  const r=await api('/api/state');
-  if(!r.ok)return;
-  const s=r.data||{}, m=s.metrics||{}, hw=s.hwmon||{};
-  lastProfile=s.profile||{};
-  const set=(id,v)=>{const e=$(id);if(e)e.textContent=v;};
-  set('#mobileLatency', m.e2e_us!=null?(m.e2e_us/1000).toFixed(1)+' ms':'-- ms');
-  set('#mobileCaptureFps', m.capture_fps!=null?m.capture_fps.toFixed(1)+' 帧/秒':'-- 帧/秒');
-  set('#mobileFps', m.pipeline_fps!=null?m.pipeline_fps.toFixed(1)+' 帧/秒':'-- 帧/秒');
-  set('#mobileHailoTemperature', hw.soc_temp_c!=null?hw.soc_temp_c+'°C':'--');
-  set('#mobileVideoStatus', (m.frame_dets!=null?m.frame_dets:0)+' 检出');
-  // YU 风格运行数据面板（真实指标）
-  const rs=$('#runtimeSummary');
-  if(rs){
-    const inferOn=!!(s.services&&s.services.inference);
-    updateStartButton(inferOn);
-    const pre=(m.decode_us!=null||m.rga_us!=null)
-      ?('decode '+(m.decode_us!=null?(m.decode_us/1000).toFixed(1):'-')+'ms · RGA '+(m.rga_us!=null?(m.rga_us/1000).toFixed(1):'-')+'ms')
-      :'-';
-    const queue=[];
-    if(m.poll_timeouts!=null)queue.push('超时 '+m.poll_timeouts);
-    if(m.dropped!=null)queue.push('丢帧 '+m.dropped);
-    rs.innerHTML=[
-      ['当前模型',(s.profile&&s.profile.model_id)||'—'],
-      ['推理状态',inferOn?'运行中':'已停止'],
-      ['采集排队',queue.length?queue.join(' · '):'正常'],
-      ['预处理路径',pre],
-      ['最后错误',(m.errors!=null&&m.errors>0)?('errors='+m.errors):'无'],
-    ].map(x=>'<div class="runtime-stat"><span>'+x[0]+'</span><strong>'+x[1]+'</strong></div>').join('');
-  }
-  const sb=$('#statusBadge');
-  if(sb){ sb.textContent='运行正常'; sb.className='status-badge ok'; }
-  // 全局热键禁用真实状态（C 桥 stats.json guard 字段，toggle 切换）
-  const gd=$('#hotkeyGuardRuntimeStatus');
-  if(gd){ gd.textContent=(s.mouse&&s.mouse.guard)?'已禁用（所有热键已暂停）':'未禁用'; }
-  // 标定前置条件：当前是否识别到目标（无目标时禁止开始标定）
-  _calTargetFound=!!(s.mouse&&s.mouse.target_found);
-  const ai=$('#applyIndicator');
-  if(ai){ ai.textContent='已同步'; ai.className='sync-badge ready'; }
-  if(s.profile) backfillProfile(s.profile);
-  updateAimRangeOverlay();
-  renderAutoTrigger();
-  backfillSystem(s);
-}
+async function refreshPlatform(){const [s,h]=await Promise.all([apiClient.getStatus(),apiClient.getHealth()]); if(!s.ok||!h.ok){renderPlatform(null);return;} const d=s.data||{}; d.health=h.data; renderPlatform(d);}
+async function runtimeAction(action){const fn={start:apiClient.startRuntime,stop:apiClient.stopRuntime,restart:apiClient.restartRuntime}[action];if(!fn)return;const r=await fn.call(apiClient);toast(r.ok?'操作完成':'操作失败');setTimeout(refreshPlatform,500);}
+const startBtn=document.querySelector('#startButton'); if(startBtn)startBtn.addEventListener('click',()=>runtimeAction('restart'));
+refreshPlatform(); setInterval(refreshPlatform,1500);
 
 /* ===== 瞄准范围框 + 参考点（对齐 YU：crop×FOV半径 方框 + 瞄准点绿点） ===== */
 function getPreviewImageLayout(stage, cropSize){
