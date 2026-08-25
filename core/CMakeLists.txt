@@ -42,6 +42,7 @@ set(CORE_SOURCES
   src/runtime/CoreRuntime.cpp
   src/runtime/HardwareRunner.cpp
   src/output/FifoHidOutput.cpp
+  src/output/AiboxHidOutput.cpp
   src/common/Logger.cpp
   src/common/Json.cpp
   src/config/ConfigManager.cpp

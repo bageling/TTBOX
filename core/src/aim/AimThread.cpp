@@ -9,6 +9,8 @@ bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOut
     if (!mailbox || !output || running_.exchange(true)) return false;
     mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000; runtime_config_ = runtime_config; physical_buttons_ = physical_buttons;
     { std::lock_guard<std::mutex> lk(status_mutex_); status_ = {}; status_.running = true; }
+    aibox_pid_x_.init(25.0, 25.0, 3.0, 0.03, 9900.0);
+    aibox_pid_y_.init(25.0, 25.0, 0.0, 0.03, 9900.0);
     thread_ = std::thread(&AimThread::loop, this);
     return true;
 }
@@ -63,8 +65,9 @@ void AimThread::loop() {
             float trace_control_x = 0.0f, trace_control_y = 0.0f;
             float trace_smith_dx = 0.0f, trace_smith_dy = 0.0f;
             if (selected.valid && task.frame_width > 0 && task.frame_height > 0) {
+                // 目标框上部瞄准点：避免框中心落到躯干/裆部，先取框高 25% 处。
                 const float tx = (selected.box.x1 + selected.box.x2) * 0.5f;
-                const float ty = (selected.box.y1 + selected.box.y2) * 0.5f;
+                const float ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.25f;
                 const float dt_target = last_timestamp_us_ > 0 && task.timestamp_us > last_timestamp_us_
                     ? static_cast<float>(task.timestamp_us - last_timestamp_us_) / 1000000.0f : 0.004f;
                 if (last_target_id_ != -1 && selected.target_id != last_target_id_) {
@@ -103,9 +106,12 @@ void AimThread::loop() {
                 }
                 trace_smith_dx = pending.dx; trace_smith_dy = pending.dy;
                 trace_control_x = control_x; trace_control_y = control_y;
-                const auto motion = controller_.update(control_x, control_y, kp_x, kp_y, ki_x, ki_y, kd_x, kd_y, dt);
+                // AIBOX P_PID：X predict=3.0，Y predict=0；不再走简化 PID。
+                const auto motion = output::OutputAction{};
+                const float aibox_x = static_cast<float>(aibox_pid_x_.update(control_x));
+                const float aibox_y = static_cast<float>(aibox_pid_y_.update(control_y));
                 // 保留小数余量，避免小幅连续误差被整数 HID count 截断。
-                remainder_x_ += motion.out_x; remainder_y_ += motion.out_y;
+                remainder_x_ += aibox_x; remainder_y_ += aibox_y;
                 move_x = static_cast<int16_t>(remainder_x_);
                 move_y = static_cast<int16_t>(remainder_y_);
                 remainder_x_ -= static_cast<float>(move_x); remainder_y_ -= static_cast<float>(move_y);
@@ -117,7 +123,7 @@ void AimThread::loop() {
             status_.has_target = selected.valid;
             if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
             status_.predicted_x = selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f;
-            status_.predicted_y = selected.valid ? (selected.box.y1 + selected.box.y2) * 0.5f : 0.0f;
+            status_.predicted_y = selected.valid ? selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.25f : 0.0f;
             status_.error_x = ex;
             status_.error_y = ey;
             status_.control_x = trace_control_x;

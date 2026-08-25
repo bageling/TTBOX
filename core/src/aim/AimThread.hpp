@@ -14,6 +14,7 @@
 #include "model/RuntimeProfile.hpp"
 #include "aim/SmithPredictor.hpp"
 #include "aim/AlphaBetaGammaFilter.hpp"
+#include "aim/AiboxPpidController.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -58,6 +59,8 @@ private:
     std::atomic<uint16_t>* physical_buttons_ = nullptr;
     TargetSelector selector_;
     MotionController controller_;
+    AiboxPpidController aibox_pid_x_;
+    AiboxPpidController aibox_pid_y_;
     AimStateMachine state_machine_;
     SmithPredictor smith_;
     AlphaBetaGammaFilter abg_;
