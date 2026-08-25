@@ -9,3 +9,11 @@ class SystemdAdapterTests(unittest.TestCase):
   s=SystemdServiceAdapter(runner=run).status("ttbox-core")
   self.assertTrue(s.active); self.assertEqual(s.main_pid,42); self.assertEqual(calls[0][0],['systemctl','show','ttbox-core','--no-page','--property=LoadState,ActiveState,SubState,MainPID,Result']); self.assertNotIn('shell',calls[0][1])
 if __name__=='__main__': unittest.main()
+
+
+class PrefixTests(unittest.TestCase):
+ def test_sudo_prefix_uses_argv(self):
+  from types import SimpleNamespace
+  calls=[]
+  def run(argv,**kw): calls.append(argv); return SimpleNamespace(returncode=0,stdout="ActiveState=active\nSubState=running\nMainPID=1\nLoadState=loaded\n",stderr="")
+  SystemdServiceAdapter(['sudo','-n','systemctl'],run).status('x'); self.assertEqual(calls[0][0:3],['sudo','-n','systemctl'])

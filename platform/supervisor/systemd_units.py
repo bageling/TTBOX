@@ -21,6 +21,8 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/opt/ttbox/core /opt/ttbox/models /opt/ttbox/config /opt/ttbox/data /opt/ttbox/logs /run/ttbox
+RuntimeDirectory=ttbox
+RuntimeDirectoryMode=0755
 
 [Install]
 WantedBy=multi-user.target
@@ -35,7 +37,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/ttbox/supervisor
-ExecStart=/opt/ttbox/supervisor/current/ttbox-supervisor
+ExecStart=/usr/bin/python3 /opt/ttbox/supervisor/runner.py
 Restart=always
 RestartSec=2
 StandardOutput=journal

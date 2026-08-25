@@ -29,6 +29,8 @@ class RuntimeControllerTests(unittest.TestCase):
    def health(self): return False
   a=Unhealthy(); c=RuntimeController(a); snap=c.start()
   self.assertEqual(snap.state,"FAILED"); self.assertFalse(a.running); self.assertIsNone(snap.pid)
+ def test_external_failure_becomes_failed(self):
+  self.c.start(); self.c.process.running=False; snap=self.c.mark_failed("core crashed"); self.assertEqual(snap.state,"FAILED"); self.assertEqual(snap.last_error,"core crashed")
  def test_health_exception_becomes_failed(self):
   class Broken(MockProcessAdapter):
    def health(self): raise RuntimeError("probe failed")

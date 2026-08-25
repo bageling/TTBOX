@@ -10,6 +10,6 @@ class PlatformHealth:
   checks={}
   if self.runtime: checks['runtime']=self.runtime.health()
   checks['storage']={'ok':os.path.isdir(self.model_root) if self.model_root else True}
-  checks['python']= {'ok':shutil.which('python') is not None}
+  checks['python']= {'ok':shutil.which('python') is not None or shutil.which('python3') is not None}
   ok=all(bool(v.get('ok')) for v in checks.values())
   return HealthReport(ok,checks,time.time())

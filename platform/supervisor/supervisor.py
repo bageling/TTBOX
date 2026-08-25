@@ -34,4 +34,7 @@ class Supervisor:
         return self.status()
     def status(self):
         service_states={n:self.services.status(n) for n in (self.core_service,*self.auxiliary)}
+        core=service_states[self.core_service]
+        if self.runtime.state.value == 'RUNNING' and not core.active:
+            self.runtime.mark_failed(core.error or f'{self.core_service} is not active')
         return SupervisorStatus(self.runtime.status(),service_states,self.health.check(),self._recovered,time.time())
