@@ -1172,98 +1172,36 @@ function filteredModels(models){
   });
 }
 function modelCardHtml(m){
-  const status=m.active?'当前使用':(m.status==='staging'?(m.backend==='onnx'?'待转换':'暂存中'):'可切换');
-  const backendLabel=m.backend==='remote'?'远端':(m.backend==='hef'?'HEF':(m.backend==='onnx'?'ONNX':'RKNN'));
-  const pending=m.backend!=='rknn'||m.status==='staging'&&m.backend!=='rknn';
-  return '<span class="model-card-top">'+
-    '<span class="model-card-title">'+escHtml(m.file_name)+'</span>'+
-    '<span class="model-card-status">'+status+'</span></span>'+
-    '<span class="model-card-meta">'+
-      '<span>'+backendLabel+'</span><span>'+fmtSize(m.size)+'</span>'+
-      '<span>'+(m.class_count?m.class_count+' 类':(m.class_names&&m.class_names.length?m.class_names.length+' 类':'类别未标注'))+'</span>'+
-      '<span>'+escHtml(m.game_profile||'通用')+'</span>'+
-    '</span>'+
+  const active=!!m.active, validation=m.validation||'UNAVAILABLE';
+  return '<span class="model-card-top"><span class="model-card-title">'+escHtml(m.id||m.file_name||'model')+'</span><span class="model-card-status">'+(active?'ACTIVE':(validation==='VALID'?'INSTALLED':'UNAVAILABLE'))+'</span></span>'+
+    '<span class="model-card-meta"><span>Version '+escHtml(m.version||m.id||'--')+'</span><span>'+fmtSize(m.size)+'</span><span>SHA256 '+escHtml((m.sha256||'UNAVAILABLE').slice(0,12))+'…</span><span>'+escHtml(validation)+'</span></span>'+
     '<div class="model-card-actions">'+
-      '<button class="ghost-button" type="button" data-model-select'+(pending||m.active?' disabled':'')+'>使用</button>'+
-      '<button class="ghost-button" type="button" data-model-classes>类别</button>'+
-      '<button class="ghost-button" type="button" data-model-delete'+(m.active?' disabled':'')+'>删除</button>'+
+      (active?'<button class="ghost-button" type="button" data-model-deactivate>停用</button><button class="ghost-button" type="button" data-model-rollback>回滚</button>':'<button class="ghost-button" type="button" data-model-validate>验证</button><button class="ghost-button" type="button" data-model-install>安装</button><button class="ghost-button" type="button" data-model-activate>激活</button><button class="ghost-button" type="button" data-model-delete>删除</button>')+
     '</div>';
 }
-function renderModelList(models){
-  const list=$('#modelCardList'), empty=$('#modelEmptyState');
-  if(!list)return;
-  list.innerHTML='';
-  const filtered=filteredModels(models);
-  if(empty)empty.hidden=filtered.length!==0;
-  filtered.forEach(m=>{
-    const card=document.createElement('div');
-    card.className='model-card'+(m.active?' is-active':'');
-    card.innerHTML=modelCardHtml(m);
-    card.querySelector('[data-model-select]').addEventListener('click',async()=>{
-      if(m.backend!=='rknn'){toast('该模型后端待接入（'+(m.backend==='onnx'?'ONNX 需转换为 RKNN':'远端/Hailo 待接入')+'）');return;}
-      const r=await api('/api/models/select',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model_id:m.id})});
-      toast(r.ok?'已切换模型':'切换失败：'+((r.data&&r.data.detail)||''));
-      setTimeout(()=>loadModels(),1200);
-    });
-    card.querySelector('[data-model-classes]').addEventListener('click',()=>{toast('类别编辑待接入');});
-    card.querySelector('[data-model-delete]').addEventListener('click',async()=>{
-      const r=await api('/api/models/delete',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({model_id:m.id})});
-      toast(r.ok?'模型已删除':'删除失败：'+((r.data&&r.data.detail)||''));
-      setTimeout(()=>loadModels(),800);
-    });
-    list.appendChild(card);
-  });
+function modelError(r){if(r.status===0)return 'OFFLINE'; const d=r.data||{}; return d.error||d.detail||('HTTP '+r.status);}
+async function modelAction(id,action){
+  if((action==='rollback'||action==='deactivate'||action==='delete')&&!window.confirm(action==='delete'?'确认删除模型 '+id+'？':'确认执行 '+action+'？'))return;
+  const method=action==='delete'?'DELETE':'POST'; const r=await apiClient.request('/api/v1/models/'+encodeURIComponent(id)+(action==='delete'?'':'/'+action),{method});
+  toast(r.ok?'操作完成：'+action:'操作失败：'+modelError(r)); await loadModels(); await refreshPlatform();
 }
-let _modelsRetry=0;
-var _modelClassNames=[];  // 当前模型类别名缓存（aim 方案类别过滤 chip 用）
-var _calTargetFound=false;  // 标定前置：是否识别到目标（refreshState 更新）
+function renderModelList(models){
+  const list=$('#modelCardList'),empty=$('#modelEmptyState'); if(!list)return; list.innerHTML='';
+  if(empty)empty.hidden=models.length!==0;
+  models.forEach(m=>{const card=document.createElement('div');card.className='model-card'+(m.active?' is-active':'');card.innerHTML=modelCardHtml(m);
+    ['validate','install','activate','deactivate','rollback','delete'].forEach(a=>{const b=card.querySelector('[data-model-'+a+']');if(b)b.addEventListener('click',()=>modelAction(m.id,a));}); list.appendChild(card);});
+}
 async function loadModels(){
-  const r=await api('/api/models');
-  if(!r.ok){
-    if(_modelsRetry<5){_modelsRetry++;setTimeout(loadModels,2000);}
-    return;
-  }
-  _modelsRetry=0;
-  const models=r.data.models||[];
-  const am=models.find(m=>m.active);
-  const nameSrc=am&&am.class_names&&am.class_names.length?am.class_names:
-                 ((models.find(m=>m.class_names&&m.class_names.length)||{}).class_names||[]);
-  _modelClassNames=Array.isArray(nameSrc)?nameSrc:[];
-  const pill=$('#modelLibrarySummary');
-  if(pill)pill.textContent=models.length+' 个可用';
-  const cur=$('#modelCurrentName'); if(cur)cur.textContent=am?(am.file_name||am.name):'尚未选择模型';
-  const curMeta=$('#modelCurrentMeta');
-  if(curMeta)curMeta.textContent=am?(am.backend==='remote'?'远端':am.backend==='hef'?'HEF':'RKNN')+' · '+fmtSize(am.size)+(am.class_count?' · '+am.class_count+' 类':''):'等待模型信息';
-  renderModelFilters(models);
+  const r=await apiClient.request('/api/v1/models'); if(!r.ok){toast('模型列表：'+modelError(r));return;}
+  const models=(r.data&&r.data.models)||[]; const active=models.find(m=>m.active); const pill=$('#modelLibrarySummary'); if(pill)pill.textContent=models.length+' 个可用';
+  const cur=$('#modelCurrentName');if(cur)cur.textContent=active?active.id:'尚未选择模型';
+  const meta=$('#modelCurrentMeta');if(meta)meta.textContent=active?('Version '+(active.version||active.id)+' · '+fmtSize(active.size)+' · '+(active.validation||'UNAVAILABLE')):'等待模型信息';
   renderModelList(models);
 }
-
-/* 模型导入对话框 */
-const openImportBtn=$('#openModelImportButton');
-if(openImportBtn)openImportBtn.addEventListener('click',()=>setDialog('#modelImportDialog',true));
-[['#closeModelImportButton','#modelImportDialog'],['#cancelModelImportButton','#modelImportDialog']].forEach(([btn,d])=>{
-  const b=$(btn); if(b)b.addEventListener('click',()=>setDialog(d,false));
-});
-document.querySelectorAll('#modelImportForm input[name="model_type"]').forEach(r=>r.addEventListener('change',()=>{
-  const t=(document.querySelector('#modelImportForm input[name="model_type"]:checked')||{}).value||'rknn';
-  const hint=$('#modelImportHint');
-  if(hint){
-    if(t==='onnx'){hint.hidden=false;hint.textContent='上传 ONNX 后会自动转换为 RKNN（板端转换待接入，先存暂存区）。';}
-    else if(t==='remote_onnx'){hint.hidden=false;hint.textContent='远端 ONNX 需 Windows 端推理服务（远端推理接入待后续实现）。';}
-    else if(t==='hef'){hint.hidden=false;hint.textContent='HEF 需 Hailo-8 硬件（当前未检测到，待接入）。';}
-    else {hint.hidden=true;hint.textContent='';}
-  }
-}));
+const openImportBtn=$('#openModelImportButton');if(openImportBtn)openImportBtn.addEventListener('click',()=>setDialog('#modelImportDialog',true));
+[['#closeModelImportButton','#modelImportDialog'],['#cancelModelImportButton','#modelImportDialog']].forEach(([btn,d])=>{const b=$(btn);if(b)b.addEventListener('click',()=>setDialog(d,false));});
 const importForm=$('#modelImportForm');
-if(importForm)importForm.addEventListener('submit',async(e)=>{
-  e.preventDefault();
-  const btn=$('#submitModelImportButton');
-  if(btn){btn.disabled=true;btn.textContent='上传中...';}
-  const r=await api('/api/models/import',{method:'POST',body:new FormData(importForm)});
-  if(btn){btn.disabled=false;btn.textContent='导入';}
-  toast(r.ok?(r.data&&r.data.detail||'导入成功'):'导入失败：'+((r.data&&r.data.detail)||'未知错误'));
-  if(r.ok){setDialog('#modelImportDialog',false);importForm.reset();setTimeout(()=>loadModels(),800);}
-});
+if(importForm)importForm.addEventListener('submit',async e=>{e.preventDefault();const file=$('#modelImportFile')&&$('#modelImportFile').files[0];if(!file||!file.name.toLowerCase().endsWith('.rknn')){toast('请选择 .rknn 文件');return;}const btn=$('#submitModelImportButton');if(btn){btn.disabled=true;btn.textContent='上传中…';}const fd=new FormData();fd.append('file',file);const r=await apiClient.request('/api/v1/models/upload',{method:'POST',body:fd});if(btn){btn.disabled=false;btn.textContent='导入';}if(!r.ok){toast('上传失败：'+modelError(r));return;}const id=r.data.id;toast('Uploaded: '+id);setDialog('#modelImportDialog',false);await loadModels();await modelAction(id,'validate');await modelAction(id,'install');});
 
 /* 连接远端推理对话框（设备端先行，推理接入待后续） */
 const openRemoteBtn=$('#openRemoteConnectButton');
