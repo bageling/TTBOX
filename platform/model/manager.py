@@ -1,8 +1,8 @@
-"""AIBOX 能力对齐：模型 staging/validate/install/activate/rollback 控制面。"""
+"""AIBOX 对齐的模型生命周期控制面；不解析 RKNN tensor，也不改 Core。"""
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-import json, shutil, tempfile
+import hashlib, json, os, shutil
 
 @dataclass(frozen=True)
 class ModelInfo:
@@ -10,43 +10,76 @@ class ModelInfo:
 
 class ModelManager:
     def __init__(self, root: str|Path):
-        self.root=Path(root).resolve(); self.staging=self.root/'staging'; self.versions=self.root/'versions'; self.current=self.root/'current'
+        self.root=Path(root).resolve(); self.staging=self.root/'staging'; self.versions=self.root/'versions'; self.current=self.root/'current'; self.previous=self.root/'previous'
         for p in (self.staging,self.versions): p.mkdir(parents=True,exist_ok=True)
     def _id(self, model_id):
         if not model_id or Path(model_id).name != model_id or model_id in ('.','..') or any(c in model_id for c in '/\\'):
             raise ValueError('invalid model id')
         return model_id
+    def _inside_versions(self, path: Path) -> Path:
+        resolved=path.resolve()
+        try: resolved.relative_to(self.versions.resolve())
+        except ValueError as exc: raise ValueError('model path escapes versions directory') from exc
+        return resolved
+    def _version_dir(self, model_id): return self._inside_versions(self.versions/self._id(model_id))
+    @staticmethod
+    def _digest(path):
+        h=hashlib.sha256();
+        with path.open('rb') as f:
+            for chunk in iter(lambda:f.read(1024*1024),b''): h.update(chunk)
+        return h.hexdigest()
     def upload(self, model_id: str, source: str|Path) -> ModelInfo:
         mid=self._id(model_id); src=Path(source).resolve()
         if not src.is_file(): raise FileNotFoundError(src)
-        dst=self.staging/mid; dst.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst/'model.rknn')
+        dst=self.staging/mid; dst.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(src,dst/'model.rknn'); marker=dst/'validation.json'
+        if marker.exists(): marker.unlink()
         return ModelInfo(mid,'staging',str(dst))
     def validate(self, model_id: str) -> ModelInfo:
         mid=self._id(model_id); d=self.staging/mid; f=d/'model.rknn'
         if not f.is_file() or f.stat().st_size==0: raise ValueError('staged model is missing or empty')
-        (d/'validation.json').write_text(json.dumps({'ok':True,'model_id':mid},ensure_ascii=False),encoding='utf-8')
+        marker={'ok':True,'model_id':mid,'size':f.stat().st_size,'sha256':self._digest(f)}
+        (d/'validation.json').write_text(json.dumps(marker,ensure_ascii=False),encoding='utf-8')
         return ModelInfo(mid,'validated',str(d))
     def install(self, model_id: str) -> ModelInfo:
-        mid=self._id(model_id); src=self.staging/mid; marker=src/'validation.json'
-        if not marker.is_file(): raise ValueError('model must be validated before install')
+        mid=self._id(model_id); src=self.staging/mid; marker=src/'validation.json'; f=src/'model.rknn'
+        if not marker.is_file() or not f.is_file(): raise ValueError('model must be validated before install')
+        meta=json.loads(marker.read_text(encoding='utf-8'))
+        if meta.get('model_id')!=mid or meta.get('size')!=f.stat().st_size or meta.get('sha256')!=self._digest(f): raise ValueError('staged model changed after validation')
         dst=self.versions/mid
-        if dst.exists(): shutil.rmtree(dst)
+        if dst.is_symlink() or (dst.exists() and not dst.is_dir()): dst.unlink()
+        elif dst.exists(): shutil.rmtree(dst)
         shutil.copytree(src,dst); return ModelInfo(mid,'installed',str(dst))
+    def _atomic_activate(self, target: Path):
+        temp=self.root/f'.current.tmp.{os.getpid()}'
+        if temp.exists() or temp.is_symlink(): temp.unlink()
+        temp.symlink_to(target,target_is_directory=True)
+        try:
+            os.replace(temp,self.current)
+        except PermissionError:
+            # Windows 对“替换已有目录符号链接”拒绝原子 replace；先移除链接再替换临时链接。
+            # Linux/RK3588 仍优先走上面的原子路径。
+            if self.current.is_symlink(): self.current.unlink()
+            os.replace(temp,self.current)
+        except Exception:
+            if temp.exists() or temp.is_symlink(): temp.unlink()
+            raise
     def activate(self, model_id: str) -> ModelInfo:
-        mid=self._id(model_id); src=self.versions/mid
+        mid=self._id(model_id); src=self._version_dir(mid)
         if not (src/'model.rknn').is_file(): raise ValueError('model is not installed')
-        previous=self.current.resolve() if self.current.is_symlink() else None
-        if self.current.exists() or self.current.is_symlink(): self.current.unlink() if self.current.is_symlink() else shutil.rmtree(self.current)
-        self.current.symlink_to(src,target_is_directory=True)
-        if previous: (self.root/'previous').write_text(str(previous),encoding='utf-8')
+        old_id=self.current.resolve().name if self.current.is_symlink() and self.current.exists() else None
+        self._atomic_activate(src)
+        if old_id and old_id != mid: self.previous.write_text(old_id,encoding='utf-8')
+        elif old_id is None and self.previous.exists(): self.previous.unlink()
         return ModelInfo(mid,'active',str(src))
     def rollback(self) -> ModelInfo:
         if not self.current.is_symlink(): raise ValueError('no active model')
-        previous_file=self.root/'previous'
-        if not previous_file.is_file(): raise ValueError('no previous model')
-        prev=Path(previous_file.read_text(encoding='utf-8')).resolve()
-        if not prev.is_dir(): raise ValueError('previous model is missing')
-        self.current.unlink(); self.current.symlink_to(prev,target_is_directory=True)
-        return ModelInfo(prev.name,'active',str(prev))
+        if not self.previous.is_file(): raise ValueError('no previous model')
+        prev_id=self._id(self.previous.read_text(encoding='utf-8').strip()); prev=self._version_dir(prev_id)
+        if not (prev/'model.rknn').is_file(): raise ValueError('previous model is missing')
+        current_id=self.current.resolve().name
+        self._atomic_activate(prev); self.previous.write_text(current_id,encoding='utf-8')
+        return ModelInfo(prev_id,'active',str(prev))
     def list(self) -> list[ModelInfo]:
-        return [ModelInfo(p.name,'active' if self.current.is_symlink() and self.current.resolve()==p.resolve() else 'installed',str(p)) for p in sorted(self.versions.iterdir()) if p.is_dir()]
+        active=self.current.resolve() if self.current.is_symlink() and self.current.exists() else None
+        return [ModelInfo(p.name,'active' if active and p.resolve()==active else 'installed',str(p)) for p in sorted(self.versions.iterdir()) if p.is_dir() and not p.is_symlink()]
