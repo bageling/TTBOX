@@ -1,3 +1,10 @@
-# Supervisor Boundary
+# Phase 2 Service / Supervisor / Health
 
-服务目录根据 AIBOX 的 `aibox.service`、`aiboxkm.service`、`web-aibox.service`、`cloud-file-manager.service` 能力抽取。当前只实现声明式服务规格和依赖模型；尚未调用 systemd，避免在 Windows 主机伪造设备运行结果。
+AIBOX unit facts are represented by `ServiceCatalog` and controlled through `SystemdServiceAdapter`:
+
+- Core: `Restart=always`, `RestartSec=5`, `User=aibox`, `/var/lib/aibox`, `/etc/aibox`.
+- HID: `ExecStartPre=modprobe libcomposite`, root/aiboxkm, vendor versions use `Restart=on-failure` or `no`.
+- Web: nginx dedicated unit, network-online dependency, preflight/setup, restart limit.
+- Control plane: root backend, network-online dependency, `Restart=always`, `RestartSec=1`, `/opt/autobl`.
+
+TTBOX `Supervisor` owns ordering and calls the existing `RuntimeController`; it does not implement Core. `HealthMonitor` aggregates Runtime and service status. Systemd calls are real when executed on Linux/RK3588; Windows tests use only `MockServiceAdapter` and are not device evidence.
