@@ -61,6 +61,7 @@ void AimThread::loop() {
             }
             event.now_ms = task.timestamp_us / 1000ULL;
             if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); smith_.reset(); abg_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
+            (void)kp_x; (void)kp_y; (void)ki_x; (void)ki_y; (void)kd_x; (void)kd_y;
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
             float trace_control_x = 0.0f, trace_control_y = 0.0f;
             float trace_smith_dx = 0.0f, trace_smith_dy = 0.0f;
@@ -90,8 +91,9 @@ void AimThread::loop() {
                                                profile->mouse.vfov, profile->mouse.move_speed_y);
                     }
                 }
-                float dt = last_timestamp_us_ > 0 && task.timestamp_us > last_timestamp_us_
+                const float dt = last_timestamp_us_ > 0 && task.timestamp_us > last_timestamp_us_
                     ? static_cast<float>(task.timestamp_us - last_timestamp_us_) / 1000000.0f : 0.004f;
+                (void)dt;
                 // Smith 的在途量单位是最终输出 count；只有 FOV 换算后的控制域与其一致时才扣除。
                 // 非 FOV 模式下 control 是像素误差，不能直接减 HID count，避免量纲混用导致振荡。
                 SmithPredictor::Summary pending{};
@@ -107,7 +109,6 @@ void AimThread::loop() {
                 trace_smith_dx = pending.dx; trace_smith_dy = pending.dy;
                 trace_control_x = control_x; trace_control_y = control_y;
                 // AIBOX P_PID：X predict=3.0，Y predict=0；不再走简化 PID。
-                const auto motion = output::OutputAction{};
                 const float aibox_x = static_cast<float>(aibox_pid_x_.update(control_x));
                 const float aibox_y = static_cast<float>(aibox_pid_y_.update(control_y));
                 // 保留小数余量，避免小幅连续误差被整数 HID count 截断。

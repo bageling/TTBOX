@@ -24,6 +24,9 @@ bool AiboxHidOutput::send(const OutputAction& a) {
 #if defined(_WIN32)
     (void)a; return false;
 #else
+    // 安全门：未显式启用时不写入真实鼠标 Gadget。
+    if (!enabled_) return false;
+    if (button_source_ && (button_source_->load(std::memory_order_acquire) & button_mask_) == 0) return false;
     if (!open_if_needed()) return false;
     // 当前 gadget 鼠标描述符要求 9 字节：ReportID=2 + buttons(16bit LE)
     // + X(int16 LE) + Y(int16 LE) + wheel + pan。

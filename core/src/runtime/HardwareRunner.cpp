@@ -1,5 +1,6 @@
 // HardwareRunner.cpp — 严格的下游先停、上游后停生命周期。
 #include "runtime/HardwareRunner.hpp"
+#include "output/AiboxHidOutput.hpp"
 namespace ttbox::core {
 bool HardwareRunner::initialize(const Params& p,std::string* error){
  if(!p.output){if(error)*error="HardwareRunner 输出后端为空";return false;}
@@ -23,6 +24,10 @@ bool HardwareRunner::start(std::string* error){
  if(!workers_->start(wp,error)){capture_->stop();capture_->close();running_=false;return false;}
  std::string mouse_error;
  if(!mouse_reader_.start("", &mouse_error)){ if(error)*error="物理鼠标读取器启动失败: "+mouse_error; workers_->stop(); capture_->stop(); capture_->close(); running_=false; return false; }
+ if (auto aibox = std::dynamic_pointer_cast<output::AiboxHidOutput>(params_.output)) {
+     // 最终输出门控必须读取同一个真实鼠标 event11 按钮源，避免 AimThread 与输出端状态分裂。
+     aibox->set_button_source(mouse_reader_.button_source(), 0x03);
+ }
  if(!aim_thread_.start(mailbox_.get(),params_.output,4000,params_.runtime_config, params_.simulated_buttons ? &simulated_buttons_ : mouse_reader_.button_source())){workers_->stop();capture_->stop();capture_->close();running_=false;return false;}
  return true;
 }

@@ -33,7 +33,8 @@ void FifoHidOutput::close() {
     if (fd_ >= 0 && control_sent_) {
         // 停止/析构前明确关闭 Bridge AI 门控，禁止残留状态继续注入。
         const unsigned char disable_frame[6] = {0x02, 0x00, 0x03, 0x00, 0x00, 0x00};
-        (void)::write(fd_, disable_frame, sizeof(disable_frame));
+        const ssize_t ignored = ::write(fd_, disable_frame, sizeof(disable_frame));
+        (void)ignored;
     }
     if (fd_ >= 0) { ::close(fd_); fd_ = -1; }
     control_sent_ = false;

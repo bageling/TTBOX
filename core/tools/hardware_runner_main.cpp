@@ -45,7 +45,12 @@ int main(int argc,char** argv){
     p.workers.pass_through=false; p.workers.out_w=0; p.workers.out_h=0; auto trace_output=std::make_shared<ttbox::core::output::TraceHidOutput>();
     auto fifo_output=std::make_shared<ttbox::core::output::FifoHidOutput>(fifo);
     auto aibox_output=std::make_shared<ttbox::core::output::AiboxHidOutput>("/dev/hidg1");
-    if (aibox_gadget) p.output=aibox_output;
+    if (aibox_gadget) {
+        aibox_output->set_enabled(true);
+        // AIBOX 真实输出必须由物理左/右键门控；Runner 使用右键或左键任一键。
+        // 这里由 HardwareRunner 的 PhysicalMouseReader 提供按钮源，输出端再做最终安全检查。
+        p.output=aibox_output;
+    }
     else if (fifo_mode) p.output=fifo_output;
     else if (trace) p.output=trace_output;
     else p.output=std::make_shared<ttbox::core::output::NullHidOutput>();
