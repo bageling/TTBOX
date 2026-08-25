@@ -67,7 +67,7 @@ void AimThread::loop() {
             if (selected.valid && task.frame_width > 0 && task.frame_height > 0) {
                 // 目标框上部瞄准点：避免框中心落到躯干/裆部，先取框高 25% 处。
                 const float tx = (selected.box.x1 + selected.box.x2) * 0.5f;
-                const float ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.25f;
+                const float ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
                 const float dt_target = last_timestamp_us_ > 0 && task.timestamp_us > last_timestamp_us_
                     ? static_cast<float>(task.timestamp_us - last_timestamp_us_) / 1000000.0f : 0.004f;
                 if (last_target_id_ != -1 && selected.target_id != last_target_id_) {
@@ -123,7 +123,7 @@ void AimThread::loop() {
             status_.has_target = selected.valid;
             if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
             status_.predicted_x = selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f;
-            status_.predicted_y = selected.valid ? selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.25f : 0.0f;
+            status_.predicted_y = selected.valid ? selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f : 0.0f;
             status_.error_x = ex;
             status_.error_y = ey;
             status_.control_x = trace_control_x;
