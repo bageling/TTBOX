@@ -35,6 +35,7 @@ from urllib.parse import urlparse
 
 TTBOX = Path("/opt/ttbox")
 MODELS_REG = TTBOX / "models" / "registry"
+PLATFORM_MODEL_DIR = TTBOX / "models" / "current"
 MODELS_INSTALLED = MODELS_REG / "installed"
 MODELS_STAGING = MODELS_REG / "staging"
 MODELS_MANIFESTS = MODELS_REG / "manifests"        # 模型元数据（类别名/游戏标签/描述）
@@ -55,6 +56,12 @@ CONVERT_DIR = TTBOX / "run" / "convert"
 MOUSE_STATS_FILE = Path("/run/ttbox-mouse-stats.json")  # A10：C 桥 AI 注入统计
 TARGET_STATE_FILE = Path("/run/ttbox-target.json")      # A10.3：C++ AimThread 高频目标状态
 MOUSE_HW_FILE = TTBOX / "config" / "hardware_mouse.json"   # USB 鼠标身份配置（合成模式自定义）
+# Platform V1 status paths：与真实 RK3588 inference service 的部署布局一致
+PLATFORM_MODEL = TTBOX / "models" / "current" / "model.rknn"
+PLATFORM_INFER_CONFIG = TTBOX / "config" / "current" / "infer.json"
+PLATFORM_CORE_SERVICE = "ttbox-core.service"
+PLATFORM_INFER_SERVICE = "ttbox-infer.service"
+PLATFORM_SUPERVISOR_SERVICE = "ttbox-supervisor.service"
 MOUSE_APPLY_SCRIPT = TTBOX / "scripts" / "apply_mouse_identity.sh"
 # 前端页面：优先读取同目录 index.html（设计稿对接版），缺失回退内嵌 INDEX_HTML
 INDEX_FILE = Path(__file__).resolve().parent / "index.html"
@@ -270,6 +277,10 @@ def models_list() -> list[dict]:
         for f in sorted(MODELS_INSTALLED.iterdir()):
             if f.suffix.lower() == ".rknn" and f.is_file():
                 out.append(entry(f, "installed", "rknn"))
+    # Platform V1 active deployment layout: /opt/ttbox/models/current/model.rknn
+    active_platform=PLATFORM_MODEL_DIR / "model.rknn"
+    if active_platform.is_file() and not any(x.get("file_name")==active_platform.name for x in out):
+        out.append({"id":"model.rknn","name":"model","file_name":"model.rknn","backend":"rknn","status":"active","size":active_platform.stat().st_size,"active":True,"path":str(active_platform),"class_count":None,"class_names":[],"game_profile":"","description":"Platform active model","rknn_concurrency":3})
     if MODELS_STAGING.is_dir():
         for f in sorted(MODELS_STAGING.iterdir()):
             low = f.suffix.lower()
@@ -813,6 +824,60 @@ def read_model_input() -> dict:
     except Exception:  # noqa: BLE001
         pass
     return {}
+
+
+def _uptime_seconds(timestamp: str|None):
+    if not timestamp: return None
+    try:
+        import datetime
+        dt=datetime.datetime.strptime(timestamp.strip(), "%a %Y-%m-%d %H:%M:%S %Z")
+        return max(0.0,(datetime.datetime.utcnow()-dt.replace(tzinfo=None)).total_seconds())
+    except Exception: return None
+
+def _service_show(name: str) -> dict:
+    """读取 systemd show 的真实状态；失败时返回 unavailable，不填充假数据。"""
+    code, out = _run(["systemctl", "show", name, "--no-page", "--property=LoadState,ActiveState,SubState,MainPID,Result,NRestarts,ActiveEnterTimestamp"], timeout=5)
+    if code != 0:
+        return {"status": "UNKNOWN", "message": out.strip() or "service unavailable", "metrics": {}, "last_update": time.time()}
+    d={}
+    for line in out.splitlines():
+        if "=" in line:
+            k,v=line.split("=",1); d[k]=v
+    try: pid=int(d.get("MainPID","0")) or None
+    except ValueError: pid=None
+    active=d.get("ActiveState")
+    status="HEALTHY" if active=="active" else ("FAILED" if active=="failed" else "DEGRADED")
+    return {"status":status,"message":d.get("Result","") or active or "unknown","metrics":{"load_state":d.get("LoadState"),"active_state":active,"sub_state":d.get("SubState"),"main_pid":pid,"restart_count":int(d.get("NRestarts","0") or 0),"active_enter_timestamp":d.get("ActiveEnterTimestamp")},"last_update":time.time()}
+
+
+def _platform_model_status() -> dict:
+    import hashlib
+    p=PLATFORM_MODEL
+    if not p.is_file(): return {"status":"UNKNOWN","message":"active model unavailable","metrics":{},"last_update":time.time()}
+    h=hashlib.sha256()
+    with p.open("rb") as f:
+        for chunk in iter(lambda:f.read(1024*1024),b""): h.update(chunk)
+    return {"status":"HEALTHY","message":"active model present","metrics":{"model_id":p.stem,"active_version":p.parent.name,"path":str(p),"size":p.stat().st_size,"sha256":h.hexdigest(),"validation":"file-present"},"last_update":time.time()}
+
+
+def _platform_inference_status() -> dict:
+    m=read_infer_metrics(); svc=_service_show(PLATFORM_INFER_SERVICE)
+    cfg={}
+    try: cfg=json.loads(PLATFORM_INFER_CONFIG.read_text(encoding="utf-8"))
+    except Exception: pass
+    if not m:
+        return {"status":"UNKNOWN","message":"inference metrics unavailable","metrics":{"service":svc,"workers":cfg.get("workers"),"core_mask":cfg.get("cores"),"model":cfg.get("model")},"last_update":time.time()}
+    errors=m.get("errors")
+    status="HEALTHY" if svc["status"]=="HEALTHY" and errors==0 else ("FAILED" if errors else "DEGRADED")
+    return {"status":status,"message":"live inference metrics","metrics":{"service":svc,"workers":cfg.get("workers"),"core_mask":cfg.get("cores"),"model":cfg.get("model"),"capture_fps":m.get("capture_fps"),"inference_fps":m.get("pipeline_fps"),"rknn_latency_us":m.get("run_us"),"rga_latency_us":m.get("rga_us"),"decode_latency_us":m.get("decode_us"),"e2e_latency_us":m.get("e2e_us"),"processed":m.get("processed"),"captured":m.get("captured"),"dropped":m.get("dropped_latest"),"skipped":m.get("skipped"),"errors":errors,"npu_core0":m.get("npu0"),"npu_core1":m.get("npu1"),"npu_core2":m.get("npu2"),"resolution":"2560x1440","format":"BGR3","v4l2_errors":m.get("v4l2_errors"),"poll_timeouts":m.get("poll_timeouts")},"last_update":time.time()}
+
+
+def platform_health() -> dict:
+    runtime=_service_show(PLATFORM_CORE_SERVICE); inference=_platform_inference_status(); model=_platform_model_status()
+    layers={"SYSTEM":_service_show(PLATFORM_SUPERVISOR_SERVICE),"RUNTIME":runtime,"CORE":runtime,"INFERENCE":inference,"CAPTURE":{"status":inference["status"],"message":inference["message"],"metrics":{k:inference["metrics"].get(k) for k in ("resolution","format","capture_fps","v4l2_errors","poll_timeouts")},"last_update":inference["last_update"]},"NPU":{"status":inference["status"],"message":inference["message"],"metrics":{k:inference["metrics"].get(k) for k in ("npu_core0","npu_core1","npu_core2")},"last_update":inference["last_update"]},"MODEL":model,"STORAGE":{"status":"HEALTHY","message":"filesystem usage","metrics":system_status().get("storage",{}),"last_update":time.time()}}
+    statuses=[v.get("status") for v in layers.values() if isinstance(v,dict) and "status" in v]
+    aggregate="FAILED" if "FAILED" in statuses else ("DEGRADED" if "DEGRADED" in statuses or "UNKNOWN" in statuses else "HEALTHY")
+    return {"status":aggregate,"layers":layers,"last_update":time.time()}
 
 
 def system_status() -> dict:
@@ -2217,6 +2282,18 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         if u.path == "/":
             self._html()
+        elif u.path == "/api/v1/status":
+            self._json({"status":platform_health(),"runtime":_service_show(PLATFORM_CORE_SERVICE),"core":_service_show(PLATFORM_CORE_SERVICE),"inference":_platform_inference_status(),"model":_platform_model_status()})
+        elif u.path == "/api/v1/health":
+            self._json(platform_health())
+        elif u.path == "/api/v1/runtime":
+            core=_service_show(PLATFORM_CORE_SERVICE)
+            infer=_service_show(PLATFORM_INFER_SERVICE)
+            self._json({"status": "HEALTHY" if core["status"]=="HEALTHY" and infer["status"]=="HEALTHY" else "DEGRADED", "core":core, "inference_service":infer, "metrics": {"state":core["metrics"].get("active_state"), "pid":core["metrics"].get("main_pid"), "uptime":_uptime_seconds(core["metrics"].get("active_enter_timestamp")), "health":core["status"], "restart_count":core["metrics"].get("restart_count")}, "last_update":time.time()})
+        elif u.path == "/api/v1/inference":
+            self._json(_platform_inference_status())
+        elif u.path == "/api/v1/model":
+            self._json(_platform_model_status())
         elif u.path == "/api/state":
             self._json(state())
         elif u.path == "/api/state.mouse":
@@ -2629,6 +2706,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             ok, detail = draw_circle_test(req)
             self._json({"ok": ok, "detail": detail}, 200 if ok else 500)
+        elif u.path.startswith("/api/v1/runtime/"):
+            action=u.path.rsplit("/",1)[-1]
+            if action not in ("start","stop","restart"):
+                self._json({"error":"action must be start|stop|restart"},400); return
+            code,out=_run(["sudo","-n","systemctl",action,"ttbox-supervisor.service"],timeout=30)
+            if code==0:
+                code2,out2=_run(["sudo","-n","systemctl",action,"ttbox-infer.service"],timeout=30)
+                out += out2
+            invalidate_svc("ttbox-supervisor"); invalidate_svc("ttbox-infer")
+            self._json({"ok":code==0,"action":action,"detail":out,"status":platform_health()},200 if code==0 else 500)
         elif u.path == "/api/inference":
             try:
                 req = json.loads(self._read_body() or b"{}")
