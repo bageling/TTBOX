@@ -1,9 +1,13 @@
 [Unit]
 Description=TTBox inference (C++ runtime, web-controlled, not auto-start)
-After=ttbox-runtime.service
+After=ttbox-core.service
+Requires=ttbox-core.service
 
 [Service]
 Type=simple
+User=root
+Group=video
+WorkingDirectory=/opt/ttbox/runtime
 ExecStart=/opt/ttbox/runtime/ttbox-infer.sh
 Restart=on-failure
 RestartSec=3
