@@ -2294,6 +2294,20 @@ class Handler(BaseHTTPRequestHandler):
             self._json(_platform_inference_status())
         elif u.path == "/api/v1/model":
             self._json(_platform_model_status())
+        elif u.path == "/api/v1/models":
+            import hashlib
+            root=TTBOX/"models"; versions=root/"versions"; current=root/"current"; items=[]
+            for d in sorted(versions.iterdir()) if versions.exists() else []:
+                if d.name == "current-base": continue
+                f=d/"model.rknn"
+                if not f.is_file(): continue
+                meta={}
+                try: meta=json.loads((d/"validation.json").read_text(encoding="utf-8"))
+                except Exception: pass
+                items.append({"id":d.name,"version":d.name,"path":str(f),"size":f.stat().st_size,"sha256":hashlib.sha256(f.read_bytes()).hexdigest(),"validation":"VALID" if meta.get("ok") else "UNAVAILABLE","installed":True,"active":current.is_symlink() and current.resolve()==d.resolve()})
+            self._json({"models":items,"active":_platform_model_status()})
+        elif u.path.startswith("/api/v1/models/"):
+            mid=os.path.basename(u.path); v=TTBOX/"models"/"versions"/mid; st=TTBOX/"models"/"staging"/mid; self._json({"id":mid,"installed":(v/"model.rknn").is_file(),"staged":(st/"model.rknn").is_file(),"active":(TTBOX/"models"/"current").is_symlink() and (TTBOX/"models"/"current").resolve()==v})
         elif u.path == "/api/state":
             self._json(state())
         elif u.path == "/api/state.mouse":
@@ -2382,8 +2396,85 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._json({"error": "not found"}, 404)
 
+    def _platform_model_request(self, action: str, model_id: str):
+        """Platform V1 模型控制路由；暂不改写旧模型接口。"""
+        from pathlib import Path as _Path
+        safe=os.path.basename(model_id)
+        if not safe or safe != model_id or safe in ('.','..'):
+            self._json({"ok":False,"error":"invalid model id"},400); return
+        root=TTBOX/"models"; versions=root/"versions"; staging=root/"staging"; current=root/"current"
+        versions.mkdir(parents=True,exist_ok=True); staging.mkdir(parents=True,exist_ok=True)
+        v=versions/safe; st=staging/safe
+        if action=="validate":
+            f=st/"model.rknn"
+            if not f.is_file() or f.stat().st_size==0: self._json({"ok":False,"error":"staged model unavailable"},400); return
+            import hashlib
+            h=hashlib.sha256(f.read_bytes()).hexdigest(); meta={"ok":True,"model_id":safe,"size":f.stat().st_size,"sha256":h}
+            (st/"validation.json").write_text(json.dumps(meta),encoding="utf-8"); self._json({"ok":True,"state":"VALID","metadata":meta}); return
+        if action=="install":
+            if not (st/"validation.json").is_file(): self._json({"ok":False,"error":"validate first"},400); return
+            import shutil
+            tmp=versions/('.'+safe+'.tmp'); shutil.rmtree(tmp,ignore_errors=True); shutil.copytree(st,tmp)
+            backup=versions/('.'+safe+'.backup')
+            if v.exists(): shutil.rmtree(backup,ignore_errors=True); os.replace(v,backup)
+            os.replace(tmp,v); shutil.rmtree(backup,ignore_errors=True); self._json({"ok":True,"state":"INSTALLED","id":safe}); return
+        if action=="activate":
+            if not (v/"model.rknn").is_file(): self._json({"ok":False,"error":"installed model unavailable"},400); return
+            tmp=root/('.current.tmp');
+            if tmp.exists() or tmp.is_symlink(): tmp.unlink()
+            old=current.resolve().name if current.is_symlink() and current.exists() else None
+            # 兼容 Phase 3/6 的旧目录式 current：先保留为受控版本，再切换为 symlink。
+            if current.exists() and not current.is_symlink():
+                legacy=versions/'current-base'
+                if not legacy.exists(): os.replace(current,legacy)
+                else: shutil.rmtree(current)
+                old='current-base'
+            tmp.symlink_to(v,target_is_directory=True)
+            try: os.replace(tmp,current)
+            except PermissionError:
+                if current.is_symlink(): current.unlink()
+                os.replace(tmp,current)
+            if old and old!=safe: (root/'previous').write_text(old,encoding='utf-8')
+            code,out=_run(["sudo","-n","systemctl","restart","ttbox-infer.service"],timeout=30); invalidate_svc("ttbox-infer")
+            self._json({"ok":code==0,"state":"ACTIVE" if code==0 else "FAILED","detail":out,"id":safe},200 if code==0 else 500); return
+        if action=="deactivate":
+            if current.is_symlink(): current.unlink()
+            elif current.exists(): shutil.rmtree(current)
+            self._json({"ok":True,"state":"DEACTIVATED","id":safe}); return
+        if action=="rollback":
+            prev=root/'previous'
+            if not prev.is_file(): self._json({"ok":False,"error":"no previous model"},400); return
+            pid=os.path.basename(prev.read_text(encoding='utf-8').strip()); pv=versions/pid
+            if not pid or pid!=prev.read_text(encoding='utf-8').strip() or not (pv/"model.rknn").is_file(): self._json({"ok":False,"error":"invalid previous model"},400); return
+            tmp=root/('.current.tmp');
+            if tmp.exists() or tmp.is_symlink(): tmp.unlink()
+            cur=current.resolve().name if current.is_symlink() and current.exists() else ''; tmp.symlink_to(pv,target_is_directory=True)
+            try: os.replace(tmp,current)
+            except PermissionError:
+                if current.is_symlink(): current.unlink()
+                os.replace(tmp,current)
+            if cur: prev.write_text(cur,encoding='utf-8')
+            code,out=_run(["sudo","-n","systemctl","restart","ttbox-infer.service"],timeout=30); invalidate_svc("ttbox-infer")
+            self._json({"ok":code==0,"state":"ACTIVE" if code==0 else "FAILED","detail":out,"id":pid},200 if code==0 else 500); return
+        self._json({"ok":False,"error":"unsupported action"},400)
+
     def do_POST(self):
         u = urlparse(self.path)
+        if u.path == "/api/v1/models/upload":
+            import re as _re
+            ctype=self.headers.get("Content-Type",""); _,pd=cgi.parse_header(ctype); boundary=pd.get("boundary","")
+            if not boundary: self._json({"ok":False,"error":"multipart required"},400); return
+            length=int(self.headers.get("Content-Length",0) or 0); body=self.rfile.read(length); parts=body.split(("--"+boundary).encode()); fname=None; data=None
+            for part in parts:
+                if b"Content-Disposition" not in part: continue
+                m=_re.search(rb'filename="([^"]+)"',part)
+                if m:
+                    fname=os.path.basename(m.group(1).decode(errors="ignore")); _,sep,data=part.partition(b"\r\n\r\n"); data=data[:-2] if sep and data.endswith(b"\r\n") else data; break
+            if not fname or not data or fname != os.path.basename(fname) or not fname.endswith('.rknn'): self._json({"ok":False,"error":"invalid model file"},400); return
+            mid=os.path.splitext(fname)[0]; st=TTBOX/"models"/"staging"/mid; st.mkdir(parents=True,exist_ok=True); (st/'model.rknn').write_bytes(data); self._json({"ok":True,"state":"UPLOADING","id":mid,"size":len(data)}); return
+        if u.path.startswith("/api/v1/models/"):
+            seg=u.path.split('/'); mid=seg[4] if len(seg)>4 else ''; action=seg[5] if len(seg)>5 else ''
+            self._platform_model_request(action,mid); return
         if u.path == "/api/models/import":
             # 通用 multipart：收集表单字段 + 文件（对齐 YU 导入对话框）
             import re as _re
@@ -2773,6 +2864,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         """删除模型/清除标定。"""
         u = urlparse(self.path)
+        if u.path.startswith("/api/v1/models/"):
+            mid=os.path.basename(u.path); v=TTBOX/"models"/"versions"/mid; current=TTBOX/"models"/"current"
+            if current.is_symlink() and current.resolve()==v: self._json({"ok":False,"error":"active model cannot be removed"},400); return
+            if not mid or mid in (".","..") or mid != os.path.basename(mid): self._json({"ok":False,"error":"invalid model id"},400); return
+            import shutil
+            if v.is_dir(): shutil.rmtree(v); self._json({"ok":True,"state":"REMOVED","id":mid}); return
+            self._json({"ok":False,"error":"model not installed"},404); return
         if u.path == "/api/models/delete":
             try:
                 req = json.loads(self._read_body() or b"{}")
