@@ -27,13 +27,21 @@ class RuntimeController:
         try:
             info=self.process.start(); self._pid=info.pid; self._started_at=info.started_at or self._clock()
             self._move(RuntimeState.READY)
-            if not self.process.health(): raise RuntimeError("core process health check failed")
+            if not self.process.health():
+                self.process.stop()
+                self._pid=None; self._started_at=None
+                raise RuntimeError("core process health check failed")
             self._move(RuntimeState.RUNNING); self._last_error=None
         except Exception as exc: self._fail(exc)
         return self.status()
     def stop(self) -> RuntimeSnapshot:
         if self._state == RuntimeState.STOPPED: return self.status()
-        if self._state == RuntimeState.FAILED: self.process.stop(); self._state=RuntimeState.STOPPED
+        if self._state == RuntimeState.FAILED:
+            try: self.process.stop()
+            except Exception as exc:
+                self._fail(exc)
+                return self.status()
+            self._state=RuntimeState.STOPPED; self._pid=None; self._started_at=None
         else:
             if self._state != RuntimeState.STOPPING: self._move(RuntimeState.STOPPING)
             try: self.process.stop(); self._state=RuntimeState.STOPPED; self._pid=None; self._started_at=None
@@ -44,9 +52,17 @@ class RuntimeController:
     def reload(self) -> RuntimeSnapshot:
         return self.restart() if self._state in (RuntimeState.READY,RuntimeState.RUNNING) else self.start()
     def health(self) -> dict[str,Any]:
-        ok=self._state==RuntimeState.RUNNING and self.process.health()
+        try: process_ok=self.process.health()
+        except Exception as exc:
+            process_ok=False
+            if self._state != RuntimeState.STOPPED: self._fail(exc)
+        ok=self._state==RuntimeState.RUNNING and process_ok
         return {"ok":ok,"state":self._state.value,"last_error":self._last_error,"timestamp":self._clock()}
     def status(self) -> RuntimeSnapshot:
         now=self._clock(); uptime=max(0.0,now-self._started_at) if self._started_at and self._state==RuntimeState.RUNNING else 0.0
-        health="healthy" if self._state==RuntimeState.RUNNING and self.process.health() else ("failed" if self._state==RuntimeState.FAILED else "stopped")
+        try: process_ok=self.process.health()
+        except Exception as exc:
+            process_ok=False
+            if self._state != RuntimeState.STOPPED: self._fail(exc)
+        health="healthy" if self._state==RuntimeState.RUNNING and process_ok else ("failed" if self._state==RuntimeState.FAILED else "stopped")
         return RuntimeSnapshot(self._state.value,self._pid,uptime,self._last_error,health,now)

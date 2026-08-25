@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
-import hashlib, json, os, shutil
+import hashlib, json, os, shutil, tempfile
 
 @dataclass(frozen=True)
 class ModelInfo:
@@ -47,9 +47,27 @@ class ModelManager:
         meta=json.loads(marker.read_text(encoding='utf-8'))
         if meta.get('model_id')!=mid or meta.get('size')!=f.stat().st_size or meta.get('sha256')!=self._digest(f): raise ValueError('staged model changed after validation')
         dst=self.versions/mid
-        if dst.is_symlink() or (dst.exists() and not dst.is_dir()): dst.unlink()
-        elif dst.exists(): shutil.rmtree(dst)
-        shutil.copytree(src,dst); return ModelInfo(mid,'installed',str(dst))
+        temp=Path(tempfile.mkdtemp(prefix=f'.{mid}.',dir=self.versions))
+        backup=None
+        try:
+            shutil.copytree(src,temp/'payload',dirs_exist_ok=True)
+            if dst.exists() or dst.is_symlink():
+                backup=self.versions/f'.{mid}.backup.{os.getpid()}'
+                if backup.exists() or backup.is_symlink():
+                    backup.unlink() if backup.is_symlink() or backup.is_file() else shutil.rmtree(backup)
+                os.replace(dst,backup)
+            os.replace(temp/'payload',dst)
+            if backup is not None:
+                shutil.rmtree(backup,ignore_errors=True)
+        except Exception:
+            if dst.exists() or dst.is_symlink():
+                if dst.is_symlink() or dst.is_file(): dst.unlink()
+                else: shutil.rmtree(dst,ignore_errors=True)
+            if backup is not None and (backup.exists() or backup.is_symlink()): os.replace(backup,dst)
+            raise
+        finally:
+            if temp.exists(): shutil.rmtree(temp,ignore_errors=True)
+        return ModelInfo(mid,'installed',str(dst))
     def _atomic_activate(self, target: Path):
         temp=self.root/f'.current.tmp.{os.getpid()}'
         if temp.exists() or temp.is_symlink(): temp.unlink()

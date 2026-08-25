@@ -24,6 +24,15 @@ class RuntimeControllerTests(unittest.TestCase):
   self.c.start(); snap=self.c.reload(); self.assertEqual(snap.state,"RUNNING"); self.assertEqual(self.adapter.starts,2)
  def test_health(self):
   self.assertFalse(self.c.health()["ok"]); self.c.start(); self.assertTrue(self.c.health()["ok"])
+ def test_failed_health_stops_started_process(self):
+  class Unhealthy(MockProcessAdapter):
+   def health(self): return False
+  a=Unhealthy(); c=RuntimeController(a); snap=c.start()
+  self.assertEqual(snap.state,"FAILED"); self.assertFalse(a.running); self.assertIsNone(snap.pid)
+ def test_health_exception_becomes_failed(self):
+  class Broken(MockProcessAdapter):
+   def health(self): raise RuntimeError("probe failed")
+  a=Broken(); c=RuntimeController(a); c.start(); self.assertEqual(c.health()["ok"],False); self.assertEqual(c.state,RuntimeState.FAILED)
  def test_status_shape(self):
   d=self.c.status().as_dict(); self.assertEqual(set(d),{"state","pid","uptime","last_error","health","timestamp"})
  def test_uptime(self):
