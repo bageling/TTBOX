@@ -9,8 +9,8 @@ bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOut
     if (!mailbox || !output || running_.exchange(true)) return false;
     mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000; runtime_config_ = runtime_config; physical_buttons_ = physical_buttons;
     { std::lock_guard<std::mutex> lk(status_mutex_); status_ = {}; status_.running = true; }
-    aibox_pid_x_.init(25.0, 25.0, 3.0, 0.03, 9900.0);
-    aibox_pid_y_.init(25.0, 25.0, 0.0, 0.03, 9900.0);
+    aibox_pid_x_.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+    aibox_pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0);
     thread_ = std::thread(&AimThread::loop, this);
     return true;
 }
@@ -41,7 +41,6 @@ void AimThread::loop() {
                     ki_x = profile->mouse.ki_x; ki_y = profile->mouse.ki_y;
                     kd_x = profile->mouse.kd_x; kd_y = profile->mouse.kd_y;
                     smith_.set_dead_ms(profile->mouse.smith_dead_ms);
-                    abg_.configure(profile->mouse.alpha, profile->mouse.beta, profile->mouse.gamma, profile->mouse.predict_dt_ms);
                 }
             }
             const auto selected = selector_.select(task.detections, scfg,
@@ -60,7 +59,7 @@ void AimThread::loop() {
                 }
             }
             event.now_ms = task.timestamp_us / 1000ULL;
-            if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); smith_.reset(); abg_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
+            if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); smith_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
             (void)kp_x; (void)kp_y; (void)ki_x; (void)ki_y; (void)kd_x; (void)kd_y;
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
             float trace_control_x = 0.0f, trace_control_y = 0.0f;
@@ -69,16 +68,15 @@ void AimThread::loop() {
                 // 目标框上部瞄准点：避免框中心落到躯干/裆部，先取框高 25% 处。
                 const float tx = (selected.box.x1 + selected.box.x2) * 0.5f;
                 const float ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
-                const float dt_target = last_timestamp_us_ > 0 && task.timestamp_us > last_timestamp_us_
-                    ? static_cast<float>(task.timestamp_us - last_timestamp_us_) / 1000000.0f : 0.004f;
                 if (last_target_id_ != -1 && selected.target_id != last_target_id_) {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
-                    abg_.reset(); smith_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
+                    smith_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
                 }
                 last_target_id_ = selected.target_id;
-                abg_.update(tx, ty, dt_target);
-                const auto predicted = abg_.predicted();
-                ex = predicted.x - task.frame_width * 0.5f; ey = predicted.y - task.frame_height * 0.5f;
+                // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
+                // 速度信息只进入 P_PID 的前馈/Kalman，不在目标坐标层 coast。
+                ex = tx - task.frame_width * 0.5f;
+                ey = ty - task.frame_height * 0.5f;
                 float control_x = ex;
                 float control_y = ey;
                 if (runtime_config_) {
@@ -103,7 +101,15 @@ void AimThread::loop() {
                     smith_enabled = profile && profile->mouse.fov_mode;
                 }
                 if (smith_enabled) {
-                    pending = smith_.predicted(task.timestamp_us);
+                    pending = smith_.predicted(task.frame_number, task.timestamp_us);
+                    if (pending.has_newer_frame) {
+                        // AIBOX 帧号护栏：更新帧已经发过移动，旧帧不得反向修正。
+                        {
+                            std::lock_guard<std::mutex> lk(status_mutex_);
+                            ++status_.stale;
+                        }
+                        continue;
+                    }
                     control_x -= pending.dx; control_y -= pending.dy;
                 }
                 trace_smith_dx = pending.dx; trace_smith_dy = pending.dy;

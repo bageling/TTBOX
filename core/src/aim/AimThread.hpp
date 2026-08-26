@@ -13,7 +13,6 @@
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "aim/SmithPredictor.hpp"
-#include "aim/AlphaBetaGammaFilter.hpp"
 #include "aim/AiboxPpidController.hpp"
 namespace ttbox::core::aim {
 class AimThread {
@@ -63,7 +62,6 @@ private:
     AiboxPpidController aibox_pid_y_;
     AimStateMachine state_machine_;
     SmithPredictor smith_;
-    AlphaBetaGammaFilter abg_;
     uint64_t last_timestamp_us_ = 0;
     float remainder_x_ = 0.0f;
     float remainder_y_ = 0.0f;

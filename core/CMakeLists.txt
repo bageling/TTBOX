@@ -177,6 +177,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_aim_thread PRIVATE ttbox_core)
   add_test(NAME test_aim_thread COMMAND test_aim_thread)
 
+  # A11：AIBOX P_PID smooth 接线与 Smith 帧号护栏测试
+  add_executable(test_aim_algorithm tests/test_aim_algorithm.cpp)
+  target_link_libraries(test_aim_algorithm PRIVATE ttbox_core)
+  add_test(NAME test_aim_algorithm COMMAND test_aim_algorithm)
+
   # A11：FOV 分辨率与方向换算测试
   add_executable(test_fov_angle tests/test_fov_angle.cpp)
   target_link_libraries(test_fov_angle PRIVATE ttbox_core)

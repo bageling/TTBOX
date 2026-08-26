@@ -8,15 +8,28 @@
 namespace ttbox::core::aim {
 class SmithPredictor {
 public:
-    struct Summary { float dx=0.0f; float dy=0.0f; };
+    struct Summary {
+        float dx=0.0f;
+        float dy=0.0f;
+        bool has_newer_frame=false;
+    };
     void set_dead_ms(float ms) { dead_ms_ = std::max(0.0f, ms); }
     void reset() { moves_.clear(); }
     void record(uint64_t frame, float dx, float dy, uint64_t now_us) {
         prune(now_us); moves_.push_back({frame, dx, dy, now_us});
     }
-    Summary predicted(uint64_t now_us) {
-        prune(now_us); Summary s; for (const auto& m : moves_) { s.dx += m.dx; s.dy += m.dy; } return s;
+    Summary predicted(uint64_t query_frame, uint64_t now_us) {
+        prune(now_us);
+        Summary s;
+        for (const auto& m : moves_) {
+            s.dx += m.dx;
+            s.dy += m.dy;
+            if (m.frame > query_frame) s.has_newer_frame = true;
+        }
+        return s;
     }
+
+    Summary predicted(uint64_t now_us) { return predicted(UINT64_MAX, now_us); }
 private:
     struct Move { uint64_t frame; float dx; float dy; uint64_t t_us; };
     void prune(uint64_t now_us) {
