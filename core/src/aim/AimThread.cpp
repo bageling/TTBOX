@@ -4,6 +4,8 @@
 #include <utility>
 #include "aim/AimError.hpp"
 #include "mouse/FovAngle.hpp"
+#include "mouse/CoordinateTransform.hpp"
+#include "mouse/AimPointProfile.hpp"
 namespace ttbox::core::aim {
 bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us, RuntimeConfig* runtime_config, std::atomic<uint16_t>* physical_buttons) {
     if (!mailbox || !output || running_.exchange(true)) return false;
@@ -26,21 +28,28 @@ void AimThread::loop() {
         AimTargetTask task;
         if (mailbox_->take_latest(&task, last_frame)) {
             last_frame = task.frame_number;
-            last_timestamp_us_ = task.timestamp_us;
+            const uint64_t previous_timestamp_us = last_timestamp_us_;
             // 新控制链：目标选择 → 误差 → 纯 PID/P 控制 → OutputAction。
             TargetSelectorConfig scfg;
             scfg.roi_w = task.frame_width; scfg.roi_h = task.frame_height;
             scfg.confidence = 0.0f;
-            float kp_x = 0.0f, kp_y = 0.0f, ki_x = 0.0f, ki_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
+            float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
+            AimPointProfile aim_point;
             if (runtime_config_) {
                 auto profile = runtime_config_->snapshot();
                 if (profile) {
                     scfg.fov_range = profile->fov.enabled ? profile->fov.radius * 2.0f : 1.0f;
                     scfg.lost_grace_ms = profile->mouse.lost_grace_ms;
+                    scfg.aim_ratio_x = profile->mouse.aim_point.offset_x;
+                    scfg.aim_ratio_y = profile->mouse.aim_point.offset_y;
                     kp_x = profile->mouse.kp_x; kp_y = profile->mouse.kp_y;
-                    ki_x = profile->mouse.ki_x; ki_y = profile->mouse.ki_y;
                     kd_x = profile->mouse.kd_x; kd_y = profile->mouse.kd_y;
+                    aim_point = profile->mouse.aim_point;
                     smith_.set_dead_ms(profile->mouse.smith_dead_ms);
+                    aibox_pid_x_.configure(kp_x, kd_x, profile->mouse.predict_x,
+                                           profile->mouse.rate_x, profile->mouse.smooth_x);
+                    aibox_pid_y_.configure(kp_y, kd_y, profile->mouse.predict_y,
+                                           profile->mouse.rate_y, profile->mouse.smooth_y);
                 }
             }
             const auto selected = selector_.select(task.detections, scfg,
@@ -60,14 +69,15 @@ void AimThread::loop() {
             }
             event.now_ms = task.timestamp_us / 1000ULL;
             if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); smith_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
-            (void)kp_x; (void)kp_y; (void)ki_x; (void)ki_y; (void)kd_x; (void)kd_y;
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
             float trace_control_x = 0.0f, trace_control_y = 0.0f;
             float trace_smith_dx = 0.0f, trace_smith_dy = 0.0f;
             if (selected.valid && task.frame_width > 0 && task.frame_height > 0) {
-                // 目标框上部瞄准点：避免框中心落到躯干/裆部，先取框高 25% 处。
-                const float tx = (selected.box.x1 + selected.box.x2) * 0.5f;
-                const float ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
+                float tx = 0.0f, ty = 0.0f;
+                if (!aim_point_at(selected.box, selected.box.class_id, aim_point, &tx, &ty)) {
+                    tx = (selected.box.x1 + selected.box.x2) * 0.5f;
+                    ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
+                }
                 if (last_target_id_ != -1 && selected.target_id != last_target_id_) {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
                     smith_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
@@ -75,8 +85,12 @@ void AimThread::loop() {
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
                 // 速度信息只进入 P_PID 的前馈/Kalman，不在目标坐标层 coast。
-                ex = tx - task.frame_width * 0.5f;
-                ey = ty - task.frame_height * 0.5f;
+                float ref_x = 0.0f, ref_y = 0.0f;
+                CoordinateTransform::reference_point(static_cast<float>(task.frame_width),
+                                                     static_cast<float>(task.frame_height),
+                                                     aim_point, &ref_x, &ref_y);
+                ex = tx - ref_x;
+                ey = ty - ref_y;
                 float control_x = ex;
                 float control_y = ey;
                 if (runtime_config_) {
@@ -89,8 +103,8 @@ void AimThread::loop() {
                                                profile->mouse.vfov, profile->mouse.move_speed_y);
                     }
                 }
-                const float dt = last_timestamp_us_ > 0 && task.timestamp_us > last_timestamp_us_
-                    ? static_cast<float>(task.timestamp_us - last_timestamp_us_) / 1000000.0f : 0.004f;
+                const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
+                    ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
                 (void)dt;
                 // Smith 的在途量单位是最终输出 count；只有 FOV 换算后的控制域与其一致时才扣除。
                 // 非 FOV 模式下 control 是像素误差，不能直接减 HID count，避免量纲混用导致振荡。
@@ -125,12 +139,13 @@ void AimThread::loop() {
                 smith_.record(task.frame_number, static_cast<float>(move_x), static_cast<float>(move_y), task.timestamp_us);
             }
             output_->send(output::OutputAction{move_x, move_y, 0, 0, task.frame_number, task.timestamp_us});
+            last_timestamp_us_ = task.timestamp_us;
             std::lock_guard<std::mutex> lk(status_mutex_);
             status_.has_task = true;
             status_.has_target = selected.valid;
             if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
             status_.predicted_x = selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f;
-            status_.predicted_y = selected.valid ? selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f : 0.0f;
+            status_.predicted_y = selected.valid ? (selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f) : 0.0f;
             status_.error_x = ex;
             status_.error_y = ey;
             status_.control_x = trace_control_x;

@@ -1090,8 +1090,28 @@ def _sync_ai_controller_to_mouse(data: dict) -> None:
         feats = (data or {}).get("features") or {}
         ac = feats.get("ai_controller") or {}
         if not isinstance(ac, dict):
-            return
+            ac = {}
         mo = data.setdefault("mouse", {})
+        # VisionForge 画像控件位于 features，C++ RuntimeProfile 使用根级 geometry_filter。
+        gf = feats.get("detection_geometry_filter") or {}
+        if isinstance(gf, dict):
+            data["geometry_filter"] = {"enabled": bool(gf.get("enabled", False))}
+        # VisionForge 高层画像先收敛到 TTBOX 已有、真实被 C++ 消费的字段。
+        sp = feats.get("stability_profile") or {}
+        tl = feats.get("target_lock_profile") or {}
+        if isinstance(sp, dict) or isinstance(tl, dict):
+            sp = sp if isinstance(sp, dict) else {}
+            tl = tl if isinstance(tl, dict) else {}
+            strength = max(0.0, min(1.0, float(sp.get("stability_strength", tl.get("stability", 0.78)))))
+            agility = max(0.0, min(1.0, float(sp.get("response_agility", tl.get("switch_agility", 0.28)))))
+            dropout = max(0.0, min(1.0, float(sp.get("dropout_tolerance", tl.get("lost_hold", 0.76)))))
+            # 目标锁定画像的高层语义落到现有 AimState/TargetSelector 消费的宽限期。
+            mo["lost_grace_ms"] = round(max(20.0, min(140.0, 28.0 + dropout * 72.0 + strength * 24.0 - agility * 18.0)), 2)
+            mo["confidence"] = max(0.0, min(1.0, float(mo.get("confidence", 0.25))))
+            data["visionforge_profiles"] = {
+                "stability_profile": {"enabled": True, "stability_strength": round(strength, 3), "response_agility": round(agility, 3), "dropout_tolerance": round(dropout, 3)},
+                "target_lock_profile": {"enabled": bool(tl.get("enabled", False)), "stability": round(float(tl.get("stability", strength)), 3), "switch_agility": round(float(tl.get("switch_agility", agility)), 3), "lost_hold": round(float(tl.get("lost_hold", dropout)), 3), "small_target_recall": round(float(tl.get("small_target_recall", 0.45)), 3), "enhanced_tracking": bool(tl.get("enhanced_tracking", False))},
+            }
         mo["predict_x"] = float(ac.get("predict_x") or mo.get("predict_x") or 0.5)
         mo["predict_y"] = float(ac.get("predict_y") or mo.get("predict_y") or 0.4)
         if "smooth_x" in ac: mo["smooth_x"] = float(ac["smooth_x"])

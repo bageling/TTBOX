@@ -5,7 +5,8 @@
 namespace ttbox::core::aim {
 class AiboxPpidController {
 public:
- void init(double kp,double kd,double predict,double rate,double smooth){kp_=kp;kd_=kd;predict_=predict;kp_rate_=rate;smooth_=smooth;reset();}
+ void init(double kp,double kd,double predict,double rate,double smooth){configure(kp,kd,predict,rate,smooth,true);}
+ void configure(double kp,double kd,double predict,double rate,double smooth,bool reset_state=false){kp_=kp;kd_=kd;predict_=predict;kp_rate_=rate;smooth_=smooth;if(reset_state) reset();}
  void reset(){kp_gain_=0;integral_gain_=0;u_=0;last_error_=0;vx_=0;vp_=0;ix_=0;ip_=0;}
  double update(double e){
   if(std::abs(e)<0.3)e=0;

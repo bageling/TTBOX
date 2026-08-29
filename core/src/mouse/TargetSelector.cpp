@@ -25,8 +25,8 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                                       b.class_id) != cfg.class_filter.end();
             if (!in) continue;
         }
-        const float bdx = box_center_x(b) - cx;
-        const float bdy = box_center_y(b) - cy;
+        const float bdx = b.x1 + (b.x2 - b.x1) * cfg.aim_ratio_x - cx;
+        const float bdy = b.y1 + (b.y2 - b.y1) * cfg.aim_ratio_y - cy;
         const float d_sq = bdx * bdx + bdy * bdy;
         if (d_sq > radius_sq) continue;  // FOV 范围外
         out.push_back({b, box_center_x(b), box_center_y(b), d_sq});

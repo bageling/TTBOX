@@ -23,12 +23,13 @@ struct PipelineMetrics {
 
 // 系统运行状态（IPC GET_STATUS 返回体）
 struct SystemStatus {
-    bool running = false;      // core 是否在运行
+    bool running = false;        // core 是否在运行（Application 层标志）
+    bool runtime_running = false; // CoreRuntime 流水线是否启动
     std::string app_name;
     std::string version;
-    double uptime_ms = 0.0;    // 自 initialize 起的运行时长
-    std::string ipc_socket;    // 当前 IPC socket 路径
-    std::string config_file;   // 当前加载的配置文件
+    double uptime_ms = 0.0;      // 自 initialize 起的运行时长
+    std::string ipc_socket;      // 当前 IPC socket 路径
+    std::string config_file;     // 当前加载的配置文件
     PipelineMetrics metrics;
 };
 

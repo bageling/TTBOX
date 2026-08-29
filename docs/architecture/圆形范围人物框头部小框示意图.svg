@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#17233a"/>
+    </linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000" flood-opacity=".35"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L9,3 L0,6 Z" fill="#dbeafe"/></marker>
+  </defs>
+  <rect width="1200" height="760" fill="url(#bg)"/>
+  <text x="60" y="62" fill="#f8fafc" font-size="30" font-family="Microsoft YaHei, sans-serif" font-weight="700">TTBOX：圆形瞄准范围 + 人物大小框 + 头部小框</text>
+  <text x="60" y="98" fill="#94a3b8" font-size="18" font-family="Microsoft YaHei, sans-serif">圆形负责“是否进入瞄准范围”，矩形负责“人物检测”，头部小框负责“精确瞄准点”</text>
+
+  <!-- screen -->
+  <rect x="55" y="145" width="760" height="520" rx="14" fill="#101827" stroke="#475569" stroke-width="3" filter="url(#shadow)"/>
+  <text x="82" y="181" fill="#94a3b8" font-size="17" font-family="Microsoft YaHei, sans-serif">1920×1080画面示意（缩放显示）</text>
+
+  <!-- aim circle -->
+  <circle cx="435" cy="405" r="205" fill="#22d3ee" fill-opacity=".07" stroke="#22d3ee" stroke-width="4" stroke-dasharray="12 9"/>
+  <circle cx="435" cy="405" r="5" fill="#f8fafc"/>
+  <path d="M435 370 V440 M400 405 H470" stroke="#f8fafc" stroke-width="3"/>
+  <text x="458" y="445" fill="#67e8f9" font-size="18" font-family="Microsoft YaHei, sans-serif">准星/圆心</text>
+  <text x="580" y="225" fill="#67e8f9" font-size="18" font-family="Microsoft YaHei, sans-serif">圆形有效瞄准范围</text>
+  <path d="M570 235 C530 255 535 265 580 275" fill="none" stroke="#67e8f9" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- body box -->
+  <rect x="515" y="275" width="155" height="285" rx="3" fill="#f59e0b" fill-opacity=".10" stroke="#f59e0b" stroke-width="4"/>
+  <text x="690" y="330" fill="#fbbf24" font-size="19" font-family="Microsoft YaHei, sans-serif" font-weight="700">人物大框</text>
+  <text x="690" y="358" fill="#fcd34d" font-size="16" font-family="Microsoft YaHei, sans-serif">身体/整个人物</text>
+  <path d="M680 345 C655 350 650 370 645 400" fill="none" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- head box -->
+  <rect x="543" y="294" width="100" height="76" rx="3" fill="#fb7185" fill-opacity=".17" stroke="#fb7185" stroke-width="4"/>
+  <text x="685" y="420" fill="#fda4af" font-size="19" font-family="Microsoft YaHei, sans-serif" font-weight="700">头部小框</text>
+  <text x="685" y="448" fill="#fecdd3" font-size="16" font-family="Microsoft YaHei, sans-serif">精确识别头部</text>
+  <path d="M675 430 C650 420 645 382 625 350" fill="none" stroke="#fb7185" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- aim point -->
+  <circle cx="593" cy="331" r="9" fill="#a7f3d0" stroke="#064e3b" stroke-width="3"/>
+  <path d="M593 331 L435 405" stroke="#a7f3d0" stroke-width="3" stroke-dasharray="8 7" marker-end="url(#arrow)"/>
+  <text x="690" y="510" fill="#a7f3d0" font-size="19" font-family="Microsoft YaHei, sans-serif" font-weight="700">实际瞄准点</text>
+  <text x="690" y="538" fill="#bbf7d0" font-size="16" font-family="Microsoft YaHei, sans-serif">优先取头部小框</text>
+  <path d="M680 520 C650 500 625 420 600 345" fill="none" stroke="#a7f3d0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- right explanation -->
+  <rect x="850" y="145" width="300" height="520" rx="14" fill="#111827" stroke="#334155" stroke-width="2"/>
+  <text x="880" y="190" fill="#f8fafc" font-size="22" font-family="Microsoft YaHei, sans-serif" font-weight="700">计算逻辑</text>
+  <line x1="880" y1="210" x2="1120" y2="210" stroke="#334155"/>
+  <text x="880" y="255" fill="#67e8f9" font-size="18" font-family="Microsoft YaHei, sans-serif">① 圆形范围</text>
+  <text x="880" y="285" fill="#cbd5e1" font-size="16" font-family="Microsoft YaHei, sans-serif">判断头部瞄准点是否在圆内</text>
+  <text x="880" y="315" fill="#cbd5e1" font-size="16" font-family="Microsoft YaHei, sans-serif">圆内才允许进入控制</text>
+  <text x="880" y="370" fill="#fbbf24" font-size="18" font-family="Microsoft YaHei, sans-serif">② 人物大框</text>
+  <text x="880" y="400" fill="#cbd5e1" font-size="16" font-family="Microsoft YaHei, sans-serif">判断身体范围、大小、比例</text>
+  <text x="880" y="430" fill="#cbd5e1" font-size="16" font-family="Microsoft YaHei, sans-serif">用于头身配对和过滤</text>
+  <text x="880" y="485" fill="#fb7185" font-size="18" font-family="Microsoft YaHei, sans-serif">③ 头部小框</text>
+  <text x="880" y="515" fill="#cbd5e1" font-size="16" font-family="Microsoft YaHei, sans-serif">优先计算头部瞄准点</text>
+  <text x="880" y="545" fill="#cbd5e1" font-size="16" font-family="Microsoft YaHei, sans-serif">没有头框时才用身体上部点</text>
+  <rect x="880" y="585" width="240" height="48" rx="8" fill="#064e3b" stroke="#34d399"/>
+  <text x="900" y="616" fill="#bbf7d0" font-size="17" font-family="Microsoft YaHei, sans-serif" font-weight="700">圆管范围，框管人物，头框管瞄准</text>
+</svg>

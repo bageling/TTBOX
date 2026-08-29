@@ -28,6 +28,8 @@ struct TargetSelectorConfig {
     float center_x = 0.5f;           // 选择中心（crop 系归一化）
     float center_y = 0.5f;
     float lost_grace_ms = 30.0f;     // 目标丢失宽限（对齐参考 selector_lost_grace_ms=30）
+    float aim_ratio_x = 0.5f;
+    float aim_ratio_y = 0.2f;
     float switch_match_ratio = 0.4f; // rect_lock 匹配距离 = 目标对角 × 此比例
 };
 

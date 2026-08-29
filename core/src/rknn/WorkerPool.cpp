@@ -142,6 +142,9 @@ bool InferenceWorker::start(const Params& params, std::string* error) {
         }
         decoder_ = std::move(d);
     }
+    if (params.runtime_config != nullptr) {
+        if (auto profile = params.runtime_config->snapshot()) geometry_filter_.set_config(profile->geometry_filter);
+    }
 
     TTBOX_LOG_INFO("worker[" + std::to_string(id_) + "] 就绪: core_mask=" +
                    std::to_string(params.core_mask) + " 模型加载 " +
@@ -169,6 +172,7 @@ void InferenceWorker::apply_runtime_profile() {
     if (!prof || prof == applied_profile_) return;
 
     decoder_->apply_runtime(prof->inference, prof->fov);
+    geometry_filter_.set_config(prof->geometry_filter);
     const uint32_t rw = prof->capture.width;
     const uint32_t rh = prof->capture.height;
     const uint32_t fw = params_.frame_w, fh = params_.frame_h;
@@ -283,6 +287,9 @@ void InferenceWorker::loop() {
             stats_.errors.fetch_add(1);
             if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] decode: %s\n", id_, derr.c_str());
             continue;
+        }
+        if (geometry_filter_.config().enabled && params_.frame_w > 0 && params_.frame_h > 0) {
+            detections_ = geometry_filter_.filter(detections_, static_cast<float>(params_.frame_w) * 0.5f, static_cast<float>(params_.frame_h) * 0.5f);
         }
         stats_.decode_ok.fetch_add(1);
         stats_.processed.fetch_add(1);

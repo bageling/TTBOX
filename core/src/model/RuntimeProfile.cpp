@@ -161,6 +161,18 @@ JsonValue RuntimeProfile::to_json() const {
     inf.set("max_detections", JsonValue::number(static_cast<double>(inference.max_detections)));
     root.set("inference", std::move(inf));
 
+    JsonValue gf = JsonValue::object();
+    gf.set("enabled", JsonValue::boolean(geometry_filter.enabled));
+    gf.set("min_head_conf", JsonValue::number(geometry_filter.min_head_conf));
+    gf.set("min_body_conf", JsonValue::number(geometry_filter.min_body_conf));
+    gf.set("paired_head_min_conf", JsonValue::number(geometry_filter.paired_head_min_conf));
+    gf.set("head_only_min_conf", JsonValue::number(geometry_filter.head_only_min_conf));
+    gf.set("head_only_center_max_px", JsonValue::number(geometry_filter.head_only_center_max_px));
+    gf.set("min_body_width_px", JsonValue::number(geometry_filter.min_body_width_px));
+    gf.set("min_body_height_px", JsonValue::number(geometry_filter.min_body_height_px));
+    gf.set("border_reject_enabled", JsonValue::boolean(geometry_filter.reject_border));
+    root.set("geometry_filter", std::move(gf));
+
     JsonValue fobj = JsonValue::object();
     fobj.set("enabled", JsonValue::boolean(fov.enabled));
     fobj.set("shape", JsonValue::number(static_cast<double>(fov.shape == FovShape::kRect ? 1 : 0)));
@@ -285,6 +297,17 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
                 if (e.is_number()) p.inference.class_filter.push_back(static_cast<int>(e.as_int()));
             }
         }
+    }
+    if (const JsonValue* gf = v.find("geometry_filter"); gf && gf->is_object()) {
+        p.geometry_filter.enabled = obj_bool(*gf, "enabled", false);
+        p.geometry_filter.min_head_conf = static_cast<float>(obj_num(*gf, "min_head_conf", 0.18));
+        p.geometry_filter.min_body_conf = static_cast<float>(obj_num(*gf, "min_body_conf", 0.26));
+        p.geometry_filter.paired_head_min_conf = static_cast<float>(obj_num(*gf, "paired_head_min_conf", 0.20));
+        p.geometry_filter.head_only_min_conf = static_cast<float>(obj_num(*gf, "head_only_min_conf", 0.75));
+        p.geometry_filter.head_only_center_max_px = static_cast<float>(obj_num(*gf, "head_only_center_max_px", 175.0));
+        p.geometry_filter.min_body_width_px = static_cast<float>(obj_num(*gf, "min_body_width_px", 8.0));
+        p.geometry_filter.min_body_height_px = static_cast<float>(obj_num(*gf, "min_body_height_px", 26.0));
+        p.geometry_filter.reject_border = obj_bool(*gf, "border_reject_enabled", true);
     }
     if (const JsonValue* f = v.find("fov"); f && f->is_object()) {
         p.fov.enabled = obj_bool(*f, "enabled", false);

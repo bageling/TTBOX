@@ -87,6 +87,7 @@ const implemented = new Set([
   'recoil_only_when_target_visible','recoil_target_lost_release_ms',
   'recoil_trigger_delay_enabled','recoil_trigger_delay_ms',
   'recoil_humanize_enabled','recoil_humanize_curve_strength','recoil_humanize_jitter_px','recoil_humanize_jitter_frequency',
+  'stability_profile_strength','stability_profile_agility','stability_profile_dropout','target_lock_profile_recall','geometry_filter_enabled','target_lock_profile_tracking',
   'rapid_fire_enabled','rapid_fire_hotkey','rapid_fire_press_base_ms','rapid_fire_interval_base_ms',
   'auto_back_flick_enabled','crosshair_detection_enabled','crosshair_hotkey','crosshair_hotkey2','crosshair_hotkey_mode',
   'crosshair_roi_w','crosshair_roi_h',
@@ -162,6 +163,21 @@ function collectFeatures(){
       block_physical_mouse_x_while_aiming:chk('#controller_block_physical_mouse_x_while_aiming'),
       block_physical_mouse_y_while_aiming:chk('#controller_block_physical_mouse_y_while_aiming')
     },
+    stability_profile:{
+      enabled:true,
+      stability_strength:val('#stability_profile_strength')!=null?val('#stability_profile_strength'):0.65,
+      response_agility:val('#stability_profile_agility')!=null?val('#stability_profile_agility'):0.45,
+      dropout_tolerance:val('#stability_profile_dropout')!=null?val('#stability_profile_dropout'):0.65
+    },
+    target_lock_profile:{
+      enabled:chk('#target_lock_profile_tracking'),
+      stability:val('#stability_profile_strength')!=null?val('#stability_profile_strength'):0.78,
+      switch_agility:val('#stability_profile_agility')!=null?val('#stability_profile_agility'):0.28,
+      lost_hold:val('#stability_profile_dropout')!=null?val('#stability_profile_dropout'):0.76,
+      small_target_recall:val('#target_lock_profile_recall')!=null?val('#target_lock_profile_recall'):0.45,
+      enhanced_tracking:chk('#target_lock_profile_tracking')
+    },
+    detection_geometry_filter:{enabled:chk('#geometry_filter_enabled')},
     recoil:{
       enabled:chk('#recoil_enabled'),
       hotkey:str('#recoil_hotkey')||'left',
@@ -265,7 +281,10 @@ function collectProfile(prev){
       offset_y: val('#capture_crop_offset_y')||0,
       center_crop:true
     },
-    features: f
+    features: f,
+    stability_profile: f.stability_profile,
+    target_lock_profile: f.target_lock_profile,
+    geometry_filter: f.detection_geometry_filter
   };
 }
 let _profile={};
@@ -480,6 +499,14 @@ function backfillProfile(profile){
   setValSync('#controller_selector_lost_grace_ms', m.lost_grace_ms);
   setValSync('#controller_aim_reference_offset_x', m.aim_offset_x);
   setValSync('#controller_aim_reference_offset_y', m.aim_offset_y);
+  const sp=lastProfile.stability_profile||{};
+  setValSync('#stability_profile_strength',sp.stability_strength);
+  setValSync('#stability_profile_agility',sp.response_agility);
+  setValSync('#stability_profile_dropout',sp.dropout_tolerance);
+  const tl=lastProfile.target_lock_profile||{};
+  setValSync('#target_lock_profile_recall',tl.small_target_recall);
+  setChk('#target_lock_profile_tracking',tl.enabled||tl.enhanced_tracking);
+  setChk('#geometry_filter_enabled',(lastProfile.detection_geometry_filter||{}).enabled);
   setChk('#controller_aim_fire_lock_y', m.aim_fire_lock_y);
   setChk('#controller_block_physical_mouse_x_while_aiming', m.block_physical_x);
   setChk('#controller_block_physical_mouse_y_while_aiming', m.block_physical_y);

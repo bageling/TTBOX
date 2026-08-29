@@ -15,6 +15,7 @@ option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
 # 硬件测试（需要 /dev/video0，仅板端启用；host 上默认关闭）
 option(TTBOX_CORE_BUILD_HW_TESTS "构建 V4L2 硬件验收测试（RK3588）" OFF)
+option(TTBOX_CORE_BUILD_AUTH "构建在线授权层（需要 OpenSSL 开发文件）" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -52,6 +53,7 @@ set(CORE_SOURCES
   src/model/RuntimeProfile.cpp
   src/model/IModelSource.cpp
   src/rknn/DecodeNMS.cpp
+  src/rknn/DetectionGeometryFilter.cpp
   src/hid/HidForwarder.cpp
   src/hid/HidParser.cpp
   src/hid/HidPackageManifest.cpp
@@ -67,6 +69,16 @@ set(CORE_SOURCES
   src/mouse/MouseRouter.cpp
   src/mouse/AimStateMachine.cpp
 )
+if(TTBOX_CORE_BUILD_AUTH)
+  list(APPEND CORE_SOURCES
+    src/auth/DeviceFingerprint.cpp
+    src/auth/LicenseDaemon.cpp
+    src/auth/HttpClient.cpp
+    src/auth/AiboxLicenseClient.cpp
+  )
+else()
+  list(APPEND CORE_SOURCES src/auth/DisabledAuth.cpp)
+endif()
 set(TTBOX_CORE_HAS_RGA FALSE)
 set(TTBOX_CORE_HAS_RKNN FALSE)
 if(UNIX AND NOT APPLE)
@@ -186,6 +198,14 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_fov_angle tests/test_fov_angle.cpp)
   target_link_libraries(test_fov_angle PRIVATE ttbox_core)
   add_test(NAME test_fov_angle COMMAND test_fov_angle)
+
+  add_executable(test_detection_geometry_filter tests/test_detection_geometry_filter.cpp)
+  target_link_libraries(test_detection_geometry_filter PRIVATE ttbox_core)
+  add_test(NAME test_detection_geometry_filter COMMAND test_detection_geometry_filter)
+
+  add_executable(test_coordinate_transform tests/test_coordinate_transform.cpp)
+  target_link_libraries(test_coordinate_transform PRIVATE ttbox_core)
+  add_test(NAME test_coordinate_transform COMMAND test_coordinate_transform)
 
   # ---- 硬件验收测试（板端：-DTTBOX_CORE_BUILD_HW_TESTS=ON）----
   if(TTBOX_CORE_BUILD_HW_TESTS AND UNIX AND NOT APPLE)

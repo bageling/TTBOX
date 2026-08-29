@@ -31,6 +31,7 @@
 #include "rga/RgaProcessor.hpp"
 #include "rknn/DecodeNMS.hpp"
 #include "rknn/RKNNEngine.hpp"
+#include "rknn/DetectionGeometryFilter.hpp"
 
 namespace ttbox::core {
 
@@ -110,6 +111,7 @@ private:
     std::vector<void*> raw_buf_ptrs_;
     std::vector<size_t> raw_sizes_;
     std::vector<DetectionBox> detections_; // 本帧检测结果，转换为 AimTargetTask
+    DetectionGeometryFilter geometry_filter_;
     uint32_t last_seq_ = 0;
     int id_ = -1;
     WorkerStats stats_;

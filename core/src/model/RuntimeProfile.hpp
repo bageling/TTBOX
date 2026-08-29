@@ -19,6 +19,7 @@
 
 #include "common/Json.hpp"
 #include "mouse/MouseTypes.hpp"
+#include "rknn/DetectionGeometryFilter.hpp"
 
 namespace ttbox::core {
 
@@ -83,6 +84,7 @@ struct RuntimeProfile {
     FovProfile fov;
     PreviewProfile preview;     // Web 实时画面尺寸
     aim::MouseProfile mouse;    // A10：鼠标 AI 注入配置（与模型彻底分离）
+    DetectionGeometryFilterConfig geometry_filter;
 
     // ---- JSON 序列化（仅配置管理/持久化使用；推理路径禁止逐帧解析）----
     JsonValue to_json() const;
