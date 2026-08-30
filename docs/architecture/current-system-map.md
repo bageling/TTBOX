@@ -44,7 +44,7 @@
 
 ## K. Web
 
-仓库没有独立 Web 源码应用；`core/tools/web/` 主要是静态页面、脚本和 systemd/部署文件。AIBOX 包中的 Flutter Web 与后端资源仅作能力参考，未复制第三方代码。
+仓库没有独立 Web 源码应用；原 `core/tools/web/`（AIBOX 旧 Python 控制台、静态页面与部署脚本）已于 Web 重置阶段整体移除，Web 前端待新底座重建。
 
 ## L. API
 
@@ -52,7 +52,7 @@
 
 ## M. systemd
 
-仓库中的 service 文件主要位于 `core/tools/web/`，包括 `ttbox-infer.service`、`ttbox-hid-forward.service`、`ttbox-hid.service`、firstboot/watchdog/EDID 等。尚无统一 Platform Supervisor unit。
+原位于 `core/tools/web/` 的 systemd service 文件（`ttbox-infer.service` 等）随该目录一并移除；尚无统一 Platform Supervisor unit。
 
 ## N. Config
 
@@ -72,7 +72,7 @@
 
 ## R. Scripts
 
-`scripts/` 覆盖 EDID、HID gadget、部署、硬件调查、包安装/回滚、验收；`core/tools/web/` 还包含 image/rootfs/package/release 脚本。脚本入口多，当前未由单一 Supervisor 编排。
+`scripts/` 覆盖 EDID、HID gadget、部署、硬件调查、包安装/回滚、验收。脚本入口多，当前未由单一 Supervisor 编排。
 
 ## S. Tests
 

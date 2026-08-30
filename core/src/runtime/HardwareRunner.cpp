@@ -26,7 +26,10 @@ bool HardwareRunner::start(std::string* error){
  if(!mouse_reader_.start("", &mouse_error)){ if(error)*error="物理鼠标读取器启动失败: "+mouse_error; workers_->stop(); capture_->stop(); capture_->close(); running_=false; return false; }
  if (auto aibox = std::dynamic_pointer_cast<output::AiboxHidOutput>(params_.output)) {
      // 最终输出门控必须读取同一个真实鼠标 event11 按钮源，避免 AimThread 与输出端状态分裂。
-     aibox->set_button_source(mouse_reader_.button_source(), 0x03);
+     // 放行掩码不再在此快照/写死：绑定 RuntimeConfig 后，每次发送由 AiboxHidOutput
+     // 实时读取 aim_hotkey|aim_hotkey2 与 mouse.enabled —— 改热键配置即时生效，无需重启。
+     aibox->set_button_source(mouse_reader_.button_source());
+     aibox->set_config_source(params_.runtime_config);
  }
  if(!aim_thread_.start(mailbox_.get(),params_.output,4000,params_.runtime_config, params_.simulated_buttons ? &simulated_buttons_ : mouse_reader_.button_source())){workers_->stop();capture_->stop();capture_->close();running_=false;return false;}
  return true;

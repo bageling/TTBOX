@@ -5,6 +5,11 @@
 //   禁止删除 active 模型、激活失败恢复、quarantine
 #include "test_util.hpp"
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 #include <cstdio>
 #include <filesystem>
 #include <fstream>

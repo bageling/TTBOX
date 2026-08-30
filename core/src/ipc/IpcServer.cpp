@@ -31,6 +31,8 @@ namespace ttbox::core {
 namespace {
 
 #if defined(_WIN32)
+// MSVC 无 ssize_t：Windows 分支统一用 long long 语义的别名。
+using ssize_t = long long;
 // Windows：路径 "tcp:<port>"。返回监听 fd（SOCKET 转 int），失败 -1。
 int listen_tcp(const std::string& path, std::string* error) {
     static bool ws_inited = []() {
@@ -250,6 +252,33 @@ bool IpcServer::start(const std::string& socket_path, std::string* error) {
     listen_fd_ = fd;
     running_.store(true);
     accept_thread_ = std::thread(&IpcServer::accept_loop, this);
+
+    // 自举握手：Windows 下连接刚 listen 的 socket 偶发 WSAECONNREFUSED（accept 尚未就绪），
+    // 这里内部自连一次 PING，确保 start() 返回后任何客户端首次连接都能成功。
+    // 失败重试 5 次 × 40ms；全部失败则回滚启动（fail-fast，不带病运行）。
+    bool ready = false;
+    std::string probe_error;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        std::string pong;
+        if (ipc_request(socket_path_, R"({"type":"PING"})", pong, 500, &probe_error)) {
+            ready = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    }
+    if (!ready) {
+        running_.store(false);
+        if (accept_thread_.joinable()) accept_thread_.join();
+#if defined(_WIN32)
+        ::closesocket(static_cast<SOCKET>(listen_fd_));
+#else
+        ::close(listen_fd_);
+#endif
+        listen_fd_ = -1;
+        if (error) *error = "IPC 自举握手失败: " + probe_error;
+        return false;
+    }
+
     TTBOX_LOG_INFO("IPC 服务已启动: " + socket_path);
     return true;
 }
@@ -363,7 +392,40 @@ IpcResponse IpcServer::handle_request(const JsonValue& request) {
         return resp;
     }
 
-    if (type == "GET_CONFIG") {
+        if (type == "GET_PREVIEW") {
+        if (!preview_provider_) {
+            resp.status = IpcError::kInternal;
+            resp.error = "preview provider not registered";
+            return resp;
+        }
+        std::vector<uint8_t> jpeg;
+        if (!preview_provider_(&jpeg) || jpeg.empty()) {
+            resp.status = IpcError::kNotFound;
+            resp.error = "暂无预览帧";
+            return resp;
+        }
+        // base64 编码进 JSON
+        static const char* table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string b64;
+        b64.reserve(((jpeg.size() + 2) / 3) * 4);
+        for (size_t i = 0; i < jpeg.size(); i += 3) {
+            const uint32_t v = (static_cast<uint32_t>(jpeg[i]) << 16) |
+                               (i + 1 < jpeg.size() ? static_cast<uint32_t>(jpeg[i+1]) << 8 : 0) |
+                               (i + 2 < jpeg.size() ? static_cast<uint32_t>(jpeg[i+2]) : 0);
+            b64 += table[(v >> 18) & 63];
+            b64 += table[(v >> 12) & 63];
+            b64 += (i + 1 < jpeg.size()) ? table[(v >> 6) & 63] : '=';
+            b64 += (i + 2 < jpeg.size()) ? table[v & 63] : '=';
+        }
+        JsonValue pd = JsonValue::object();
+        pd.set("jpeg_base64", JsonValue::string(b64));
+        pd.set("bytes", JsonValue::number(static_cast<double>(jpeg.size())));
+        resp.status = IpcError::kOk;
+        resp.data = std::move(pd);
+        return resp;
+    }
+
+if (type == "GET_CONFIG") {
         if (!config_provider_) {
             resp.status = IpcError::kInternal;
             resp.error = "config provider not registered";
@@ -372,6 +434,176 @@ IpcResponse IpcServer::handle_request(const JsonValue& request) {
         resp.status = IpcError::kOk;
         resp.data = config_provider_();
         return resp;
+    }
+
+    // ---- SET_CONFIG：原子更新运行时配置（解析→校验→update→落盘）----
+    // 请求：{"type":"SET_CONFIG","params":{"profile":{...RuntimeProfile JSON...}}}
+    // 任意一步失败都直接返回错误，当前运行配置与配置文件不被污染。
+    if (type == "SET_CONFIG") {
+        if (!config_update_) {
+            resp.status = IpcError::kInternal;
+            resp.error = "config update handler not registered";
+            return resp;
+        }
+        const JsonValue* params = request.find("params");
+        const JsonValue* profile_v = params ? params->find("profile") : nullptr;
+        if (!profile_v || !profile_v->is_object()) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = "missing object field params.profile";
+            return resp;
+        }
+        std::string handler_error;
+        bool persisted = false;
+        if (!config_update_(*profile_v, &handler_error, &persisted)) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = handler_error.empty() ? "config update rejected" : handler_error;
+            return resp;
+        }
+        JsonValue data = JsonValue::object();
+        data.set("applied", JsonValue::boolean(true));
+        data.set("persisted", JsonValue::boolean(persisted));
+        resp.status = IpcError::kOk;
+        resp.data = std::move(data);
+        return resp;
+    }
+
+    // ---- RUNTIME_CONTROL：启动/停止/重启 AI 流水线 ----
+    // 请求：{"type":"RUNTIME_CONTROL","params":{"action":"start|stop|restart"}}
+    if (type == "RUNTIME_CONTROL") {
+        if (!runtime_control_) {
+            resp.status = IpcError::kInternal;
+            resp.error = "runtime control handler not registered";
+            return resp;
+        }
+        const JsonValue* params = request.find("params");
+        const JsonValue* action_v = params ? params->find("action") : nullptr;
+        const std::string action = action_v ? action_v->as_string() : "";
+        if (action != "start" && action != "stop" && action != "restart") {
+            resp.status = IpcError::kBadRequest;
+            resp.error = "params.action must be start|stop|restart";
+            return resp;
+        }
+        std::string handler_error;
+        if (!runtime_control_(action, &handler_error)) {
+            resp.status = IpcError::kInternal;
+            resp.error = handler_error.empty() ? ("runtime " + action + " failed") : handler_error;
+            return resp;
+        }
+        JsonValue data = JsonValue::object();
+        data.set("action", JsonValue::string(action));
+        resp.status = IpcError::kOk;
+        resp.data = std::move(data);
+        return resp;
+    }
+
+    // ---- 模型管理（v0.3）：LIST / IMPORT / VALIDATE / INSTALL / ACTIVATE / REMOVE ----
+    // 通用参数校验辅助：取 params.<field> 字符串
+    auto param_str = [&request](const char* field, std::string* out) -> bool {
+        const JsonValue* params = request.find("params");
+        const JsonValue* v = params ? params->find(field) : nullptr;
+        if (!v || !v->is_string() || v->as_string().empty()) return false;
+        *out = v->as_string();
+        return true;
+    };
+    // 防 path traversal：model_id 只允许 [A-Za-z0-9_-]
+    auto valid_model_id = [](const std::string& id) -> bool {
+        if (id.size() < 1 || id.size() > 64) return false;
+        for (char c : id) {
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                  (c >= '0' && c <= '9') || c == '_' || c == '-')) return false;
+        }
+        return true;
+    };
+
+    if (type == "MODEL_LIST") {
+        if (!model_list_) {
+            resp.status = IpcError::kInternal;
+            resp.error = "model list handler not registered";
+            return resp;
+        }
+        resp.status = IpcError::kOk;
+        resp.data = model_list_();
+        return resp;
+    }
+
+    if (type == "MODEL_IMPORT") {
+        if (!model_import_) {
+            resp.status = IpcError::kInternal;
+            resp.error = "model import handler not registered";
+            return resp;
+        }
+        std::string src_path, model_id, label;
+        if (!param_str("src_path", &src_path) || !param_str("model_id", &model_id)) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = "params.src_path 与 params.model_id 必填（字符串）";
+            return resp;
+        }
+        (void)param_str("label", &label);  // 可选
+        if (!valid_model_id(model_id)) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = "model_id 只允许字母/数字/下划线/连字符（1~64 字符）";
+            return resp;
+        }
+        std::string handler_error;
+        if (!model_import_(src_path, model_id, label, &handler_error)) {
+            resp.status = IpcError::kBadRequest;
+            resp.error = handler_error.empty() ? "模型导入失败" : handler_error;
+            return resp;
+        }
+        JsonValue data = JsonValue::object();
+        data.set("model_id", JsonValue::string(model_id));
+        resp.status = IpcError::kOk;
+        resp.data = std::move(data);
+        return resp;
+    }
+
+    // MODEL_VALIDATE / MODEL_INSTALL / MODEL_ACTIVATE / MODEL_REMOVE 共用形态
+    auto handle_model_action = [&](const char* action_name,
+                                   const ModelActionHandler& handler) -> IpcResponse {
+        IpcResponse r;
+        r.id = resp.id;
+        r.type = type;
+        if (!handler) {
+            r.status = IpcError::kInternal;
+            r.error = std::string(action_name) + " handler not registered";
+            return r;
+        }
+        std::string model_id;
+        if (!param_str("model_id", &model_id)) {
+            r.status = IpcError::kBadRequest;
+            r.error = "params.model_id 必填（字符串）";
+            return r;
+        }
+        if (!valid_model_id(model_id)) {
+            r.status = IpcError::kBadRequest;
+            r.error = "model_id 只允许字母/数字/下划线/连字符";
+            return r;
+        }
+        std::string handler_error;
+        if (!handler(model_id, &handler_error)) {
+            r.status = IpcError::kBadRequest;
+            r.error = handler_error.empty() ? (std::string(action_name) + " 失败") : handler_error;
+            return r;
+        }
+        JsonValue data = JsonValue::object();
+        data.set("model_id", JsonValue::string(model_id));
+        data.set("action", JsonValue::string(action_name));
+        r.status = IpcError::kOk;
+        r.data = std::move(data);
+        return r;
+    };
+
+    if (type == "MODEL_VALIDATE") {
+        return handle_model_action("validate", model_validate_);
+    }
+    if (type == "MODEL_INSTALL") {
+        return handle_model_action("install", model_install_);
+    }
+    if (type == "MODEL_ACTIVATE") {
+        return handle_model_action("activate", model_activate_);
+    }
+    if (type == "MODEL_REMOVE") {
+        return handle_model_action("remove", model_remove_);
     }
 
     resp.status = IpcError::kUnsupported;
@@ -447,6 +679,7 @@ bool ipc_ping(const std::string& socket_path, std::string* error) {
 JsonValue system_status_to_json(const SystemStatus& status) {
     JsonValue data = JsonValue::object();
     data.set("running", JsonValue::boolean(status.running));
+    data.set("runtime_running", JsonValue::boolean(status.runtime_running));
     data.set("app_name", JsonValue::string(status.app_name));
     data.set("version", JsonValue::string(status.version));
     data.set("uptime_ms", JsonValue::number(status.uptime_ms));
@@ -455,12 +688,38 @@ JsonValue system_status_to_json(const SystemStatus& status) {
 
     JsonValue m = JsonValue::object();
     m.set("fps", JsonValue::number(status.metrics.fps));
+    m.set("capture_fps", JsonValue::number(status.metrics.capture_fps));
+    m.set("infer_total", JsonValue::number(static_cast<double>(status.metrics.infer_total)));
+    m.set("mouse_dx", JsonValue::number(static_cast<double>(status.metrics.mouse_dx)));
+    m.set("mouse_dy", JsonValue::number(static_cast<double>(status.metrics.mouse_dy)));
+    m.set("gated_frames", JsonValue::number(static_cast<double>(status.metrics.gated_frames)));
+    m.set("target_frames", JsonValue::number(static_cast<double>(status.metrics.target_frames)));
+    m.set("no_target_frames", JsonValue::number(static_cast<double>(status.metrics.no_target_frames)));
+    m.set("aim_active", JsonValue::boolean(status.metrics.aim_active));
+    m.set("preview_fps", JsonValue::number(status.metrics.preview_fps));
+    m.set("preview_encode_ms", JsonValue::number(status.metrics.preview_encode_ms));
+    m.set("preview_width", JsonValue::number(static_cast<double>(status.metrics.preview_width)));
+    m.set("preview_height", JsonValue::number(static_cast<double>(status.metrics.preview_height)));
+    m.set("preview_bytes", JsonValue::number(static_cast<double>(status.metrics.preview_bytes)));
+    m.set("preview_frames", JsonValue::number(static_cast<double>(status.metrics.preview_frames)));
+    m.set("preview_dropped", JsonValue::number(static_cast<double>(status.metrics.preview_dropped)));
     m.set("capture_ms", JsonValue::number(status.metrics.capture_ms));
     m.set("resize_ms", JsonValue::number(status.metrics.resize_ms));
     m.set("infer_ms", JsonValue::number(status.metrics.infer_ms));
     m.set("decode_ms", JsonValue::number(status.metrics.decode_ms));
     m.set("aim_ms", JsonValue::number(status.metrics.aim_ms));
     m.set("e2e_ms", JsonValue::number(status.metrics.e2e_ms));
+    // 分位数（真实样本，ms）
+    m.set("e2e_p50_ms", JsonValue::number(status.metrics.e2e_p50_ms));
+    m.set("e2e_p95_ms", JsonValue::number(status.metrics.e2e_p95_ms));
+    m.set("e2e_p99_ms", JsonValue::number(status.metrics.e2e_p99_ms));
+    m.set("e2e_max_ms", JsonValue::number(status.metrics.e2e_max_ms));
+    m.set("infer_p50_ms", JsonValue::number(status.metrics.infer_p50_ms));
+    m.set("infer_p95_ms", JsonValue::number(status.metrics.infer_p95_ms));
+    m.set("infer_p99_ms", JsonValue::number(status.metrics.infer_p99_ms));
+    m.set("decode_p50_ms", JsonValue::number(status.metrics.decode_p50_ms));
+    m.set("decode_p95_ms", JsonValue::number(status.metrics.decode_p95_ms));
+    m.set("decode_p99_ms", JsonValue::number(status.metrics.decode_p99_ms));
     m.set("detect_count", JsonValue::number(static_cast<double>(status.metrics.detect_count)));
     m.set("dropped_frames", JsonValue::number(static_cast<double>(status.metrics.dropped_frames)));
     m.set("frames_total", JsonValue::number(static_cast<double>(status.metrics.frames_total)));

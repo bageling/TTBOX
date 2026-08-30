@@ -72,6 +72,7 @@ struct PreviewProfile {
     uint32_t roi_w = 320;    // 屏幕中心截取宽
     uint32_t roi_h = 320;
     bool center_crop = true;
+    uint32_t fps = 0;        // 预览帧率上限（0 = 用 Application 默认 preview_fps）
 };
 
 // ---------------------------------------------------------------------------

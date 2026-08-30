@@ -2,6 +2,8 @@
 
 > 目标：以 TTBOX 为香橙派 5 Plus 主干，吸收 VisionForge 的网页界面思路、参数组织方式和经过验证的算法模块。
 
+> **⚠ 已过时（2026-08-29 Web 重置）**：文中引用的 `core/tools/web/`（AIBOX 旧控制台）已整体移除；本文仅作历史评估参考，Web 前端待新底座重建。
+
 ## 一、当前结论
 
 VisionForge 本身是 Windows Python/Tkinter 桌面程序，仓库中没有可直接拿来替换的现成业务网页前端。TTBOX 当前已经有一套可在板端运行的 HTML/CSS/JavaScript 控制台：

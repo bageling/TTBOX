@@ -1,5 +1,7 @@
 // test_ipc.cpp — IPC 服务端：PING / GET_STATUS / GET_CONFIG / 错误处理
+#include <chrono>
 #include <string>
+#include <thread>
 
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -18,6 +20,15 @@ std::string tmp_socket_path() {
 #else
     return "/tmp/ttbox_core_test_" + std::to_string(static_cast<long>(::getpid())) + ".sock";
 #endif
+}
+
+// Windows TIME_WAIT 下固定端口偶发 bind 失败：带重试的启动（总等待 ~1s）
+static bool start_with_retry(ttbox::core::IpcServer& server, std::string* error = nullptr) {
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        if (server.start(tmp_socket_path(), error)) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    return false;
 }
 
 ttbox::core::SystemStatus test_status() {
@@ -43,7 +54,7 @@ ttbox::core::JsonValue test_config_json() {
 TEST(ipc_ping_roundtrip) {
     ttbox::core::IpcServer server;
     std::string error;
-    CHECK(server.start(tmp_socket_path(), &error));
+    CHECK(start_with_retry(server, &error));
     if (!server.running()) {
         std::printf("  [info] server start failed: %s\n", error.c_str());
         return;
@@ -70,7 +81,7 @@ TEST(ipc_get_status) {
     ttbox::core::IpcServer server;
     server.set_status_provider(test_status);
     std::string error;
-    CHECK(server.start(tmp_socket_path(), &error));
+    CHECK(start_with_retry(server, &error));
 
     std::string response;
     CHECK(ttbox::core::ipc_request(server.socket_path(), R"({"type":"GET_STATUS"})", response, 2000, &error));
@@ -95,7 +106,7 @@ TEST(ipc_get_config) {
     ttbox::core::IpcServer server;
     server.set_config_provider(test_config_json);
     std::string error;
-    CHECK(server.start(tmp_socket_path(), &error));
+    CHECK(start_with_retry(server, &error));
 
     std::string response;
     CHECK(ttbox::core::ipc_request(server.socket_path(), R"({"type":"GET_CONFIG"})", response, 2000, &error));
@@ -117,7 +128,7 @@ TEST(ipc_get_config) {
 TEST(ipc_unsupported_type_error) {
     ttbox::core::IpcServer server;
     std::string error;
-    CHECK(server.start(tmp_socket_path(), &error));
+    CHECK(start_with_retry(server, &error));
 
     std::string response;
     CHECK(ttbox::core::ipc_request(server.socket_path(), R"({"type":"DO_NOTHING"})", response, 2000, &error));
@@ -134,7 +145,7 @@ TEST(ipc_unsupported_type_error) {
 TEST(ipc_bad_json_error) {
     ttbox::core::IpcServer server;
     std::string error;
-    CHECK(server.start(tmp_socket_path(), &error));
+    CHECK(start_with_retry(server, &error));
 
     std::string response;
     CHECK(ttbox::core::ipc_request(server.socket_path(), "{ not json", response, 2000, &error));

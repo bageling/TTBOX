@@ -1,6 +1,11 @@
 // test_hid_package.cpp — A9-P2 单元测试：HID Package（manifest/registry/config/source/回滚）
 #include "test_util.hpp"
 
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -99,7 +104,7 @@ TEST(hid_manifest_fields) {
 }
 
 TEST(hid_version_file) {
-    const std::string f = "/tmp/hid_ver_test_" + std::to_string(::getpid()) + ".txt";
+    const std::string f = "/tmp/hid_ver_test_" + std::to_string(static_cast<int>(::getpid())) + ".txt";
     CHECK(hid_write_version(f, "0.0.1"));
     std::string v;
     CHECK(hid_read_version(f, &v));

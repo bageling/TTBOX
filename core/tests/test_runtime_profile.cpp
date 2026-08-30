@@ -1,6 +1,8 @@
 // test_runtime_profile.cpp — A-8 单元测试：RuntimeProfile JSON/校验/RuntimeConfig 热更新
 #include "test_util.hpp"
 
+#include <limits>
+#include <cmath>
 #include "model/RuntimeProfile.hpp"
 
 using namespace ttbox::core;
@@ -136,4 +138,18 @@ TEST(runtime_config_hot_update) {
     p3.inference.confidence = 0.9f;
     cfg.update(std::make_shared<RuntimeProfile>(p3));
     CHECK_EQ(old->inference.confidence, 0.7f);  // 旧对象未被破坏
+}
+
+TEST(runtime_profile_validate_rejects_nonfinite) {
+    // C12 修复回归：inf/NaN 配置必须被 validate 拒绝（否则 PID 输出乱飞）
+    RuntimeProfile p;
+    // 手动塞入 inf（绕过 from_json 的默认路径，模拟 JSON 1e999 解析结果）
+    p.mouse.kp_x = std::numeric_limits<float>::infinity();
+    std::string err;
+    CHECK(!p.validate(&err));
+    CHECK(err.find("非有限") != std::string::npos);
+
+    p.mouse.kp_x = 17.0f;
+    p.mouse.kd_y = std::numeric_limits<float>::quiet_NaN();
+    CHECK(!p.validate(&err));
 }

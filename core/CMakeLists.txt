@@ -30,7 +30,8 @@ get_filename_component(TTBOX_PROJECT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOL
 
 # ---- 编译警告 ----
 if(MSVC)
-  add_compile_options(/W4 /permissive-)
+  # /utf-8：源码为 UTF-8（中文注释），GB 代码页下会被错读导致 #pragma once 失效
+  add_compile_options(/W4 /permissive- /utf-8)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -50,6 +51,7 @@ set(CORE_SOURCES
   src/ipc/IpcServer.cpp
   src/model/ModelAdapter.cpp
   src/model/ModelRegistry.cpp
+  src/model/ModelManagement.cpp
   src/model/RuntimeProfile.cpp
   src/model/IModelSource.cpp
   src/rknn/DecodeNMS.cpp
@@ -85,6 +87,7 @@ if(UNIX AND NOT APPLE)
   list(APPEND CORE_SOURCES
     src/capture/DmaBuf.cpp
     src/capture/V4L2Capture.cpp
+    src/preview/PreviewModule.cpp
   )
   # RGA（librga，阶段 A-3）：板端已装 /usr/local；缺失则不编译 RGA 源
   find_path(RGA_INCLUDE_DIR im2d.h PATHS /usr/local/include)
@@ -132,6 +135,27 @@ target_compile_definitions(ttbox_core PUBLIC TTBOX_PROJECT_ROOT="${TTBOX_PROJECT
 if(WIN32)
   target_link_libraries(ttbox_core PUBLIC ws2_32)
 endif()
+# Phase2：Preview（libjpeg，板端 UNIX）
+if(UNIX AND NOT APPLE)
+  find_package(JPEG QUIET)
+  if(NOT JPEG_FOUND)
+    find_library(JPEG_LIB jpeg PATHS /usr/lib /usr/local/lib)
+    find_path(JPEG_INC jpeglib.h PATHS /usr/include)
+    if(JPEG_LIB AND JPEG_INC)
+      set(JPEG_LIBRARIES ${JPEG_LIB})
+      set(JPEG_INCLUDE_DIRS ${JPEG_INC})
+      set(JPEG_FOUND TRUE)
+    endif()
+  endif()
+  if(JPEG_FOUND)
+    target_link_libraries(ttbox_core PUBLIC ${JPEG_LIBRARIES})
+    target_include_directories(ttbox_core PUBLIC ${JPEG_INCLUDE_DIRS})
+    message(STATUS "libjpeg found: ${JPEG_LIBRARIES}")
+  else()
+    message(WARNING "libjpeg 未找到，PreviewModule 不编译")
+    list(REMOVE_ITEM CORE_SOURCES src/preview/PreviewModule.cpp)
+  endif()
+endif()
 
 # ---- 新架构硬件入口（默认 NullHidOutput，不接管真实鼠标）----
 if(UNIX AND NOT APPLE AND TTBOX_CORE_HAS_RKNN)
@@ -140,8 +164,12 @@ if(UNIX AND NOT APPLE AND TTBOX_CORE_HAS_RKNN)
 endif()
 
 # ---- 主程序 ----
-add_executable(ttbox_core_main src/main.cpp)
-target_link_libraries(ttbox_core_main PRIVATE ttbox_core)
+# V4L2/RKNN 仅在板端编译；Windows 下 CoreRuntime 会引用未编译符号，
+# 因此 ttbox_core_main 仅在 UNIX 且 RKNN 可用时构建。
+if(UNIX AND NOT APPLE AND TTBOX_CORE_HAS_RKNN)
+  add_executable(ttbox_core_main src/main.cpp)
+  target_link_libraries(ttbox_core_main PRIVATE ttbox_core)
+endif()
 
 # ---- IPC 命令行工具 ----
 if(TTBOX_CORE_BUILD_TOOLS)
@@ -157,7 +185,11 @@ if(TTBOX_CORE_BUILD_TESTS)
     tests/test_logger.cpp
     tests/test_config.cpp
     tests/test_ipc.cpp
-    tests/test_application.cpp
+    tests/test_ipc_control.cpp  # Phase 1：SET_CONFIG / RUNTIME_CONTROL 验收
+    tests/test_ipc_model.cpp    # v0.3：模型管理 IPC 验收
+    # test_application 依赖 Application→CoreRuntime→V4L2/RKNN（仅板端可链接），
+    # Windows 下排除，其余纯逻辑测试保留。
+    $<$<NOT:$<PLATFORM_ID:Windows>>:tests/test_application.cpp>
     tests/test_decode.cpp
     tests/test_model_metadata.cpp
     tests/test_decoder_dispatch.cpp
@@ -189,10 +221,30 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_aim_thread PRIVATE ttbox_core)
   add_test(NAME test_aim_thread COMMAND test_aim_thread)
 
-  # A11：AIBOX P_PID smooth 接线与 Smith 帧号护栏测试
-  add_executable(test_aim_algorithm tests/test_aim_algorithm.cpp)
-  target_link_libraries(test_aim_algorithm PRIVATE ttbox_core)
-  add_test(NAME test_aim_algorithm COMMAND test_aim_algorithm)
+  # pid1.cpp P_PID 1:1 移植对照测试（与参考实现输出逐点一致）
+  add_executable(test_pid1 tests/test_pid1.cpp)
+  target_link_libraries(test_pid1 PRIVATE ttbox_core)
+  add_test(NAME test_pid1 COMMAND test_pid1)
+
+  # Hotkey Gate 最终输出安全边界测试（7 个验收场景）
+  add_executable(test_hotkey_gate tests/test_hotkey_gate.cpp)
+  target_link_libraries(test_hotkey_gate PRIVATE ttbox_core)
+  add_test(NAME test_hotkey_gate COMMAND test_hotkey_gate)
+
+  # 热键完全可配置化验收（默认/换键/侧键/双键/any-all/免重启生效/未按键零输出）
+  add_executable(test_hotkey_config tests/test_hotkey_config.cpp)
+  target_link_libraries(test_hotkey_config PRIVATE ttbox_core)
+  add_test(NAME test_hotkey_config COMMAND test_hotkey_config)
+
+  # C6：TargetSelector 防横跳压力测试（交叉/抖动/消失/排序翻转）
+  add_executable(test_selector_stress tests/test_selector_stress.cpp)
+  target_link_libraries(test_selector_stress PRIVATE ttbox_core)
+  add_test(NAME test_selector_stress COMMAND test_selector_stress)
+
+  # C10/C11/C14：生命周期压力 + RuntimeConfig 并发读写压测
+  add_executable(test_lifecycle_stress tests/test_lifecycle_stress.cpp)
+  target_link_libraries(test_lifecycle_stress PRIVATE ttbox_core)
+  add_test(NAME test_lifecycle_stress COMMAND test_lifecycle_stress)
 
   # A11：FOV 分辨率与方向换算测试
   add_executable(test_fov_angle tests/test_fov_angle.cpp)
@@ -206,6 +258,13 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_coordinate_transform tests/test_coordinate_transform.cpp)
   target_link_libraries(test_coordinate_transform PRIVATE ttbox_core)
   add_test(NAME test_coordinate_transform COMMAND test_coordinate_transform)
+
+  # G1 metrics 测试：实例化 CoreRuntime（依赖 V4L2Capture/WorkerPool，仅板端编译）
+  if(UNIX AND NOT APPLE)
+    add_executable(test_metrics_g1 tests/test_metrics_g1.cpp)
+    target_link_libraries(test_metrics_g1 PRIVATE ttbox_core)
+    add_test(NAME test_metrics_g1 COMMAND test_metrics_g1)
+  endif()
 
   # ---- 硬件验收测试（板端：-DTTBOX_CORE_BUILD_HW_TESTS=ON）----
   if(TTBOX_CORE_BUILD_HW_TESTS AND UNIX AND NOT APPLE)

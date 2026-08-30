@@ -4,14 +4,19 @@
 #include "output/IHidOutput.hpp"
 #include <string>
 #include <atomic>
+namespace ttbox::core { class RuntimeConfig; }
 namespace ttbox::core::output {
 class AiboxHidOutput final : public IHidOutput {
 public:
     explicit AiboxHidOutput(std::string hidg_path = "/dev/hidg1") : path_(std::move(hidg_path)) {}
     ~AiboxHidOutput() override { close(); }
     bool send(const OutputAction& action) override;
+    // 静态总闸（output_enabled / 外部 kill 开关）；mouse.enabled 由配置实时判定。
     void set_enabled(bool enabled) { enabled_ = enabled; }
-    void set_button_source(std::atomic<uint16_t>* source, uint16_t mask) { button_source_ = source; button_mask_ = mask; }
+    // 保险门按钮源；放行掩码不再由调用方传入（禁止写死），每次发送时从 config_source_ 实时读取。
+    void set_button_source(std::atomic<uint16_t>* source) { button_source_ = source; }
+    // 绑定运行时配置：热键 mask 与 mouse.enabled 每次发送时取实时快照，改配置即时生效。
+    void set_config_source(ttbox::core::RuntimeConfig* config) { config_source_ = config; }
     void close();
 private:
     bool open_if_needed();
@@ -19,6 +24,6 @@ private:
     int fd_ = -1;
     bool enabled_ = false;
     std::atomic<uint16_t>* button_source_ = nullptr;
-    uint16_t button_mask_ = 0;
+    ttbox::core::RuntimeConfig* config_source_ = nullptr;
 };
 }  // namespace ttbox::core::output

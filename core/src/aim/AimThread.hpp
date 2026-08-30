@@ -12,8 +12,7 @@
 #include "mouse/MotionController.hpp"
 #include "mouse/TargetSelector.hpp"
 #include "model/RuntimeProfile.hpp"
-#include "aim/SmithPredictor.hpp"
-#include "aim/AiboxPpidController.hpp"
+#include "aim/Pid1Controller.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -41,6 +40,9 @@ public:
         int16_t min_move_y = 0;
         int16_t max_move_y = 0;
         uint64_t clipped_frames = 0;
+        uint64_t gated_frames = 0;      // Hotkey Gate 拦截的周期数（热键未按）
+        uint16_t last_hotkey_bits = 0;  // 最近一次采样的物理按键位图（遥测）
+        bool last_injection_allowed = false;  // 最近一次 Gate 判定结果
     };
     AimThread() = default;
     ~AimThread() { stop(); }
@@ -58,10 +60,9 @@ private:
     std::atomic<uint16_t>* physical_buttons_ = nullptr;
     TargetSelector selector_;
     MotionController controller_;
-    AiboxPpidController aibox_pid_x_;
-    AiboxPpidController aibox_pid_y_;
+    Pid1Controller pid_x_;   // pid1.cpp P_PID 1:1 移植：X 轴（predict=3.0）
+    Pid1Controller pid_y_;   // pid1.cpp P_PID 1:1 移植：Y 轴（predict=0.0）
     AimStateMachine state_machine_;
-    SmithPredictor smith_;
     uint64_t last_timestamp_us_ = 0;
     float remainder_x_ = 0.0f;
     float remainder_y_ = 0.0f;

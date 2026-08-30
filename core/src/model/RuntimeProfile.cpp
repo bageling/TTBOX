@@ -1,5 +1,6 @@
 // RuntimeProfile.cpp — RuntimeProfile JSON 序列化/校验
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 #include "model/RuntimeProfile.hpp"
@@ -65,6 +66,26 @@ std::string obj_str(const JsonValue& o, const char* key, const std::string& def)
 // ---------------------------------------------------------------------------
 
 bool RuntimeProfile::validate(std::string* error) const {
+    // 非有限值总闸：JSON 1e999 等可产生 inf，NaN/inf 进入 PID 会输出乱飞（fail-closed 防线）。
+    const float mouse_nums[] = {
+        mouse.kp_x, mouse.kp_y, mouse.ki_x, mouse.ki_y, mouse.kd_x, mouse.kd_y,
+        mouse.predict_x, mouse.predict_y, mouse.rate_x, mouse.rate_y,
+        mouse.smooth_x, mouse.smooth_y, mouse.smooth,
+        mouse.fov_range, mouse.confidence, mouse.sensitivity, mouse.output_scale,
+        mouse.deadzone_x, mouse.deadzone_y, mouse.output_deadzone,
+        mouse.selector_search_radius, mouse.lost_grace_ms,
+        mouse.hfov, mouse.vfov, mouse.move_speed_x, mouse.move_speed_y,
+        mouse.aim_point.aim_offset_x, mouse.aim_point.aim_offset_y,
+        mouse.aim_point.offset_x, mouse.aim_point.offset_y,
+        inference.confidence, inference.iou,
+        fov.center_x, fov.center_y, fov.radius,
+    };
+    for (const float v : mouse_nums) {
+        if (!std::isfinite(v)) {
+            if (error) *error = "配置含非有限数值（NaN/Infinity），已拒绝";
+            return false;
+        }
+    }
     if (inference.confidence < 0.0f || inference.confidence > 1.0f) {
         if (error) *error = "confidence 必须在 [0,1]";
         return false;
@@ -270,6 +291,7 @@ JsonValue RuntimeProfile::to_json() const {
     pv.set("roi_w", JsonValue::number(static_cast<double>(preview.roi_w)));
     pv.set("roi_h", JsonValue::number(static_cast<double>(preview.roi_h)));
     pv.set("center_crop", JsonValue::boolean(preview.center_crop));
+    pv.set("fps", JsonValue::number(static_cast<double>(preview.fps)));
     root.set("preview", std::move(pv));
 
     return root;
@@ -405,6 +427,7 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.preview.roi_w = static_cast<uint32_t>(std::max<int64_t>(obj_int(*pv, "roi_w", 320), 1));
         p.preview.roi_h = static_cast<uint32_t>(std::max<int64_t>(obj_int(*pv, "roi_h", 320), 1));
         p.preview.center_crop = obj_bool(*pv, "center_crop", true);
+        p.preview.fps = static_cast<uint32_t>(std::max<int64_t>(obj_int(*pv, "fps", 0), 0));
     }
     return p;
 }

@@ -11,8 +11,9 @@ bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOut
     if (!mailbox || !output || running_.exchange(true)) return false;
     mailbox_ = mailbox; output_ = std::move(output); interval_us_ = interval_us > 0 ? interval_us : 4000; runtime_config_ = runtime_config; physical_buttons_ = physical_buttons;
     { std::lock_guard<std::mutex> lk(status_mutex_); status_ = {}; status_.running = true; }
-    aibox_pid_x_.init(25.0, 25.0, 3.0, 0.3, 9900.0);
-    aibox_pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0);
+    // pid1.cpp main() 原始参数：X predict=3.0，Y predict=0.0。
+    pid_x_.init(25.0, 25.0, 3.0, 0.3, 9900.0);
+    pid_y_.init(25.0, 25.0, 0.0, 0.3, 9900.0);
     thread_ = std::thread(&AimThread::loop, this);
     return true;
 }
@@ -45,33 +46,49 @@ void AimThread::loop() {
                     kp_x = profile->mouse.kp_x; kp_y = profile->mouse.kp_y;
                     kd_x = profile->mouse.kd_x; kd_y = profile->mouse.kd_y;
                     aim_point = profile->mouse.aim_point;
-                    smith_.set_dead_ms(profile->mouse.smith_dead_ms);
-                    aibox_pid_x_.configure(kp_x, kd_x, profile->mouse.predict_x,
-                                           profile->mouse.rate_x, profile->mouse.smooth_x);
-                    aibox_pid_y_.configure(kp_y, kd_y, profile->mouse.predict_y,
-                                           profile->mouse.rate_y, profile->mouse.smooth_y);
+                    pid_x_.configure(kp_x, kd_x, profile->mouse.predict_x,
+                                     profile->mouse.rate_x, profile->mouse.smooth_x);
+                    pid_y_.configure(kp_y, kd_y, profile->mouse.predict_y,
+                                     profile->mouse.rate_y, profile->mouse.smooth_y);
                 }
             }
             const auto selected = selector_.select(task.detections, scfg,
                 static_cast<uint32_t>(task.timestamp_us / 1000ULL));
-            AimStateEvent event; event.has_target = selected.valid;
-            event.hotkey_active = true;
-            if (physical_buttons_ && runtime_config_) {
+            // ---- Hotkey Gate 输入解析（每周期独立计算，AI 链路照常运行）----
+            // any 模式：主键或副键任一按下即触发；all 模式：两者同时按下。
+            uint16_t hotkey_bits = 0;
+            bool injection_allowed = false;
+            if (physical_buttons_) hotkey_bits = physical_buttons_->load(std::memory_order_acquire);
+            if (runtime_config_) {
                 auto p = runtime_config_->snapshot();
                 if (p) {
-                    const uint16_t buttons = physical_buttons_->load(std::memory_order_acquire);
-                    const bool a = (buttons & p->mouse.aim_hotkey) != 0;
-                    const bool b = p->mouse.aim_hotkey2 != 0 && (buttons & p->mouse.aim_hotkey2) != 0;
+                    const bool a = (hotkey_bits & p->mouse.aim_hotkey) != 0;
+                    const bool b = p->mouse.aim_hotkey2 != 0 && (hotkey_bits & p->mouse.aim_hotkey2) != 0;
                     // 鼠标五键统一位图：左1、右2、中4、侧1 8、侧2 16。
-                    // any 模式下主键命中即可；配置副键时，副键也可单独作为触发键。
-                    event.hotkey_active = p->mouse.aim_hotkey_mode == 1 ? (a && b) : (a || b);
+                    // 热键位全部来自用户配置快照（每周期重读 → 改配置即时生效，无需重启）。
+                    // mouse.enabled 是总开关；any 模式主/副键任一命中即可，all 模式需同时按下。
+                    injection_allowed = p->mouse.enabled &&
+                                        (p->mouse.aim_hotkey_mode == 1 ? (a && b) : (a || b));
                 }
             }
+            AimStateEvent event; event.has_target = selected.valid;
+            event.hotkey_active = injection_allowed;
             event.now_ms = task.timestamp_us / 1000ULL;
-            if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); smith_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
+            if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); pid_x_.reset(); pid_y_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
             float trace_control_x = 0.0f, trace_control_y = 0.0f;
             float trace_smith_dx = 0.0f, trace_smith_dy = 0.0f;
+            // ---- Hotkey Gate：最终输出安全边界 ----
+            // 热键未按下时：无论目标/误差/PID 状态如何，
+            // 本周期一律跳过移动计算（不积分、不累计余数），
+            // 只保留误差遥测；最终发送的 OutputAction 强制 dx=dy=0。
+            // AI 链路（mailbox→selector→误差遥测）不受热键影响，始终运行。
+            if (!injection_allowed) {
+                pid_x_.reset();      // 清在途量/PID 状态，防止旧状态绕过 Gate
+                pid_y_.reset();
+                remainder_x_ = 0.0f;
+                remainder_y_ = 0.0f;
+            }
             if (selected.valid && task.frame_width > 0 && task.frame_height > 0) {
                 float tx = 0.0f, ty = 0.0f;
                 if (!aim_point_at(selected.box, selected.box.class_id, aim_point, &tx, &ty)) {
@@ -80,7 +97,7 @@ void AimThread::loop() {
                 }
                 if (last_target_id_ != -1 && selected.target_id != last_target_id_) {
                     // 目标切换：速度/加速度来自旧目标，必须清除预测状态。
-                    smith_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
+                    pid_x_.reset(); pid_y_.reset(); controller_.reset(); remainder_x_ = remainder_y_ = 0.0f;
                 }
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
@@ -106,37 +123,34 @@ void AimThread::loop() {
                 const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
                     ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
                 (void)dt;
-                // Smith 的在途量单位是最终输出 count；只有 FOV 换算后的控制域与其一致时才扣除。
-                // 非 FOV 模式下 control 是像素误差，不能直接减 HID count，避免量纲混用导致振荡。
-                SmithPredictor::Summary pending{};
-                bool smith_enabled = false;
-                if (runtime_config_) {
-                    auto profile = runtime_config_->snapshot();
-                    smith_enabled = profile && profile->mouse.fov_mode;
-                }
-                if (smith_enabled) {
-                    pending = smith_.predicted(task.frame_number, task.timestamp_us);
-                    if (pending.has_newer_frame) {
-                        // AIBOX 帧号护栏：更新帧已经发过移动，旧帧不得反向修正。
-                        {
-                            std::lock_guard<std::mutex> lk(status_mutex_);
-                            ++status_.stale;
-                        }
-                        continue;
-                    }
-                    control_x -= pending.dx; control_y -= pending.dy;
-                }
-                trace_smith_dx = pending.dx; trace_smith_dy = pending.dy;
+                // pid1.cpp P_PID 直接消费控制域误差（FOV 开启时已是 HID count 域）。
+                trace_smith_dx = 0.0f; trace_smith_dy = 0.0f;
                 trace_control_x = control_x; trace_control_y = control_y;
-                // AIBOX P_PID：X predict=3.0，Y predict=0；不再走简化 PID。
-                const float aibox_x = static_cast<float>(aibox_pid_x_.update(control_x));
-                const float aibox_y = static_cast<float>(aibox_pid_y_.update(control_y));
+                // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
+                const float aibox_x = static_cast<float>(pid_x_.update(control_x));
+                const float aibox_y = static_cast<float>(pid_y_.update(control_y));
                 // 保留小数余量，避免小幅连续误差被整数 HID count 截断。
                 remainder_x_ += aibox_x; remainder_y_ += aibox_y;
-                move_x = static_cast<int16_t>(remainder_x_);
-                move_y = static_cast<int16_t>(remainder_y_);
+                // int16 截断保护：单帧输出 clamp 到 HID count 范围（-32768..32767），
+                // 防异常大值 static_cast 产生实现定义行为（乱飞）。
+                constexpr float kHidMax = 32767.0f;
+                constexpr float kHidMin = -32768.0f;
+                const float cx_f = std::clamp(remainder_x_, kHidMin, kHidMax);
+                const float cy_f = std::clamp(remainder_y_, kHidMin, kHidMax);
+                move_x = static_cast<int16_t>(cx_f);
+                move_y = static_cast<int16_t>(cy_f);
                 remainder_x_ -= static_cast<float>(move_x); remainder_y_ -= static_cast<float>(move_y);
-                smith_.record(task.frame_number, static_cast<float>(move_x), static_cast<float>(move_y), task.timestamp_us);
+                // 兜底：若余数已非有限（理论上 validate 已挡），立即清零防持续乱飞
+                if (!std::isfinite(remainder_x_) || !std::isfinite(remainder_y_)) {
+                    remainder_x_ = 0.0f; remainder_y_ = 0.0f;
+                    pid_x_.reset(); pid_y_.reset();
+                }
+            }
+            // ---- Hotkey Gate 兜底（安全边界最后一行）----
+            // 无论前面算出什么，热键未按下时最终动作强制归零。
+            if (!injection_allowed) {
+                move_x = 0;
+                move_y = 0;
             }
             output_->send(output::OutputAction{move_x, move_y, 0, 0, task.frame_number, task.timestamp_us});
             last_timestamp_us_ = task.timestamp_us;
@@ -164,6 +178,9 @@ void AimThread::loop() {
                 status_.max_move_y = std::max(status_.max_move_y, move_y);
             }
             if (move_x <= -127 || move_x >= 127 || move_y <= -127 || move_y >= 127) ++status_.clipped_frames;
+            if (!injection_allowed) ++status_.gated_frames;
+            status_.last_hotkey_bits = hotkey_bits;
+            status_.last_injection_allowed = injection_allowed;
             status_.last_frame = task.frame_number;
             ++status_.consumed;
         }

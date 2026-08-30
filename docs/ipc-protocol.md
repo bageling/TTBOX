@@ -1,6 +1,6 @@
 # aibox_core IPC 协议 (阶段 A-1)
 
-> 版本: 0.1 · 状态: 基础版（仅 PING / GET_STATUS / GET_CONFIG）· 对应代码 `aibox/core/src/ipc/IpcServer.{hpp,cpp}`
+> 版本: 0.3 · 状态: 基础版 + 配置写入/运行控制/模型管理（PING / GET_STATUS / GET_CONFIG / SET_CONFIG / RUNTIME_CONTROL / MODEL_*）· 对应代码 `aibox/core/src/ipc/IpcServer.{hpp,cpp}`
 
 ## 1. 传输
 
@@ -18,8 +18,8 @@
 ```json
 {
   "id": "<可选回显标识，字符串>",
-  "type": "PING | GET_STATUS | GET_CONFIG",
-  "params": { }   // 可选，当前版本忽略
+  "type": "PING | GET_STATUS | GET_CONFIG | SET_CONFIG | RUNTIME_CONTROL",
+  "params": { }   // SET_CONFIG / RUNTIME_CONTROL 必填
 }
 ```
 
@@ -28,6 +28,40 @@
 | `PING` | 存活探测，恒成功 |
 | `GET_STATUS` | 返回系统运行状态 |
 | `GET_CONFIG` | 返回已加载配置（扁平键值） |
+| `SET_CONFIG` | 原子更新 RuntimeProfile（校验→热更新→落盘），v0.2 新增 |
+| `RUNTIME_CONTROL` | start/stop/restart AI 流水线，v0.2 新增 |
+
+### SET_CONFIG（v0.2）
+
+```json
+{"type":"SET_CONFIG","params":{"profile":{ ...完整 RuntimeProfile JSON... }}}
+→ 成功 {"status":0,"data":{"applied":true,"persisted":true}}
+→ 校验失败 {"status":1,"error":"profile 校验失败: confidence 必须在 [0,1]"}
+```
+
+原子序：JSON 解析 → `RuntimeProfile::validate` → `RuntimeConfig.update`（内存原子替换）→ 写回配置文件（仅替换宿主 JSON 的 `runtime_profile` 键，其余键保留）。任一步失败当前运行配置不被污染；`persisted=false` 表示内存已生效但落盘失败。
+
+### RUNTIME_CONTROL（v0.2）
+
+```json
+{"type":"RUNTIME_CONTROL","params":{"action":"start|stop|restart"}}
+→ 成功 {"status":0,"data":{"action":"start"}}
+```
+
+start/stop 幂等；复用 CoreRuntime 启停，不影响平台 RuntimeController 状态机。
+
+### MODEL_*（v0.3）
+
+| 消息 | params | 说明 |
+|---|---|---|
+| `MODEL_LIST` | 无 | 返回 `{models:[manifest...], active:"<id>"}` |
+| `MODEL_IMPORT` | `src_path`（必须位于收件目录 `models/_incoming/`）, `model_id`, `label?` | 收件目录文件 → staging |
+| `MODEL_VALIDATE` | `model_id` | staging 校验（validator 注入；文件级或板端 RKNN 加载） |
+| `MODEL_INSTALL` | `model_id` | staging → installed（需先 validate 通过） |
+| `MODEL_ACTIVATE` | `model_id` | 设置激活模型；**需重启 AI 流水线生效**（Core 无模型热加载） |
+| `MODEL_REMOVE` | `model_id` | 删除 installed 模型（激活中拒绝） |
+
+`model_id` 仅允许 `[A-Za-z0-9_-]`（1~64 字符，防路径穿越）。大文件不走红 IPC：先由 Gateway 落盘到收件目录，再发 `MODEL_IMPORT` 引用路径。
 
 ## 4. 响应
 

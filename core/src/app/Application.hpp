@@ -10,6 +10,7 @@
 #include "common/Metrics.hpp"
 #include "config/ConfigManager.hpp"
 #include "ipc/IpcServer.hpp"
+#include "model/ModelManagement.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "output/IHidOutput.hpp"
 #include "runtime/CoreRuntime.hpp"
@@ -39,7 +40,7 @@ public:
     const ConfigManager& config() const { return config_; }
     SystemStatus status() const;
 
-    // ---- 对外查询接口（授权状态 / 卡号 / Pro 功能） ----
+    // 对外查询接口（授权状态 / 卡号 / Pro 功能）
     auth::LicenseStatus license_status_snapshot() const;
     bool license_allow_run() const;
     bool license_is_pro() const;
@@ -48,6 +49,20 @@ private:
     // 供 IpcServer providers 使用
     SystemStatus status_provider() const;
     JsonValue config_provider() const;
+
+    // SET_CONFIG 原子更新（解析→validate→RuntimeConfig.update→落盘，任一失败不污染现配置）。
+    // 返回 false 时 error 说明原因；persisted 表示是否写入配置文件。
+    bool handle_config_update(const JsonValue& profile_json, std::string* error, bool* persisted);
+    // RUNTIME_CONTROL 启停（复用 CoreRuntime start/stop，不改状态机）
+    bool handle_runtime_control(const std::string& action, std::string* error);
+    // 模型管理（v0.3）：桥接 ModelRegistry（import/validate/install/activate/remove/list）
+    bool handle_model_import(const std::string& src_path, const std::string& model_id,
+                             const std::string& label, std::string* error);
+    JsonValue handle_model_list();
+    bool handle_model_validate(const std::string& model_id, std::string* error);
+    bool handle_model_install(const std::string& model_id, std::string* error);
+    bool handle_model_activate(const std::string& model_id, std::string* error);
+    bool handle_model_remove(const std::string& model_id, std::string* error);
 
     // 从配置构造 CoreRuntime 参数
     bool build_runtime_params(CoreRuntime::Params& out_params, std::string* error);
@@ -69,6 +84,8 @@ private:
     std::shared_ptr<output::IHidOutput> hid_output_;
     std::unique_ptr<CoreRuntime> core_runtime_;
     bool runtime_started_ = false;
+    // 模型仓库（v0.3）：root = 配置 model_registry_root 或 <项目>/models
+    std::unique_ptr<ModelManagement> model_management_;
 
     // ---- 授权（等价原 aibox-bl cardVerifyThreadFunc）----
     std::unique_ptr<auth::AiboxLicenseClient> license_client_;

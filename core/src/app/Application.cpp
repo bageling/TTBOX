@@ -9,9 +9,12 @@
 #include <thread>
 
 #include "common/Logger.hpp"
+#include "model/ModelManagement.hpp"
 #include "output/AiboxHidOutput.hpp"
 #include "output/FifoHidOutput.hpp"
 #include "ttbox/core/version.hpp"
+
+#include <cstdio>
 
 namespace ttbox::core {
 
@@ -123,6 +126,10 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         static_cast<uint32_t>(config_.get_int("model_input_width", 640));
     out_params.workers.out_h =
         static_cast<uint32_t>(config_.get_int("model_input_height", 640));
+    out_params.preview.fps = static_cast<int>(config_.get_int("preview_fps", 5));
+    out_params.preview.out_width = static_cast<uint32_t>(config_.get_int("preview_width", 640));
+    out_params.preview.out_height = static_cast<uint32_t>(config_.get_int("preview_height", 360));
+    out_params.preview.jpeg_quality = static_cast<int>(config_.get_int("preview_quality", 60));
     out_params.workers.conf_thres =
         static_cast<float>(config_.get_double("conf", 0.25));
     out_params.workers.iou_thres =
@@ -141,11 +148,12 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         const std::string hidg_path =
             config_.get_string("output_hidg_path", "/dev/hidg0");
         auto output = std::make_shared<output::AiboxHidOutput>(hidg_path);
+        // output_enabled 是后端静态总闸（不写配置时默认关闭，fail-closed）。
+        // mouse.enabled 由 AimThread 与 AiboxHidOutput 每周期实时读取 RuntimeConfig，
+        // 不在此快照 —— 用户改配置后无需重启即生效。
         bool enabled = config_.get_bool("output_enabled", false);
-        if (auto profile = runtime_config_.snapshot()) {
-            enabled = profile->mouse.enabled;
-        }
         output->set_enabled(enabled);
+        output->set_config_source(&runtime_config_);
         hid_output_ = std::move(output);
     }
     out_params.output = hid_output_;
@@ -287,7 +295,57 @@ int Application::initialize(int argc, char** argv) {
 
     // ---- 5. 启动 IPC 服务 ----
     ipc_.set_status_provider([this] { return status_provider(); });
+    ipc_.set_preview_provider([this](std::vector<uint8_t>* out) {
+        return core_runtime_ && core_runtime_->preview() && core_runtime_->preview()->running()
+                   ? core_runtime_->preview()->snapshot(out)
+                   : false;
+    });
     ipc_.set_config_provider([this] { return config_provider(); });
+    ipc_.set_config_update_handler(
+        [this](const JsonValue& profile_json, std::string* error, bool* persisted) {
+            return handle_config_update(profile_json, error, persisted);
+        });
+    ipc_.set_runtime_control_handler(
+        [this](const std::string& action, std::string* error) {
+            return handle_runtime_control(action, error);
+        });
+
+    // ---- 模型管理（v0.3）：init 仓库 + 注册回调 ----
+    {
+        const std::string reg_root = config_.get_string("model_registry_root", "");
+        model_management_ = std::make_unique<ModelManagement>(
+            ModelRegistryOptions{reg_root, true});
+        std::string mm_error;
+        if (!model_management_->init(&mm_error)) {
+            TTBOX_LOG_WARN("ModelRegistry 初始化失败（模型管理不可用）: " + mm_error);
+            model_management_.reset();
+        } else {
+            model_management_->set_validator(ModelManagement::file_level_validator);
+            ipc_.set_model_list_handler([this] { return handle_model_list(); });
+            ipc_.set_model_import_handler(
+                [this](const std::string& src, const std::string& id,
+                       const std::string& label, std::string* error) {
+                    return handle_model_import(src, id, label, error);
+                });
+            ipc_.set_model_validate_handler(
+                [this](const std::string& id, std::string* error) {
+                    return handle_model_validate(id, error);
+                });
+            ipc_.set_model_install_handler(
+                [this](const std::string& id, std::string* error) {
+                    return handle_model_install(id, error);
+                });
+            ipc_.set_model_activate_handler(
+                [this](const std::string& id, std::string* error) {
+                    return handle_model_activate(id, error);
+                });
+            ipc_.set_model_remove_handler(
+                [this](const std::string& id, std::string* error) {
+                    return handle_model_remove(id, error);
+                });
+            TTBOX_LOG_INFO("ModelRegistry 已就绪: " + model_management_->registry().root_dir());
+        }
+    }
     std::string ipc_error;
     if (!ipc_.start(ipc_path_, &ipc_error)) {
         TTBOX_LOG_ERROR("IPC 启动失败: " + ipc_error);
@@ -328,12 +386,16 @@ void Application::run() {
 
     std::string rt_error;
     if (core_runtime_ && !core_runtime_->start(&rt_error)) {
-        TTBOX_LOG_ERROR("CoreRuntime 启动失败: " + rt_error);
-        running_.store(false);
-        return;
+        // G4 语义：采集/推理启动失败（如 HDMI 无信号、V4L2 CMA 碎片、模型缺失）
+        // 不再杀死整个进程——IPC 保持可用，Web 面板仍可读状态/改配置，
+        // GET_STATUS 的 runtime_running=false 且 metrics=0（unavailable）。
+        // 用户可通过 RUNTIME_CONTROL start 重试。
+        TTBOX_LOG_WARN("CoreRuntime 启动失败（进程保持运行，可通过 RUNTIME_CONTROL 重试）: " + rt_error);
+        runtime_started_ = false;
+    } else {
+        runtime_started_ = true;
+        TTBOX_LOG_INFO("CoreRuntime 已启动 (Ctrl+C/SIGTERM 退出)");
     }
-    runtime_started_ = true;
-    TTBOX_LOG_INFO("CoreRuntime 已启动 (Ctrl+C/SIGTERM 退出)");
 
     constexpr auto kTickMs = std::chrono::milliseconds(50);
     constexpr auto kHeartbeatSec = std::chrono::seconds(10);
@@ -405,15 +467,203 @@ SystemStatus Application::status_provider() const {
     st.ipc_socket = ipc_.socket_path();
     st.config_file = config_.path();
     st.runtime_running = core_runtime_ ? core_runtime_->running() : false;
+    // G1：真实流水线指标（runtime 未运行时保持全 0 = unavailable）
+    if (core_runtime_) {
+        core_runtime_->collect_metrics(&st.metrics);
+    }
     return st;
 }
 
 JsonValue Application::config_provider() const {
+    // G4 契约：Web 需要 RuntimeProfile 结构（前端 ConfigContext 深拷贝改字段 → 全量 PUT）。
+    // 数据源优先级（唯一真源 = RuntimeConfig 内存 canonical）：
+    //   1) runtime_config_ 内存快照（SET_CONFIG 热更新后的最新值）
+    //   2) 回退到宿主配置文件的 runtime_profile 键（启动时来源）
     JsonValue data = JsonValue::object();
-    for (const auto& [key, value] : config_.flatten()) {
-        data.set(key, JsonValue::string(value));
+    JsonValue prof = JsonValue::object();
+    if (auto snap = runtime_config_.snapshot()) {
+        prof = snap->to_json();
+    } else if (config_.loaded()) {
+        const JsonValue* p = config_.root().find("runtime_profile");
+        if (p != nullptr && p->is_object()) {
+            prof = *p;
+        }
     }
+    data.set("runtime_profile", prof);
+    data.set("config_file", JsonValue::string(config_.path()));
     return data;
+}
+
+// SET_CONFIG 原子更新：
+//   JSON 解析 → RuntimeProfile::validate → RuntimeConfig.update（内存原子替换）→ 持久化。
+// 任何一步失败都直接返回 false；内存与磁盘均保证不被污染。
+bool Application::handle_config_update(const JsonValue& profile_json, std::string* error,
+                                       bool* persisted) {
+    if (persisted) *persisted = false;
+    if (!profile_json.is_object()) {
+        if (error) *error = "profile 必须是 JSON 对象";
+        return false;
+    }
+
+    // 1) 解析（严格：非法字段/类型错误 → 失败）
+    RuntimeProfile profile = RuntimeProfile::from_json(profile_json);
+    std::string validate_error;
+    if (!profile.validate(&validate_error)) {
+        if (error) *error = validate_error.empty() ? "profile 校验失败" : ("profile 校验失败: " + validate_error);
+        return false;
+    }
+
+    // 2) 内存热更新（原子替换 shared_ptr；AimThread/Worker 下个周期即读到新配置）
+    runtime_config_.update(profile);
+
+    // 3) 持久化：读回宿主配置文件（config_ 的 root），仅替换 runtime_profile 键，
+    //    其余键（app/conf/nms/...）原样保留；保存失败不撤销内存更新（热更新已生效），
+    //    以 persisted=false 告知调用方“内存已应用但落盘失败”。
+    bool saved = false;
+    if (!config_path_.empty() && config_.loaded()) {
+        JsonValue merged = config_.root();  // 深拷贝宿主 JSON
+        merged.set("runtime_profile", profile_json);
+        const std::string text = merged.dump();
+        FILE* f = std::fopen(config_path_.c_str(), "w");
+        if (f) {
+            const bool ok = std::fwrite(text.data(), 1, text.size(), f) == text.size();
+            if (std::fclose(f) != 0 && ok) {
+                saved = false;
+            } else {
+                saved = ok;
+            }
+        }
+        if (!saved && error) {
+            *error = "内存配置已生效，但写入配置文件失败: " + config_path_;
+        }
+    }
+    if (persisted) *persisted = saved;
+    return true;
+}
+
+// RUNTIME_CONTROL：start / stop / restart。
+// 直接复用 CoreRuntime start/stop（幂等），不触碰平台 RuntimeController 状态机。
+bool Application::handle_runtime_control(const std::string& action, std::string* error) {
+    if (!core_runtime_) {
+        if (error) *error = "core_runtime 未初始化";
+        return false;
+    }
+    if (action == "start") {
+        if (core_runtime_->running()) return true;  // 幂等
+        if (!core_runtime_->start(error)) {
+            if (error && error->empty()) *error = "CoreRuntime 启动失败";
+            return false;
+        }
+        runtime_started_ = true;
+        return true;
+    }
+    if (action == "stop") {
+        core_runtime_->stop();
+        runtime_started_ = false;
+        return true;
+    }
+    if (action == "restart") {
+        core_runtime_->stop();
+        if (!core_runtime_->start(error)) {
+            if (error && error->empty()) *error = "CoreRuntime 重启失败";
+            runtime_started_ = false;
+            return false;
+        }
+        runtime_started_ = true;
+        return true;
+    }
+    if (error) *error = "未知 action: " + action;
+    return false;
+}
+
+// ---- 模型管理（v0.3）实现 ----
+// 收件目录：<registry_root>/_incoming。Gateway 上传端点先把文件写到这里，
+// 再发 MODEL_IMPORT 引用路径。import 只允许引用收件目录内的文件（防任意路径读取）。
+static std::string incoming_dir_of(const ModelRegistry& reg) {
+    return reg.root_dir() + "/_incoming";
+}
+
+bool Application::handle_model_import(const std::string& src_path, const std::string& model_id,
+                                      const std::string& label, std::string* error) {
+    if (!model_management_) {
+        if (error) *error = "模型仓库不可用（初始化失败）";
+        return false;
+    }
+    ModelRegistry& reg = model_management_->registry();
+    // 路径安全：src_path 必须位于收件目录内（防 ../ 任意文件读取）。
+    // Windows 下 fs 返回反斜杠路径，统一归一化成 '/' 再比较。
+    auto normalize = [](std::string s) {
+        for (char& c : s) if (c == '\\') c = '/';
+        return s;
+    };
+    const std::string incoming = normalize(incoming_dir_of(reg));
+    const std::string src_norm = normalize(src_path);
+    if (src_norm.rfind(incoming, 0) != 0) {
+        if (error) *error = "模型文件必须先上传到收件目录（" + incoming + "）";
+        return false;
+    }
+    ModelManifest manifest;
+    manifest.label = label.empty() ? model_id : label;
+    manifest.origin = "local";
+    if (!reg.import(src_path, model_id, manifest, error)) return false;
+    TTBOX_LOG_INFO("模型已导入 staging: " + model_id);
+    return true;
+}
+
+JsonValue Application::handle_model_list() {
+    JsonValue data = JsonValue::object();
+    if (!model_management_) {
+        data.set("models", JsonValue::array());
+        data.set("active", JsonValue::string(""));
+        data.set("available", JsonValue::boolean(false));
+        return data;
+    }
+    const ModelRegistry& reg = model_management_->registry();
+    JsonValue arr = JsonValue::array();
+    for (const auto& m : reg.list()) {
+        arr.push_back(m.to_json());
+    }
+    data.set("models", std::move(arr));
+    data.set("active", JsonValue::string(reg.active_model()));
+    data.set("available", JsonValue::boolean(true));
+    return data;
+}
+
+bool Application::handle_model_validate(const std::string& model_id, std::string* error) {
+    if (!model_management_) {
+        if (error) *error = "模型仓库不可用";
+        return false;
+    }
+    return model_management_->registry().validate(model_id, error);
+}
+
+bool Application::handle_model_install(const std::string& model_id, std::string* error) {
+    if (!model_management_) {
+        if (error) *error = "模型仓库不可用";
+        return false;
+    }
+    return model_management_->registry().install(model_id, error);
+}
+
+bool Application::handle_model_activate(const std::string& model_id, std::string* error) {
+    if (!model_management_) {
+        if (error) *error = "模型仓库不可用";
+        return false;
+    }
+    // 激活后需要重启 AI 流水线才加载新模型（当前 Core 无热加载能力，如实告知 UI）。
+    const bool ok = model_management_->registry().activate(model_id, error);
+    if (ok) {
+        TTBOX_LOG_INFO("模型已激活（重启 AI 流水线后生效）: " + model_id);
+    }
+    return ok;
+}
+
+bool Application::handle_model_remove(const std::string& model_id, std::string* error) {
+    if (!model_management_) {
+        if (error) *error = "模型仓库不可用";
+        return false;
+    }
+    return model_management_->registry().remove(model_id, error);
 }
 
 }  // namespace ttbox::core
