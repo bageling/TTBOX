@@ -4,7 +4,6 @@
 #include <utility>
 
 #include "model/RuntimeProfile.hpp"
-#include "output/KmboxNetBackend.hpp"
 #include "output/LocalHidBackend.hpp"
 
 namespace ttbox::core::output {
@@ -42,28 +41,6 @@ bool OutputBackend::configure(const Params& p, std::string* error) {
         b->set_config_source(p.runtime_config);
         backend_ = std::move(b);
         return true;
-    }
-    if (p.kind == "kmboxnet") {
-        // KmboxNetBackend：配置结构/会话流程/校验规则已实证
-        // （docs/research/YU_OUTPUT_BACKEND_RESEARCH.md 3.x）；UDP 报文布局 UNVERIFIED。
-        // 报文布局就绪前 backend 可用但发送返回 not-ready（不伪造协议）。
-        KmboxNetBackend::Options opt;
-        opt.ip = p.kmboxnet_ip;
-        opt.port = p.kmboxnet_port;
-        opt.monitor_port = p.kmboxnet_monitor_port;
-        opt.timeout_ms = p.kmboxnet_timeout_ms;
-        opt.uuid = p.kmboxnet_uuid;
-        opt.encrypted = p.kmboxnet_encrypted;
-        auto b = std::make_unique<KmboxNetBackend>(opt);
-        b->set_enabled(p.enabled);
-        b->set_button_source(p.button_source);
-        b->set_config_source(p.runtime_config);
-        backend_ = std::move(b);
-        return true;
-    }
-    if (p.kind == "makcu" || p.kind == "ferrum" || p.kind == "kmboxb") {
-        if (error) *error = p.kind + " backend 尚未接入（需串口设备真机验证）";
-        return false;
     }
     if (error) *error = "未知输出后端: " + p.kind;
     return false;

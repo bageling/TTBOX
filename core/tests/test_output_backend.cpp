@@ -13,7 +13,6 @@
 #include <string>
 
 #include "model/RuntimeProfile.hpp"
-#include "output/KmboxNetBackend.hpp"
 #include "output/OutputBackend.hpp"
 
 using namespace ttbox::core;
@@ -42,27 +41,6 @@ int main() {
         p.kind = "no_such_backend";
         std::string err;
         check(!b.configure(p, &err) && b.backend() == nullptr, "backend: invalid kind 拒绝");
-    }
-    {
-        // kmboxnet：配置可成功（框架实证）；发送为 not-ready（报文布局 UNVERIFIED）
-        OutputBackend b;
-        OutputBackend::Params p;
-        p.kind = "kmboxnet";
-        p.kmboxnet_ip = "192.168.2.228";
-        p.kmboxnet_uuid = "01234567";  // 8 hex，实证校验通过
-        std::string err;
-        check(b.configure(p, &err), "backend: kmboxnet 可配置(框架实证)");
-        check(b.backend() != nullptr && std::string(b.backend()->name()) == "kmboxnet",
-              "backend: kmboxnet name()==kmboxnet");
-        // 报文布局未实证 → connect/发送应拒绝（不伪造协议）
-        check(!b.backend()->connect(&err), "backend: kmboxnet connect not-ready(UNVERIFIED)");
-        // 配置校验：uuid 长度错误 → validate 失败
-        KmboxNetBackend::Options bad_opt;
-        bad_opt.ip = "192.168.2.228";
-        bad_opt.uuid = "abcdefg";  // 7 位
-        KmboxNetBackend bad(bad_opt);
-        std::string verr;
-        check(!bad.validate(&verr), "backend: kmboxnet uuid 非 8 hex 校验拒绝");
     }
 
     // ---- 2) 本机后端生命周期（Windows 无硬件 → connect 报错但可测状态）----

@@ -47,7 +47,6 @@ set(CORE_SOURCES
   src/output/AiboxHidOutput.cpp
   src/output/OutputBackend.cpp
   src/output/LocalHidBackend.cpp
-  src/output/KmboxNetBackend.cpp
   src/common/Logger.cpp
   src/common/Json.cpp
   src/config/ConfigManager.cpp
