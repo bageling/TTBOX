@@ -31,10 +31,10 @@ sudo /home/ubuntu/ttbox-mainline/core/build/hardware_runner_main   --model /home
 
 ### 真实输出
 
-真实 AIBOX Gadget 输出必须显式指定：
+真实 TTBOX Gadget 输出必须显式指定：
 
 ```bash
-sudo .../hardware_runner_main --model /home/ubuntu/sjz-XCSH.rknn   --device /dev/video0 --workers 1 --seconds 3 --aibox-gadget
+sudo .../hardware_runner_main --model /home/ubuntu/sjz-XCSH.rknn   --device /dev/video0 --workers 1 --seconds 3 --ttbox-gadget
 ```
 
 当前输出格式：Report ID 2 + 8 字节鼠标数据，目标 Gadget 为 `/dev/hidg1`。

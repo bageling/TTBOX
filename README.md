@@ -56,7 +56,7 @@ Preview          : 640x360 12fps（RGA 硬件缩放 + 真 MJPEG 流）
 
 ### 架构现状
 
-- `AimThread` 已接管目标跟踪/控制：Pid1Controller + AlphaBetaGammaFilter + FOV + 预测 + 输出策略（旧 AiboxPpidController / SmithPredictor 已删除）
+- `AimThread` 已接管目标跟踪/控制：Pid1Controller + AlphaBetaGammaFilter + FOV + 预测 + 输出策略（旧 TtboxPpidController / SmithPredictor 已删除）
 - `WorkerPool` 独立 RKNN context 并行（core_mask 1/2/4），latest-frame 认领（seq%N）无重复处理
 - 检测解码按输出结构自动分发：单输出(yolo) / DFL 多输出(巨无敌乱杀 6 输出)
 - 无第二套 Capture；Preview 复用 Capture 最新帧，异步 RGA+JPEG，不阻塞 AI
@@ -85,9 +85,9 @@ docs/               架构、协议、性能和部署文档
 ## Web 控制台（板端）
 
 - TTBOX Web Gateway：`scripts/ttbox_gateway.py`（0.0.0.0:8081），托管 `web/dist` 前端构建产物
-- 桥接层：`web/static/ttbox-bridge.js`（在 yu 的 app.js 之前加载，拦截 fetch 双向翻译）
+- 桥接层：`web/static/ttbox-bridge.js`（在 ttbox 的 app.js 之前加载，拦截 fetch 双向翻译）
 - Preview：`/api/preview.jpg`（单帧）与 `/api/preview.mjpg`（MJPEG 流，前端 img 依赖流刷新）
-- 板端 systemd：`ttbox-core` + `ttbox-web@8081`（与 yu 8080 独立并存）
+- 板端 systemd：`ttbox-core` + `ttbox-web@8081`（与 ttbox 8080 独立并存）
 
 ## 构建
 

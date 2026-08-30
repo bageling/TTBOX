@@ -154,7 +154,7 @@ raw-gadget README 亦明确建议标准类设备使用 Composite Framework。因
 - **USB Device/OTG**：`usbdrd3_0`（dwc3-gadget UDC 已注册，`/sys/class/udc/fc000000.usb`）✓
 - **DRD/Role Switch**：`CONFIG_USB_DWC3_DUAL_ROLE=y` + typec port0 ✓
 - **内核**：`CONFIG_USB_GADGET=y`、`CONFIG_USB_CONFIGFS=y`、`CONFIG_USB_F_HID=y`、`CONFIG_HIDRAW=y`、`CONFIG_USB_HID=y` ✓（全部内置，无需改内核）
-- **HID Gadget 实测**：aibox-hid（键盘 63B desc / 鼠标 52B desc）已绑定 UDC，`/dev/hidg0`+`/dev/hidg1` 已出现，UDC state=configured，主机侧可接收报告 ✓
+- **HID Gadget 实测**：ttbox-hid（键盘 63B desc / 鼠标 52B desc）已绑定 UDC，`/dev/hidg0`+`/dev/hidg1` 已出现，UDC state=configured，主机侧可接收报告 ✓
 
 结论：**Orange Pi 5 Plus 当前内核即支持 Host → Proxy → Device 完整链路，无需修改内核。**
 

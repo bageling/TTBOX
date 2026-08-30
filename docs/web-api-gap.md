@@ -36,7 +36,7 @@
 
 ### GAP-A：`/api/state` 全量聚合端点
 - **现状**：Web 轮询需 3 个请求（status/config/models）才能渲染总览。
-- **参考**：yu 真机（192.168.0.53:8080）用 `GET /api/state` 一次返回全量。
+- **参考**：ttbox 真机（192.168.0.53:8080）用 `GET /api/state` 一次返回全量。
 - **价值**：减少请求数、简化前端；**优先级：中**（3 个并行请求在 5s 轮询下可接受）。
 - **实现方式**：Gateway 侧聚合（不动 Core IPC）；或前端 `Promise.all`（已可做，无需新 API）。
 
@@ -50,12 +50,12 @@
 
 ### GAP-D：AimThread 实时状态（目标状态/热键状态）
 - **现状**：AimThread::Status 有 consumed/target_frames/gated_frames 等，**未并入 GET_STATUS**。
-- **价值**：总览"目标状态"（yu 的 aim.active 对应物）；**优先级：中**。
+- **价值**：总览"目标状态"（ttbox 的 aim.active 对应物）；**优先级：中**。
 - **实现方式**：Application::status_provider 里把 aim_thread_.status() 并入 metrics 段（Core 小改，不破坏现有字段）。
 
 ### GAP-E：MJPEG 预览
 - **现状**：无出流。
-- **价值**：总览实时画面 + FOV 圈（yu 核心卖点）；**优先级：高**（板端 V4L2 已就绪，需新端点，Core 侧任务）。
+- **价值**：总览实时画面 + FOV 圈（ttbox 核心卖点）；**优先级：高**（板端 V4L2 已就绪，需新端点，Core 侧任务）。
 
 ### GAP-F：预设参数保存/载入
 - **现状**：无。

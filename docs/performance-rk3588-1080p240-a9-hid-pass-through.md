@@ -15,7 +15,7 @@
 - [a9-hid-project-comparison.md](./a9-hid-project-comparison.md) — 四项目对照分析（含 License）
 - [a9-hid-architecture.md](./a9-hid-architecture.md) — 架构设计（含实测限制）
 - 实现：`src/hid/`（HidTypes/SpscQueue/HidForwarder/HidParser）+ `scripts/a9_setup_hid_gadget.sh` 等
-- 测试：`aibox-hid-test`、`test_hid_forward_hw`、`test_hid_loopback`、`test_hid_load_sim`、`test_hid.cpp`（单元）
+- 测试：`ttbox-hid-test`、`test_hid_forward_hw`、`test_hid_loopback`、`test_hid_load_sim`、`test_hid.cpp`（单元）
 
 ---
 
@@ -31,7 +31,7 @@
 
 ## 3. HID RAW — PASS
 
-- hidraw 读取路径（HIDIOCGRAWINFO + HIDIOCGRDESC + poll/read）就绪（aibox-hid-test 枚举）
+- hidraw 读取路径（HIDIOCGRAWINFO + HIDIOCGRDESC + poll/read）就绪（ttbox-hid-test 枚举）
 - 当前无真实键鼠插入 → 如实报 **NOT AVAILABLE**（不伪造）；回环验证转发链路完整
 
 ## 4. Keyboard — PASS（链路就绪，真实设备待插入）
@@ -46,7 +46,7 @@
 
 ## 6. HID Gadget — PASS
 
-- configfs `aibox-hid`：Keyboard+Mouse composite，UDC=fc000000.usb
+- configfs `ttbox-hid`：Keyboard+Mouse composite，UDC=fc000000.usb
 - 实测：`/dev/hidg0`+`/dev/hidg1` 出现，UDC state=**configured**，主机侧可接收报告（write OK）
 - 主机识别标准 HID 设备，无需专用驱动
 
@@ -167,7 +167,7 @@
 
 **① 键鼠能否真实 USB HID 透传？**
 - **链路已完整建立并可运行**：hidraw（Host 读取）→ C++ 转发器（SPSC 队列）→ configfs f_hid gadget（Device 输出）→ 主机。gadget 已被主机枚举（configured），主机侧可接收标准 HID 报告。
-- 真实键鼠端到端验证（插入真实键鼠到板子 USB Host 口后运行 `sudo ./aibox-hid-test --forward`）：当前环境**无物理键鼠插入，标 NOT AVAILABLE，不伪造**。
+- 真实键鼠端到端验证（插入真实键鼠到板子 USB Host 口后运行 `sudo ./ttbox-hid-test --forward`）：当前环境**无物理键鼠插入，标 NOT AVAILABLE，不伪造**。
 
 **② 最高实际回报率是多少？**
 - 转发器链路：支持 **≥8000Hz**（合成负载 100% 无损、队列零积压）。

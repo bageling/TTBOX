@@ -27,7 +27,7 @@
 | 项 | 值（实测读取） |
 |---|---|
 | YOLO 版本 | yolo261n（自定义命名，非 v8/v11 官方版本）|
-| 模型文件 | /opt/aibox2/models/yolo261n-rk3588.rknn，7.45 MB，格式 RKNN v6（magic `RKNN`, version 6）|
+| 模型文件 | /opt/ttbox2/models/yolo261n-rk3588.rknn，7.45 MB，格式 RKNN v6（magic `RKNN`, version 6）|
 | 输入尺寸 | **640×640**（config `model_input_width/height=640`；模型文件字符串 `shape: [1,3,640,640]`）|
 | **320 模型** | **不存在**（models/ 仅 1 个文件；禁止冒充，320 相关全部 UNTESTED）|
 | Layout | 原始 ONNX **NCHW**；runtime 要求 **NHWC** 输入（日志：`need NHWC data format`）|

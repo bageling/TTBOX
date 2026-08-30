@@ -30,7 +30,7 @@
 | Expired | 停止授权功能（AI 推理停止；Web/Agent/系统管理保留） |
 | Revoked | 后台明确吊销 → 按策略停止授权功能 |
 
-## 3. 本地授权缓存（`/opt/aibox2/data/license.json`）
+## 3. 本地授权缓存（`/opt/ttbox2/data/license.json`）
 
 ```json
 {

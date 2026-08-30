@@ -7,10 +7,10 @@
 
 | 单元 | 内容 | 更新粒度 | 是否需停 Core | 回滚方式 |
 |---|---|---|---|---|
-| Core | `aibox-core` 可执行 + 库 | 版本目录切换 | 是（原子切换后重启） | 切换回旧版本目录 |
+| Core | `ttbox-core` 可执行 + 库 | 版本目录切换 | 是（原子切换后重启） | 切换回旧版本目录 |
 | Model | `.rknn` + 模型配置 JSON | 文件替换（新版本目录） | 否（Runtime 热切换或重启 Core） | 保留旧模型目录 |
-| Web | `aibox-web` + 静态资源 | 版本目录切换 | 否 | 目录切换 |
-| Agent | `aibox-agent` | 版本目录切换 | 否 | 目录切换 |
+| Web | `ttbox-web` + 静态资源 | 版本目录切换 | 否 | 目录切换 |
+| Agent | `ttbox-agent` | 版本目录切换 | 否 | 目录切换 |
 | Config | `config/*.json` | 文件替换 + schema 校验 | 否（热重载） | 备份恢复 |
 
 ## 2. 版本模型
@@ -21,7 +21,7 @@
 
 ```json
 {
-  "device_id": "aibox-<serial>",
+  "device_id": "ttbox-<serial>",
   "units": {
     "core":  { "version": "0.3.0", "sha256": "...", "compat": {"kernel": ">=6.1.99", "rga": ">=1.9.1"} },
     "model": { "version": "1.2.0", "sha256": "...", "compat": {"core": ">=0.2.0"} },
@@ -55,14 +55,14 @@
 ## 5. 失败恢复与回滚
 
 - 每个更新单元保留最近 **N（默认 2）个版本** 备份
-- 启动自检（`aibox doctor` 等价物）失败 → systemd/Agent 自动切回上一版本重启
+- 启动自检（`ttbox doctor` 等价物）失败 → systemd/Agent 自动切回上一版本重启
 - 掉电中断：staging 半成品不影响 current；启动时清理 staging
-- 回滚命令：`aibox-update rollback <unit>`
+- 回滚命令：`ttbox-update rollback <unit>`
 
 ## 6. 存储布局
 
 ```
-/opt/aibox2/
+/opt/ttbox2/
 ├── core/current -> core/v0.3.0/
 ├── core/v0.3.0/   core/v0.2.0/          # 版本目录
 ├── models/current -> models/m1.2.0/
@@ -79,7 +79,7 @@
 ## 7. 离线运行
 
 - AI Core 运行**不依赖**网络/后台/更新（离线自治）
-- 离线包：`.aibox-update`（tar + manifest + sha256）可由 U 盘/Web 上传导入
+- 离线包：`.ttbox-update`（tar + manifest + sha256）可由 U 盘/Web 上传导入
 - 离线期间授权凭本地缓存 + 宽限期运行（见 `device-validation.md`）
 
 ## 8. 安全
@@ -90,5 +90,5 @@
 
 ## 9. 与现有实现的关系
 
-- 当前仓库 `aibox/core/` 为源码形态；版本化部署目录在阶段 C/D 落地
+- 当前仓库 `ttbox/core/` 为源码形态；版本化部署目录在阶段 C/D 落地
 - 现有 `scripts/build/*`、`scripts/systemd/*` 为部署基础；Update Manager 在其上构建

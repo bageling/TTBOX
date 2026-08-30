@@ -1,10 +1,10 @@
-# aibox_core IPC 协议 (阶段 A-1)
+# ttbox_core IPC 协议 (阶段 A-1)
 
-> 版本: 0.3 · 状态: 基础版 + 配置写入/运行控制/模型管理（PING / GET_STATUS / GET_CONFIG / SET_CONFIG / RUNTIME_CONTROL / MODEL_*）· 对应代码 `aibox/core/src/ipc/IpcServer.{hpp,cpp}`
+> 版本: 0.3 · 状态: 基础版 + 配置写入/运行控制/模型管理（PING / GET_STATUS / GET_CONFIG / SET_CONFIG / RUNTIME_CONTROL / MODEL_*）· 对应代码 `ttbox/core/src/ipc/IpcServer.{hpp,cpp}`
 
 ## 1. 传输
 
-- **Unix (RK3588 / Linux)**：AF_UNIX SOCK_STREAM，默认 socket 路径 `/tmp/aibox_core.sock`（`--ipc <path>` 可覆盖；启动时自动清理残留文件，chmod 0666 允许非 root 客户端）
+- **Unix (RK3588 / Linux)**：AF_UNIX SOCK_STREAM，默认 socket 路径 `/tmp/ttbox_core.sock`（`--ipc <path>` 可覆盖；启动时自动清理残留文件，chmod 0666 允许非 root 客户端）
 - **Windows（预留 host 构建）**：TCP loopback，路径格式 `tcp:<port>`
 
 ## 2. 帧格式
@@ -90,7 +90,7 @@ start/stop 幂等；复用 CoreRuntime 启停，不影响平台 RuntimeControlle
 ### PING
 
 ```json
-{ "pong": true, "server": "aibox_core" }
+{ "pong": true, "server": "ttbox_core" }
 ```
 
 ### GET_STATUS
@@ -98,10 +98,10 @@ start/stop 幂等；复用 CoreRuntime 启停，不影响平台 RuntimeControlle
 ```json
 {
   "running": true,
-  "app_name": "aibox_core",
+  "app_name": "ttbox_core",
   "version": "0.1.0",
   "uptime_ms": 1234.5,
-  "ipc_socket": "/tmp/aibox_core.sock",
+  "ipc_socket": "/tmp/ttbox_core.sock",
   "config_file": "/path/to/config/default.json",
   "metrics": {
     "fps": 0.0, "capture_ms": 0.0, "resize_ms": 0.0,
@@ -133,9 +133,9 @@ start/stop 幂等；复用 CoreRuntime 启停，不影响平台 RuntimeControlle
 
 ## 7. 客户端
 
-- C++：`aibox/core/src/ipc/IpcServer.hpp` 提供 `ipc_request()` / `ipc_ping()`
+- C++：`ttbox/core/src/ipc/IpcServer.hpp` 提供 `ipc_request()` / `ipc_ping()`
 - 命令行：构建产物 `ipc_ping`（`--socket <path> --type PING|GET_STATUS|GET_CONFIG`）
-- 手工验证：`printf '{"type":"PING"}\n' | nc -U /tmp/aibox_core.sock`
+- 手工验证：`printf '{"type":"PING"}\n' | nc -U /tmp/ttbox_core.sock`
 
 ## 8. 兼容性约定
 

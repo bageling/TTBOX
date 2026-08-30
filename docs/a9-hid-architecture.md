@@ -44,7 +44,7 @@ AI 旁路观察（不阻塞 HID）：
 脚本：`scripts/a9_setup_hid_gadget.sh`（configfs）
 
 ```
-/sys/kernel/config/usb_gadget/aibox-hid/
+/sys/kernel/config/usb_gadget/ttbox-hid/
   ├── idVendor=0x1d6b  idProduct=0x0104  bcdUSB=0x0200
   ├── functions/hid.usb0   # Keyboard：protocol=1(boot) report_length=8 desc=63B
   ├── functions/hid.usb1   # Mouse：   protocol=2(boot) report_length=4 desc=52B
@@ -104,9 +104,9 @@ CoordinateTransform 提供 screen_to_roi / roi_to_model / model_to_detection / s
 
 ## 9. 测试
 
-- `aibox_core_tests`：SPSC 队列 / HID 解析 / 坐标转换（单元）
+- `ttbox_core_tests`：SPSC 队列 / HID 解析 / 坐标转换（单元）
 - `test_hid_forward_hw`：gadget 检查 + hidraw 枚举 + 转发统计（无设备时如实报 NOT AVAILABLE）
-- `aibox-hid-test`：独立测试程序（--mouse/--keyboard/--rate/--duration/--verbose），显示 device/VID/PID/descriptor/report size/rate/keyboard events/mouse events/latency/drop
+- `ttbox-hid-test`：独立测试程序（--mouse/--keyboard/--rate/--duration/--verbose），显示 device/VID/PID/descriptor/report size/rate/keyboard events/mouse events/latency/drop
 
 ## 10. 安全边界
 

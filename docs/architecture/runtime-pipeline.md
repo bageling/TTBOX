@@ -122,7 +122,7 @@ Pipeline 动态参数：
 | NPU 使用率 | **Core0/1/2 分核**（/sys/kernel/debug/rknpu/load，A-4 已实现） |
 | DDR 使用率 | 内存/DDR 带宽或占用（性能优化阶段接入） |
 
-发布方式：Core 每 1s 原子写共享状态区（`/dev/shm/aibox_status` 或 mmap），Web 读取并 WebSocket 推送。
+发布方式：Core 每 1s 原子写共享状态区（`/dev/shm/ttbox_status` 或 mmap），Web 读取并 WebSocket 推送。
 **管理链路 JSON；帧链路零 JSON。**
 
 ## 8. 错误处理

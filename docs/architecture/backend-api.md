@@ -30,7 +30,7 @@
 | GET | `/devices/{id}/license` | 查询 License（含宽限期） | Agent |
 | POST | `/license/validate` | 离线激活/验证授权 | Agent |
 | GET | `/updates/manifest` | 拉取 Update Manifest | Agent |
-| GET | `/updates/{unit}/download` | 下载更新包（.aibox-update） | Agent |
+| GET | `/updates/{unit}/download` | 下载更新包（.ttbox-update） | Agent |
 | GET | `/models` | 可用模型列表（含版本/校验和/兼容） | Agent/Web |
 | GET | `/models/{id}/download` | 下载模型 | Agent/Web |
 | GET | `/configs/templates` | 配置模板/默认配置 | Agent/Web |
@@ -41,7 +41,7 @@
 ### 3.1 设备注册
 ```json
 POST /devices/register
-{ "sn": "AIBOX-XXXX", "board": "orange-pi-5-plus", "firmware": "0.3.0" }
+{ "sn": "TTBOX-XXXX", "board": "orange-pi-5-plus", "firmware": "0.3.0" }
 → 200
 { "code": 0, "device_id": "dev-1234", "device_token": "tok-xxxx", "expires_at": 1735689600 }
 ```
@@ -91,11 +91,11 @@ POST /telemetry
 
 - Agent 拉取 Manifest/授权失败（网络断开）→ 使用**本地缓存**：上次成功的 Manifest + 授权缓存
 - 本地授权缓存含 `expires_at` + `grace_period_s`：到期后进入宽限期；宽限期结束且仍离线 → 停止需要授权的功能（AI Core 由设备策略决定，默认停止新推理但保持进程健康，见 device-validation.md）
-- 离线期间手动更新：导入本地 `.aibox-update` 包（不经过 Backend）
+- 离线期间手动更新：导入本地 `.ttbox-update` 包（不经过 Backend）
 
 ## 5. 安全
 
-- HTTPS + TLS 1.2+；token 存于 `/opt/aibox2/data/credentials.json`（0600）
+- HTTPS + TLS 1.2+；token 存于 `/opt/ttbox2/data/credentials.json`（0600）
 - 所有下载校验 SHA256（+ 阶段 C 增加签名验证）
 - Telemetry 不包含任何画面数据；只含聚合指标
 

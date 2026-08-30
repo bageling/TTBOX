@@ -15,7 +15,7 @@
 
 | 字段 | 中文名称 | 白话说明 | 默认值 | 范围 | 控件 | 热更新 | 消费模块 |
 |---|---|---|---|---|---|---|---|
-| `mouse.enabled` | AI 辅助 | 总开关。关闭时 AI 仍分析画面，但鼠标输出强制为 0 | false | bool | Switch | ✅ 每周期读快照（AimThread:57-88 Gate + AiboxHidOutput::send 保险门） | AimThread / AiboxHidOutput |
+| `mouse.enabled` | AI 辅助 | 总开关。关闭时 AI 仍分析画面，但鼠标输出强制为 0 | false | bool | Switch | ✅ 每周期读快照（AimThread:57-88 Gate + TtboxHidOutput::send 保险门） | AimThread / TtboxHidOutput |
 | `mouse.aim_hotkey` | 主热键 | 按住此键时 AI 才移动鼠标 | 2（右键） | 1/2/4/8/16（左/右/中/侧1/侧2） | Select | ✅ 每周期读快照 | AimThread Gate |
 | `mouse.aim_hotkey2` | 副热键 | 可选第二触发键；0 = 不使用 | 0 | 0/1/2/4/8/16 | Select | ✅ 每周期读快照 | AimThread Gate |
 | `mouse.aim_hotkey_mode` | 触发方式 | any = 任一键按下；all = 两键同时按住 | "any" | any/all | Select | ✅ 每周期读快照 | AimThread Gate |
@@ -49,8 +49,8 @@
 | `mouse.proxy_mode` | V1 仅 full_passthrough 一种 |
 | `mouse.smooth` | 与 `smooth_x/y`（0~9990）不同的 0~1 参数，Core 消费路径未接入 |
 | `mouse.aim_part` | AimThread 未消费（瞄准点由 offset_x/y 决定） |
-| `mouse.pull_curve / continuous_lead / humanize / class_offsets` | Core 无消费者（AIBOX 插件位，未移植） |
-| `mouse.aim_fire_lock_y / y_axis_fire_hotkey / y_axis_fire_release_delay_sec` | Core 无消费者（AIBOX 压枪联动位） |
+| `mouse.pull_curve / continuous_lead / humanize / class_offsets` | Core 无消费者（TTBOX 插件位，未移植） |
+| `mouse.aim_fire_lock_y / y_axis_fire_hotkey / y_axis_fire_release_delay_sec` | Core 无消费者（TTBOX 压枪联动位） |
 | `mouse.calibrating / calibration_bias_x / calibration_bias_y` | 标定流程专用，非用户参数 |
 | `mouse.block_physical_x / block_physical_y` | HID 层能力位，当前链路未接 |
 | `mouse.switch_delay_ms` | AimThread 未消费 |

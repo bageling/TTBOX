@@ -1,9 +1,9 @@
 # Phase 2 Service / Supervisor / Health
 
-AIBOX unit facts are represented by `ServiceCatalog` and controlled through `SystemdServiceAdapter`:
+TTBOX unit facts are represented by `ServiceCatalog` and controlled through `SystemdServiceAdapter`:
 
-- Core: `Restart=always`, `RestartSec=5`, `User=aibox`, `/var/lib/aibox`, `/etc/aibox`.
-- HID: `ExecStartPre=modprobe libcomposite`, root/aiboxkm, vendor versions use `Restart=on-failure` or `no`.
+- Core: `Restart=always`, `RestartSec=5`, `User=ttbox`, `/var/lib/ttbox`, `/etc/ttbox`.
+- HID: `ExecStartPre=modprobe libcomposite`, root/ttboxkm, vendor versions use `Restart=on-failure` or `no`.
 - Web: nginx dedicated unit, network-online dependency, preflight/setup, restart limit.
 - Control plane: root backend, network-online dependency, `Restart=always`, `RestartSec=1`, `/opt/autobl`.
 

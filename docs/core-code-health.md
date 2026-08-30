@@ -10,16 +10,16 @@
 |---|---|---|---|---|
 | F1 | **高（Fail-Closed）** | `RuntimeProfile::validate()` 无 isfinite 防线：JSON `1e999` 解析为 inf 可穿过 obj_num → kp_x=inf → PID 输出乱飞（已在 dev 链路实锤复现） | validate 开头加全部数值字段 isfinite 总闸，非有限值整体拒绝 | 新增 `runtime_profile_validate_rejects_nonfinite`，✅ |
 | F2 | **高（乱飞）** | `AimThread` 余数累计直接 `static_cast<int16_t>`：异常大值时截断是实现定义行为 | 输出前 clamp 到 HID count 范围 + 余数 isfinite 兜底清零（并 reset PID） | CTest 全绿 ✅ |
-| F3 | 中（死代码） | 旧控制链三件套残留生产目录：`AiboxPpidController.hpp` / `SmithPredictor.hpp` / `test_aim_algorithm.cpp`（已无任何消费者） | 删除 + CMake 清理 | CTest 10/10 ✅ |
+| F3 | 中（死代码） | 旧控制链三件套残留生产目录：`TtboxPpidController.hpp` / `SmithPredictor.hpp` / `test_aim_algorithm.cpp`（已无任何消费者） | 删除 + CMake 清理 | CTest 10/10 ✅ |
 | F4 | 低（一致性） | `motion.tsx` 丢 `usePageTitle`；RuntimeContext 文案"Core 未连接"与全站"后台服务未连接"不一致 | 补齐/统一 | 前端 build ✅ |
 
 ## 二、确认健康（审计通过，无需改动）
 
 | 项 | 结论 |
 |---|---|
-| **Hotkey Gate 唯一输出路径**（C4） | 全仓 `output_->send` 仅 `AimThread.cpp:144` 一处；`move_x/y` 仅在 AimThread 内产生且 Gate 兜底在 send 前一行。AiboxHidOutput 二级门（enabled+hotkey mask）独立兜底。**无第二条输出路径** |
+| **Hotkey Gate 唯一输出路径**（C4） | 全仓 `output_->send` 仅 `AimThread.cpp:144` 一处；`move_x/y` 仅在 AimThread 内产生且 Gate 兜底在 send 前一行。TtboxHidOutput 二级门（enabled+hotkey mask）独立兜底。**无第二条输出路径** |
 | **FIFO Fail-Closed**（C5） | `FifoHidOutput`：open 失败 return false；写失败（EPIPE/ENXIO）close 并 return false；停止/析构前发送 disable 帧清 Bridge 门控；0,0 帧也走完整链路（幂等无害）。异常默认不移动 ✅ |
-| **AiboxHidOutput Fail-Closed**（C5） | 三重门：`enabled_` 静态闸 → `mouse.enabled`+热键 mask 实时判定（fail-closed：无配置源/配置缺失拒绝注入）→ open 失败不写 |
+| **TtboxHidOutput Fail-Closed**（C5） | 三重门：`enabled_` 静态闸 → `mouse.enabled`+热键 mask 实时判定（fail-closed：无配置源/配置缺失拒绝注入）→ open 失败不写 |
 | **Mailbox 最新帧语义**（C7） | shared_ptr 原子快照（release/acquire），offer 覆盖式、take_latest 取最大 frame_number，无锁无阻塞；任务只含检测结果不含图像，无大拷贝 |
 | **AimThread dt 丢弃**（C2） | pid1 原实现为离散单步（无 dt 项），`(void)dt` 与参考实现一致，非遗漏 |
 | **pid1 热更新**（C3） | `configure()` 只改 kp/kd/predict/rate/smooth，**不触碰 kp_gain/integral_gain 渐变状态与滤波器状态**——热更新不破坏内部状态（与 pid1.cpp 语义一致） |

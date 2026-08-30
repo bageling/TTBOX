@@ -26,7 +26,7 @@ AimThread：TargetSelector（三层锁定防横跳）→ AimPoint → Coordinate
                                                               │
                               ┌───────────────────────────────┤
                               ▼                               ▼
-                   AiboxHidOutput（/dev/hidg0）      FifoHidOutput（bridge 协议）
+                   TtboxHidOutput（/dev/hidg0）      FifoHidOutput（bridge 协议）
                    [enabled + 热键 mask 双重保险]     [每帧重发控制帧 + 断开发 disable]
 ```
 
@@ -34,7 +34,7 @@ AimThread：TargetSelector（三层锁定防横跳）→ AimPoint → Coordinate
 - 检测框/参考点/误差：crop 系**像素**（roi_w×roi_h）
 - `error = target_aim_point − reference_point`（目标在右 → 正 X）
 - PID 输出：HID count 域（float → 余数保留小数 → int16 clamp）
-- FIFO 输出边界做符号翻转（设备坐标系相反）；AIBOX 不翻转
+- FIFO 输出边界做符号翻转（设备坐标系相反）；TTBOX 不翻转
 - FOV 模式（fov_mode=true）时先经角度换算（hfov/vfov→move_speed），默认关闭
 
 ## 2. 控制流（用户操作 → 生效）
@@ -92,7 +92,7 @@ RuntimeProvider（coreOnline/runtimeRunning/currentConfig/activeModel/lastError�
 | AimPoint / CoordinateTransform | ✅ 测试过 | test_mouse |
 | Pid1Controller | ✅ 1:1 对照 | test_pid1 逐点一致 |
 | Hotkey Gate | ✅ 7+ 场景 | gate/配置化/旁路审计 |
-| HID（AIBOX/FIFO） | ✅ Fail-Closed 审计 | 板端 BLOCKED |
+| HID（TTBOX/FIFO） | ✅ Fail-Closed 审计 | 板端 BLOCKED |
 | RuntimeConfig 热更新 | ✅ 并发压测 | 无撕裂 |
 | IPC（11 条） | ✅ 测试过 | 含模型管理 6 条 |
 | ModelRegistry | ✅ 全通 | 收件目录/激活保护 |

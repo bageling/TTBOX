@@ -42,7 +42,7 @@ models/
 
 ## 2. ONNX → RKNN — PASS
 
-新增离线工具 [scripts/convert_onnx_to_rknn.py](file:///g:/工作区/aibox逆向/aibox2/scripts/convert_onnx_to_rknn.py)（Python，仅离线，禁止进入高速链路）：
+新增离线工具 [scripts/convert_onnx_to_rknn.py](file:///g:/工作区/ttbox逆向/ttbox2/scripts/convert_onnx_to_rknn.py)（Python，仅离线，禁止进入高速链路）：
 
 - 支持 FP16 / INT8（w8a8，channel 量化）
 - 转换前 ONNX 图检查：**input shape / dtype / layout / color order / output shape / output count / 未知算子**
@@ -180,7 +180,7 @@ Adapter/抽象层未造成性能下降；未为性能修改任何模型语义。
 
 | 项目 | 结果 |
 |---|---|
-| aibox_core_tests 单元测试（含 A8 新增 14 项：runtime_profile 4 / registry 5 / fov_roi 6） | **54/54 PASS** |
+| ttbox_core_tests 单元测试（含 A8 新增 14 项：runtime_profile 4 / registry 5 / fov_roi 6） | **54/54 PASS** |
 | test_model_adapter（三模型） | PASS |
 | test_model_runtime（三模型 3 轮） | PASS |
 | test_model_switch_hw（仓库生命周期+切换+热更新） | PASS |

@@ -1,7 +1,7 @@
 # AIBox 最终商用架构总览
 
 > 状态：**A-1~A-6 已全部由 C++ 实现并验收**，C++ Runtime 完整覆盖高速链路
-> 对应仓库 `aibox/core/`（C++ Core）+ `docs/architecture/`
+> 对应仓库 `ttbox/core/`（C++ Core）+ `docs/architecture/`
 > 当前：**进入统一性能优化阶段**（1080p60 / 2K144 / 1080p240，按实际 V4L2 时序动态测试，吞吐 + NPU 三核利用率）
 
 ## 1. 设计目标
@@ -32,12 +32,12 @@
 │  V4L2 MPLANE · DMA-BUF heap · RGA (/dev/rga) · RKNN (librknnrt) │
 └──────────────┬───────────────────────────────────────────────┘
 ┌──────────────▼──────────────────── 进程层 ───────────────────┐
-│  aibox-core  (C++，主进程 · 完整 C++ Runtime)                │
+│  ttbox-core  (C++，主进程 · 完整 C++ Runtime)                │
 │   Capture → RGA → RKNN → Worker → Decode/NMS(ModelAdapter)  │
 │   → Target → Control → HID Out · Runtime(生命周期/配置/模型) │
 │                                                              │
-│  aibox-web    (C++，HTTP + WebSocket + Dashboard，纯管理)     │
-│  aibox-agent  (C++，注册/认证/授权缓存/版本/后台/Update 编排) │
+│  ttbox-web    (C++，HTTP + WebSocket + Dashboard，纯管理)     │
+│  ttbox-agent  (C++，注册/认证/授权缓存/版本/后台/Update 编排) │
 │  (开发期 Python 参考实现：decode.py/controller.py 仅对齐验证) │
 └──────────────┬───────────────────────────────────────────────┘
                │ 网络
@@ -51,10 +51,10 @@
 
 | 进程 | 语言 | 职责 | 与 Core 关系 |
 |---|---|---|---|
-| `aibox-core` | C++ | 高速链路（Capture/RGA/RKNN/Worker/Decode-NMS/ModelAdapter）+ Runtime | 唯一承载 AI 推理逻辑 |
-| `aibox-web` | C++ | Dashboard/API/WebSocket | Unix Socket + 共享状态；禁止承载 AI 逻辑 |
-| `aibox-agent` | C++ | 后台通信/授权/版本/更新 | Unix Socket |
-| `aibox-core` 内部线程 | — | capture / rga / rknn worker / decode / control | 线程级流水线 |
+| `ttbox-core` | C++ | 高速链路（Capture/RGA/RKNN/Worker/Decode-NMS/ModelAdapter）+ Runtime | 唯一承载 AI 推理逻辑 |
+| `ttbox-web` | C++ | Dashboard/API/WebSocket | Unix Socket + 共享状态；禁止承载 AI 逻辑 |
+| `ttbox-agent` | C++ | 后台通信/授权/版本/更新 | Unix Socket |
+| `ttbox-core` 内部线程 | — | capture / rga / rknn worker / decode / control | 线程级流水线 |
 | 参考实现（开发期） | Python | decode.py / controller.py 等，仅模型验证/数据对齐/性能分析/测试 | 不进入正式 AI 高速链路，非生产依赖 |
 
 故障隔离：任一管理进程崩溃不影响 Core；Core 崩溃由 systemd 拉起（阶段 D 加固）。
@@ -74,7 +74,7 @@ HDMI RX ──V4L2──▶ DMA-BUF fd ──RGA──▶ RKNN 输入 ──▶ 
 
 ### 4.2 管理链路（JSON 允许）
 ```
-Web/Agent ──JSON──▶ aibox-core（Runtime 控制面：start/stop/config/model/status）
+Web/Agent ──JSON──▶ ttbox-core（Runtime 控制面：start/stop/config/model/status）
 ```
 - 仅用于：配置、模型切换、状态查询、控制命令、监控（非逐帧）
 
@@ -101,8 +101,8 @@ Web/Agent ──JSON──▶ aibox-core（Runtime 控制面：start/stop/config
 ## 7. 目录布局（目标态）
 
 ```
-/opt/aibox2/
-├── core/            # C++ Core（版本化：/opt/aibox2/core/<version>/ 符号链接 current）
+/opt/ttbox2/
+├── core/            # C++ Core（版本化：/opt/ttbox2/core/<version>/ 符号链接 current）
 ├── models/          # 模型（版本化）
 ├── web/             # Web 控制台（静态 + 后端）
 ├── agent/           # Agent 进程
@@ -111,4 +111,4 @@ Web/Agent ──JSON──▶ aibox-core（Runtime 控制面：start/stop/config
 └── update/          # Update Manager 暂存/备份/回滚
 ```
 
-> 演进路径：当前仓库 `aibox/core/`（源码）→ 部署布局 `/opt/aibox2/core/`（阶段 C/D 落地）
+> 演进路径：当前仓库 `ttbox/core/`（源码）→ 部署布局 `/opt/ttbox2/core/`（阶段 C/D 落地）

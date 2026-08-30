@@ -1,24 +1,24 @@
 # AIBox 首次启动说明（first-boot）
 
-## 1. 首次启动自动完成（aibox-firstboot.service，一次性）
+## 1. 首次启动自动完成（ttbox-firstboot.service，一次性）
 
 | 项 | 动作 |
 |---|---|
-| hostname | 设置为 `aibox` |
+| hostname | 设置为 `ttbox` |
 | SSH host key | 重新生成（镜像内已清除，防止镜像克隆共用密钥） |
 | Model Registry | 初始化 `registry/{installed,staging,cache,quarantine}` |
 | HID | 配置 USB HID Gadget（键盘 + 鼠标） |
 | EDID | 注入已验证 1080p240 EDID 到 HDMI RX |
 | 锁频 | CPU/GPU/NPU 设为 performance（保持已验证性能配置） |
 
-> 首次启动后会在 `/opt/aibox/.firstboot-done` 写入标记；再次启动跳过。
+> 首次启动后会在 `/opt/ttbox/.firstboot-done` 写入标记；再次启动跳过。
 
 ## 2. 首次启动后的系统状态
 
-- `aibox-runtime.service`：运行中（IPC 守护，**不自动开始高负载推理**，避免无人控制持续占用资源）
-- `aibox-web.service`：运行中（`http://<设备IP>:8080`）
-- `aibox-hid.service`：运行中（HID Gadget + Package 0.0.1 激活 + 健康检查）
-- `aibox-infer.service`：**关闭**（由 Web 页面点击"启动推理"开启）
+- `ttbox-runtime.service`：运行中（IPC 守护，**不自动开始高负载推理**，避免无人控制持续占用资源）
+- `ttbox-web.service`：运行中（`http://<设备IP>:8080`）
+- `ttbox-hid.service`：运行中（HID Gadget + Package 0.0.1 激活 + 健康检查）
+- `ttbox-infer.service`：**关闭**（由 Web 页面点击"启动推理"开启）
 
 ## 3. 使用流程
 
@@ -33,7 +33,7 @@
 
 ## 4. 首次登录
 
-- SSH：`ssh ubuntu@<设备IP>`，密码 `aibox`
+- SSH：`ssh ubuntu@<设备IP>`，密码 `ttbox`
 - 首次登录后 `passwd` 修改密码
 - Web 无需登录（本机管理工具，仅内网使用）
 
@@ -41,16 +41,16 @@
 
 ```bash
 # 服务状态
-systemctl is-active aibox-firstboot aibox-runtime aibox-web aibox-hid
+systemctl is-active ttbox-firstboot ttbox-runtime ttbox-web ttbox-hid
 
 # 首次初始化日志
-journalctl -u aibox-firstboot -n 30 --no-pager
+journalctl -u ttbox-firstboot -n 30 --no-pager
 
 # HDMI RX 信号
 sudo v4l2-ctl -d /dev/video0 --get-dv-timings
 
 # HID 健康
-sudo /opt/aibox/runtime/aibox-hid-health --root /opt/aibox/hid
+sudo /opt/ttbox/runtime/ttbox-hid-health --root /opt/ttbox/hid
 
 # Web
 curl -s http://127.0.0.1:8080/api/state | python3 -m json.tool
@@ -59,12 +59,12 @@ curl -s http://127.0.0.1:8080/api/state | python3 -m json.tool
 ## 6. 默认配置
 
 - 推理：黄瓦 320 INT8（预置）· 3 Worker · 8 buffers · A76 affinity(4,5,6)
-- 模型目录：`/opt/aibox/models/registry/installed/`
-- 推理参数：`/opt/aibox/config/infer.json`
-- Runtime 配置：`/opt/aibox/config/default.json`
+- 模型目录：`/opt/ttbox/models/registry/installed/`
+- 推理参数：`/opt/ttbox/config/infer.json`
+- Runtime 配置：`/opt/ttbox/config/default.json`
 
 ## 7. 注意事项
 
 - 首次启动需 1-2 分钟完成初始化，期间 Web 可能短暂不可用
-- 不要删除 `/opt/aibox/.firstboot-done`（除非需要重新初始化）
+- 不要删除 `/opt/ttbox/.firstboot-done`（除非需要重新初始化）
 - 网络未连接时 Web 无法访问，但其余功能正常（本地化）

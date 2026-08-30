@@ -44,7 +44,7 @@ A1-A6 六个模块构成完整 C++ Runtime。**核心链路模块之间只传递
 
 ## 3. Python 角色边界
 
-- Python Demo（`aibox/inference/` 等）保留为 **Golden Reference / 回归基准**：参考实现、模型验证、数据对齐、性能分析、测试辅助
+- Python Demo（`ttbox/inference/` 等）保留为 **Golden Reference / 回归基准**：参考实现、模型验证、数据对齐、性能分析、测试辅助
 - **禁止**：Python 进入正式 AI 高速链路；作为生产运行依赖；在高速链路引入 Python（逐帧调用/JSON 桥接/子进程）
 - C++ 实现与 Python 参考逐项对齐（输出位级、NMS 语义、检测框），Python 侧发现的 bug 不作为 C++ 的实现依据（以模型/数据事实为准）
 
@@ -93,7 +93,7 @@ A1-A6 六个模块构成完整 C++ Runtime。**核心链路模块之间只传递
 | 输入 | 来自 Core 的共享状态/指标、用户操作 |
 | 输出 | 管理命令（转交 Core）、WebSocket 推送指标 |
 | IPC/API | HTTP(S) + WebSocket；与 Core：Unix Socket JSON；指标：共享状态区（原子读） |
-| 独立进程 | 是（`aibox-web`） |
+| 独立进程 | 是（`ttbox-web`） |
 | 独立升级 | 是（Web 版本独立） |
 
 ## 8. Agent（设备代理）
@@ -105,7 +105,7 @@ A1-A6 六个模块构成完整 C++ Runtime。**核心链路模块之间只传递
 | 输入 | Backend 响应、设备本地凭证、Update Manifest |
 | 输出 | 注册/心跳/Telemetry、更新指令（交 Update Manager） |
 | IPC/API | 与 Core：Unix Socket（状态只读 + 指令转发）；与 Backend：HTTPS REST |
-| 独立进程 | 是（`aibox-agent`） |
+| 独立进程 | 是（`ttbox-agent`） |
 | 独立升级 | 是（Agent 版本独立） |
 
 ## 9. Update Manager（更新管理）
@@ -117,7 +117,7 @@ A1-A6 六个模块构成完整 C++ Runtime。**核心链路模块之间只传递
 | 输入 | Update Manifest（JSON）、离线安装包 |
 | 输出 | 安装/回滚结果、版本状态 |
 | IPC/API | 与 Agent：本进程内/Unix Socket；与 Backend：下载 Manifest 与包 |
-| 独立进程 | 可独立或并入 Agent（建议独立目录 `aibox-update`，由 Agent 编排） |
+| 独立进程 | 可独立或并入 Agent（建议独立目录 `ttbox-update`，由 Agent 编排） |
 | 独立升级 | 是（自身随 Agent 或独立） |
 
 ## 10. Backend（云端）

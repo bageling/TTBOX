@@ -1,4 +1,4 @@
-# aibox2 Ubuntu RK3588 母版规格 (image-spec)
+# ttbox2 Ubuntu RK3588 母版规格 (image-spec)
 
 > 阶段 4 产物 · 定义最终 IMG 的完整组成
 > 状态: SPEC (未生成 IMG, 未硬件验证)
@@ -101,14 +101,14 @@
 
 依赖安装走**本地 wheel 缓存** (构建时 `pip download` 一次并锁定), 首次构建后回填 SHA256。
 
-## 10. aibox2
+## 10. ttbox2
 
 | 项 | 值 |
 |---|---|
 | 版本 | 0.0.1 |
-| 内嵌方式 | 构建时 rsync 项目 `aibox/` + `pyproject.toml` → `/opt/aibox2/app/`; 排除 tests/vendor/scripts/__pycache__/.pytest_cache/开发报告等 |
-| 运行 | venv `/opt/aibox2/venv/bin/python -m aibox`, `PYTHONPATH=/opt/aibox2/app` |
-| 不散落 | 源码不进 /usr/local /home /tmp /etc; 系统服务只引用 `/opt/aibox2` |
+| 内嵌方式 | 构建时 rsync 项目 `ttbox/` + `pyproject.toml` → `/opt/ttbox2/app/`; 排除 tests/vendor/scripts/__pycache__/.pytest_cache/开发报告等 |
+| 运行 | venv `/opt/ttbox2/venv/bin/python -m ttbox`, `PYTHONPATH=/opt/ttbox2/app` |
+| 不散落 | 源码不进 /usr/local /home /tmp /etc; 系统服务只引用 `/opt/ttbox2` |
 
 ## 11. Model
 
@@ -117,7 +117,7 @@
 | 文件 | `models/yolo261n-rk3588.rknn` (归档: `resources/models/`) |
 | SHA256 | `2B178F3DC5013A101242E988672BE9199CEB492B7EABA4C6271231A00CB770AA` |
 | 大小 | 7,445,558 B |
-| 内嵌位置 | `/opt/aibox2/models/` |
+| 内嵌位置 | `/opt/ttbox2/models/` |
 | 状态 | **PINNED** (独立资产, 可替换模型不重建系统) |
 
 ## 12. Config
@@ -128,21 +128,21 @@
 | `config/hdmirx_edid_identity.json` | `1003FE5E3C14868770C6928F0233745C91F9D856727264E3AF7CC160CA149E11` |
 | `config/yolo261n-rk3588.json` | `08962F8DCF85D79E8D61CD1FC5C0E3801BEA720B60FE9AF64A0FC882C2F3C847` |
 
-内嵌至 `/opt/aibox2/config/`; 运行时修改写回 `/opt/aibox2/config/` (可写数据区), 不写系统只读区。
+内嵌至 `/opt/ttbox2/config/`; 运行时修改写回 `/opt/ttbox2/config/` (可写数据区), 不写系统只读区。
 
 ## 13. systemd
 
 镜像预置 5 个单元 (`scripts/systemd/`), 全部 `Restart=on-failure`、日志进 journal:
 
 ```
-aibox-firstboot.service  首次初始化 (oneshot, 一次性)
+ttbox-firstboot.service  首次初始化 (oneshot, 一次性)
    ↓
-aibox-gadget.service     HID Gadget (oneshot)
+ttbox-gadget.service     HID Gadget (oneshot)
    ↓
-aibox-passthrough.service 键鼠透传
+ttbox-passthrough.service 键鼠透传
    ↓
-aibox-ai.service         AI 采集/推理/自瞄
-aibox-web.service        Web 控制台 :8080 (独立)
+ttbox-ai.service         AI 采集/推理/自瞄
+ttbox-web.service        Web 控制台 :8080 (独立)
 ```
 
 业务进程不合并; 启动不依赖手动执行 python。
@@ -152,12 +152,12 @@ aibox-web.service        Web 控制台 :8080 (独立)
 只做初始化, **不安装任何软件** (软件全部镜像构建期内嵌):
 
 1. 生成机器唯一信息 (machine-id / SSH host keys 由系统首次启动自动生成, 镜像内已清空)
-2. 创建 `/opt/aibox2/{data,logs,runtime}` 目录
+2. 创建 `/opt/ttbox2/{data,logs,runtime}` 目录
 3. 检查 Python / numpy / evdev / rknnlite
 4. 检查模型存在
 5. 检查 `/dev/video0`、`/dev/input`
 6. 初始化 HID Gadget
-7. 执行一次 `aibox doctor`
+7. 执行一次 `ttbox doctor`
 8. 写入 `.firstboot-done` 标记后退出 (有标记则跳过)
 
 ## 15. filesystem layout
@@ -169,14 +169,14 @@ aibox-web.service        Web 控制台 :8080 (独立)
 │   └── dtb-6.1.99-rockchip-rk3588/rockchip/   # 由 dtb deb 提供 (仅对应 BOARD 的 dtb+overlay)
 ├── usr/lib/librknnrt.so           # RKNN runtime (2.3.2)
 ├── usr/bin/rknn_server            # 可选
-├── etc/systemd/system/aibox-*.service
-└── opt/aibox2/
-    ├── app/                       # aibox 包 + pyproject (+ models/config 软链)
+├── etc/systemd/system/ttbox-*.service
+└── opt/ttbox2/
+    ├── app/                       # ttbox 包 + pyproject (+ models/config 软链)
     ├── config/                    # default.json 等
     ├── models/                    # yolo261n-rk3588.rknn
     ├── data/                      # .ai_state.json / .ai_models.json / 标记等
     ├── logs/                      # ai.log 等
-    ├── runtime/                   # aibox-firstboot.sh / hid-gadget.sh
+    ├── runtime/                   # ttbox-firstboot.sh / hid-gadget.sh
     └── venv/                      # Python 3.11 + numpy/evdev/rknnlite
 ```
 

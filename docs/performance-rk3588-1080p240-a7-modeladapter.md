@@ -13,23 +13,23 @@
 
 | 文件 | 说明 |
 |---|---|
-| `aibox/core/src/model/ModelMetadata.hpp` | ModelMetadata 结构（20 项字段）+ 枚举（DecodeType/QuantType/ColorOrder/CoordFormat/NmsType） |
-| `aibox/core/src/model/Decoder.hpp` | Decoder 抽象接口 + DecoderImpl（统一包装 DecodeNMS） |
-| `aibox/core/src/model/ModelAdapter.hpp` | ModelAdapterConfig + ModelAdapter（analyze/create_decoder/effective_conf/effective_iou） |
-| `aibox/core/src/model/ModelAdapter.cpp` | infer_decode_type / infer_class_count / analyze / create_decoder 实现 |
-| `aibox/core/tests/test_model_metadata.cpp` | 单元测试：20 项字段默认值 + 黄瓦 + v26m |
-| `aibox/core/tests/test_decoder_dispatch.cpp` | 单元测试：single/e2e/dfl 分发、objectness、拒绝不支持结构、用户 conf/iou |
-| `aibox/core/tests/test_model_adapter.cpp` | 硬件测试：真实模型 metadata + decoder 创建（三模型回归） |
-| `aibox/core/tests/test_model_runtime.cpp` | 硬件测试：模型加载生命周期（3 轮 init→analyze→decoder→30 帧→destroy） |
+| `ttbox/core/src/model/ModelMetadata.hpp` | ModelMetadata 结构（20 项字段）+ 枚举（DecodeType/QuantType/ColorOrder/CoordFormat/NmsType） |
+| `ttbox/core/src/model/Decoder.hpp` | Decoder 抽象接口 + DecoderImpl（统一包装 DecodeNMS） |
+| `ttbox/core/src/model/ModelAdapter.hpp` | ModelAdapterConfig + ModelAdapter（analyze/create_decoder/effective_conf/effective_iou） |
+| `ttbox/core/src/model/ModelAdapter.cpp` | infer_decode_type / infer_class_count / analyze / create_decoder 实现 |
+| `ttbox/core/tests/test_model_metadata.cpp` | 单元测试：20 项字段默认值 + 黄瓦 + v26m |
+| `ttbox/core/tests/test_decoder_dispatch.cpp` | 单元测试：single/e2e/dfl 分发、objectness、拒绝不支持结构、用户 conf/iou |
+| `ttbox/core/tests/test_model_adapter.cpp` | 硬件测试：真实模型 metadata + decoder 创建（三模型回归） |
+| `ttbox/core/tests/test_model_runtime.cpp` | 硬件测试：模型加载生命周期（3 轮 init→analyze→decoder→30 帧→destroy） |
 
 ### 修改（新增能力，不触碰 A1-A6 核心语义）
 
 | 文件 | 变更 |
 |---|---|
-| `aibox/core/src/rknn/DecodeNMS.hpp/.cpp` | DecodeParams 增 `class_filter`/`max_detections`；新增 `apply_post_filter`（class 过滤 + score 降序截断）、`set_frame`（运行期更新坐标）、`process_e2e`（[1,N,F] 通用读取，不硬编码 N/F） |
-| `aibox/core/src/rknn/WorkerPool.hpp/.cpp` | Params 增 `ModelAdapter* adapter`；worker 内部 `unique_ptr<Decoder> decoder_`（无 adapter 时保持原 DecodeNMS 默认路径） |
-| `aibox/core/tests/test_worker_hw.cpp` | 新增 `--adapter`/`--inw`/`--inh`/`--color` 参数；adapter 模式走统一接入层 |
-| `aibox/core/CMakeLists.txt` | CORE_SOURCES 加 ModelAdapter.cpp；新增 4 个测试目标 |
+| `ttbox/core/src/rknn/DecodeNMS.hpp/.cpp` | DecodeParams 增 `class_filter`/`max_detections`；新增 `apply_post_filter`（class 过滤 + score 降序截断）、`set_frame`（运行期更新坐标）、`process_e2e`（[1,N,F] 通用读取，不硬编码 N/F） |
+| `ttbox/core/src/rknn/WorkerPool.hpp/.cpp` | Params 增 `ModelAdapter* adapter`；worker 内部 `unique_ptr<Decoder> decoder_`（无 adapter 时保持原 DecodeNMS 默认路径） |
+| `ttbox/core/tests/test_worker_hw.cpp` | 新增 `--adapter`/`--inw`/`--inh`/`--color` 参数；adapter 模式走统一接入层 |
+| `ttbox/core/CMakeLists.txt` | CORE_SOURCES 加 ModelAdapter.cpp；新增 4 个测试目标 |
 | `config/default.json` | 新增 `class_filter_text`/`max_detections`（用户可配置） |
 
 未修改：Capture（V4L2Capture/DmaBuf）、RGA（RgaProcessor）、RKNN（RKNNEngine/NpuMonitor）核心逻辑。
@@ -143,7 +143,7 @@ A1-A6 Runtime (WorkerPool / RGA / RKNN / NMS)
 
 | 回归项 | 结果 |
 |---|---|
-| aibox_core_tests 单元测试（logger/config/ipc/application/decode/rga/latestframe + A7 新增 6 项） | **39/39 PASS** |
+| ttbox_core_tests 单元测试（logger/config/ipc/application/decode/rga/latestframe + A7 新增 6 项） | **39/39 PASS** |
 | test_rknn_hw（yolo261n 300 帧） | PASS（21.6 FPS，无错误） |
 | test_rga_hw | PASS（RGA 验收，无 fd 泄漏） |
 | test_capture_hw / worker_hw capture | 正常（capture 240.7 FPS） |

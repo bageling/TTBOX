@@ -57,7 +57,7 @@ sudo dd if=AIBox-v0.0.1-orangepi5plus.img of=/dev/sdX bs=4M conv=fsync status=pr
 ## 5. 登录
 
 - SSH：`ssh ubuntu@<设备IP>`
-- 默认账号：`ubuntu` / 密码：`aibox`
+- 默认账号：`ubuntu` / 密码：`ttbox`
 - 首次登录后建议立即修改密码：`passwd`
 
 ## 6. 打开 Mini Web
@@ -71,12 +71,12 @@ Web 功能：推理启停 / 实时 FPS / 模型上传/切换/删除 / 硬件监�
 ## 7. 系统布局
 
 ```
-/opt/aibox/
+/opt/ttbox/
 ├── runtime/    # C++ runtime 二进制 + 推理包装
 ├── models/     # registry/{installed,staging,cache,quarantine}
 ├── hid/        # HID Package 0.0.1
 ├── edid/       # 1080p240 EDID + 注入脚本
-├── web/        # Mini Web (aibox_web.py, :8080)
+├── web/        # Mini Web (ttbox_web.py, :8080)
 ├── config/     # default.json / infer.json
 ├── scripts/    # firstboot / HID gadget / 锁频 / ONNX→RKNN 转换
 └── tests/      # 硬件验收测试工具
@@ -86,16 +86,16 @@ Web 功能：推理启停 / 实时 FPS / 模型上传/切换/删除 / 硬件监�
 
 | 服务 | 说明 | 状态 |
 |---|---|---|
-| `aibox-firstboot.service` | 首次初始化（hostname/SSH key/EDID/gadget/锁频） | 自动，一次性 |
-| `aibox-runtime.service` | C++ Runtime 守护（IPC，不自动推理） | 自动 |
-| `aibox-web.service` | Mini Web :8080 | 自动 |
-| `aibox-hid.service` | HID Gadget + Package 激活 + 健康检查 | 自动 |
-| `aibox-infer.service` | 推理（Web 控制启停） | 默认关闭 |
-| `aibox-edid-inject.service` | EDID 注入 | 自动 |
+| `ttbox-firstboot.service` | 首次初始化（hostname/SSH key/EDID/gadget/锁频） | 自动，一次性 |
+| `ttbox-runtime.service` | C++ Runtime 守护（IPC，不自动推理） | 自动 |
+| `ttbox-web.service` | Mini Web :8080 | 自动 |
+| `ttbox-hid.service` | HID Gadget + Package 激活 + 健康检查 | 自动 |
+| `ttbox-infer.service` | 推理（Web 控制启停） | 默认关闭 |
+| `ttbox-edid-inject.service` | EDID 注入 | 自动 |
 
 ## 9. 常见问题
 
 - 烧录后无法启动：检查 TF 卡容量 ≥8G；重新烧录并校验 SHA256
-- Web 打不开：确认设备 IP；`systemctl status aibox-web`
+- Web 打不开：确认设备 IP；`systemctl status ttbox-web`
 - 推理 FPS 为 0：确认 HDMI IN 有 1080p240 信号（`sudo v4l2-ctl -d /dev/video0 --get-dv-timings`）
-- 键鼠无透传：确认 USB Host 口插入键鼠；`systemctl status aibox-hid`；`/opt/aibox/runtime/aibox-hid-health --root /opt/aibox/hid`
+- 键鼠无透传：确认 USB Host 口插入键鼠；`systemctl status ttbox-hid`；`/opt/ttbox/runtime/ttbox-hid-health --root /opt/ttbox/hid`

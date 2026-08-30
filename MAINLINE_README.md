@@ -9,14 +9,14 @@
 
 ## 配套源码
 - `scripts/`：当前部署、EDID、HID、转换工具脚本，以及生产 Web 网关 `ttbox_gateway.py`。
-- `web/static/`：Web 前端桥接层 `ttbox-bridge.js`（yu body ↔ RuntimeProfile 双向翻译、MJPEG 预览流）。
+- `web/static/`：Web 前端桥接层 `ttbox-bridge.js`（ttbox body ↔ RuntimeProfile 双向翻译、MJPEG 预览流）。
 - `config/`：当前配置模板。
 - `hid/`：当前 HID 描述和配置。
 - `docs/`：架构、协议、性能和升级文档。
 
 ## 非主线
 原目录中的 `vendor/legacy/`、`backup-*`、历史调试脚本不纳入本目录。
-旧控制链（AiboxPpidController / SmithPredictor / test_aim_algorithm）已删除，由 Pid1Controller + AlphaBetaGammaFilter 替代。
+旧控制链（TtboxPpidController / SmithPredictor / test_aim_algorithm）已删除，由 Pid1Controller + AlphaBetaGammaFilter 替代。
 
 ## 约定
 以后修改优先在本目录验证，再同步到部署目录。参数链路必须端到端真实生效（Web→Gateway→IPC→RuntimeConfig→worker），禁止前端假值。

@@ -20,35 +20,35 @@
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now aibox-runtime aibox-web aibox-hid aibox-edid-inject
-sudo systemctl status aibox-runtime aibox-web aibox-hid
+sudo systemctl enable --now ttbox-runtime ttbox-web ttbox-hid ttbox-edid-inject
+sudo systemctl status ttbox-runtime ttbox-web ttbox-hid
 ```
 
 ### 3.2 重新初始化 HID Package
 
 ```bash
-sudo /opt/aibox/runtime/aibox-hid-init.sh
-sudo /opt/aibox/runtime/aibox-hid-health --root /opt/aibox/hid
+sudo /opt/ttbox/runtime/ttbox-hid-init.sh
+sudo /opt/ttbox/runtime/ttbox-hid-health --root /opt/ttbox/hid
 ```
 
 ### 3.3 重新注入 EDID
 
 ```bash
-sudo bash /opt/aibox/edid/inject_edid.sh
+sudo bash /opt/ttbox/edid/inject_edid.sh
 ```
 
 ### 3.4 恢复锁频
 
 ```bash
-sudo bash /opt/aibox/scripts/setup_freq.sh
+sudo bash /opt/ttbox/scripts/setup_freq.sh
 ```
 
 ### 3.5 重建 Model Registry
 
 ```bash
-sudo mkdir -p /opt/aibox/models/registry/{installed,staging,cache,quarantine}
-sudo cp /opt/aibox/models/registry/installed/huangwa.rknn /opt/aibox/models/registry/installed/ 2>/dev/null
-echo "huangwa.rknn" | sudo tee /opt/aibox/models/active_model.txt
+sudo mkdir -p /opt/ttbox/models/registry/{installed,staging,cache,quarantine}
+sudo cp /opt/ttbox/models/registry/installed/huangwa.rknn /opt/ttbox/models/registry/installed/ 2>/dev/null
+echo "huangwa.rknn" | sudo tee /opt/ttbox/models/active_model.txt
 ```
 
 ## 4. 首次启动重新初始化
@@ -56,8 +56,8 @@ echo "huangwa.rknn" | sudo tee /opt/aibox/models/active_model.txt
 如需重新执行 firstboot（重新生成 SSH host key / 重新初始化）：
 
 ```bash
-sudo rm -f /opt/aibox/.firstboot-done
-sudo systemctl restart aibox-firstboot
+sudo rm -f /opt/ttbox/.firstboot-done
+sudo systemctl restart ttbox-firstboot
 ```
 
 ## 5. 检查硬件
@@ -78,16 +78,16 @@ ls -l /dev/hidg0 /dev/hidg1
 ## 6. 日志定位
 
 ```bash
-journalctl -u aibox-runtime -u aibox-web -u aibox-hid -n 50 --no-pager
-journalctl -u aibox-firstboot -n 50 --no-pager
+journalctl -u ttbox-runtime -u ttbox-web -u ttbox-hid -n 50 --no-pager
+journalctl -u ttbox-firstboot -n 50 --no-pager
 ```
 
 ## 7. 恢复出厂（完全重置）
 
 ```bash
 # 在系统内恢复出厂配置（保留数据）
-sudo rm -f /opt/aibox/.firstboot-done
-sudo rm -f /opt/aibox/models/active_model.txt
+sudo rm -f /opt/ttbox/.firstboot-done
+sudo rm -f /opt/ttbox/models/active_model.txt
 sudo reboot
 ```
 

@@ -9,9 +9,9 @@
 
 ## 1. HID 是否完全独立 —— PASS
 
-- 独立目录：[hid/](file:///g:/工作区/aibox逆向/aibox2/hid)（manifest.json / VERSION / bin/ / config/ / descriptors/ / profiles/ / validation/ / runtime/ / packages/ + registry/）
-- 独立源码：[src/hid/](file:///g:/工作区/aibox逆向/aibox2/aibox/core/src/hid)，**不依赖** `src/model/`、`src/rknn/`、`src/rga/`
-- AI Runtime 只通过 [IHidRuntime.hpp](file:///g:/工作区/aibox逆向/aibox2/aibox/core/src/hid/IHidRuntime.hpp) 访问 HID 状态；`/dev/hidraw*`、`/dev/hidg*`、`/sys/kernel/config/usb_gadget/` 全部由 HID Package 管理
+- 独立目录：[hid/](file:///g:/工作区/ttbox逆向/ttbox2/hid)（manifest.json / VERSION / bin/ / config/ / descriptors/ / profiles/ / validation/ / runtime/ / packages/ + registry/）
+- 独立源码：[src/hid/](file:///g:/工作区/ttbox逆向/ttbox2/ttbox/core/src/hid)，**不依赖** `src/model/`、`src/rknn/`、`src/rga/`
+- AI Runtime 只通过 [IHidRuntime.hpp](file:///g:/工作区/ttbox逆向/ttbox2/ttbox/core/src/hid/IHidRuntime.hpp) 访问 HID 状态；`/dev/hidraw*`、`/dev/hidg*`、`/sys/kernel/config/usb_gadget/` 全部由 HID Package 管理
 - HID 配置写入 `hid/config/hid_config.json`，**不写入** `config/default.json`
 
 ## 2. Package 目录 —— PASS
@@ -34,11 +34,11 @@ hid/
 
 ## 3. manifest —— PASS
 
-[hid/manifest.json](file:///g:/工作区/aibox逆向/aibox2/hid/manifest.json)：
+[hid/manifest.json](file:///g:/工作区/ttbox逆向/ttbox2/hid/manifest.json)：
 
 ```json
 {
-  "package_id": "aibox-hid",
+  "package_id": "ttbox-hid",
   "version": "0.0.1",
   "status_name": "development",
   "architecture": "aarch64",
@@ -55,22 +55,22 @@ hid/
 }
 ```
 
-sha256 / signature / signing_key_id 字段预留为空，**未伪造**。实现见 [HidPackageManifest.hpp](file:///g:/工作区/aibox逆向/aibox2/aibox/core/src/hid/HidPackageManifest.hpp)（`to_json` / `from_json`）。
+sha256 / signature / signing_key_id 字段预留为空，**未伪造**。实现见 [HidPackageManifest.hpp](file:///g:/工作区/ttbox逆向/ttbox2/ttbox/core/src/hid/HidPackageManifest.hpp)（`to_json` / `from_json`）。
 
 ## 4. VERSION —— PASS
 
-[hid/VERSION](file:///g:/工作区/aibox逆向/aibox2/hid/VERSION) = `0.0.1`（`hid_read_version` / `hid_write_version` 统一读写）。
+[hid/VERSION](file:///g:/工作区/ttbox逆向/ttbox2/hid/VERSION) = `0.0.1`（`hid_read_version` / `hid_write_version` 统一读写）。
 
 ## 5. Registry —— PASS
 
-[HidPackageRegistry](file:///g:/工作区/aibox逆向/aibox2/aibox/core/src/hid/HidPackageRegistry.hpp) 支持：`init / list / install / validate / activate / deactivate / remove / rollback / get_active / get_previous`。
+[HidPackageRegistry](file:///g:/工作区/ttbox逆向/ttbox2/ttbox/core/src/hid/HidPackageRegistry.hpp) 支持：`init / list / install / validate / activate / deactivate / remove / rollback / get_active / get_previous`。
 
 - **不能删除 active Package**（板端实测拒绝：`remove 0.0.1: 禁止删除 active HID Package: 0.0.1`）
 - 激活失败自动恢复旧版本（validator 注入 + quarantine + 恢复 previous，单测覆盖）
 
 ## 6. install —— PASS
 
-流程实测（板端 CLI `aibox-hid-pkg`）：
+流程实测（板端 CLI `ttbox-hid-pkg`）：
 
 ```text
 import <src> <ver> → staging
@@ -119,10 +119,10 @@ rollback       → active=0.0.1        （恢复，禁止出现"无可用 HID Pa
 
 ## 11. health check —— PASS
 
-[aibox-hid-health](file:///g:/工作区/aibox逆向/aibox2/aibox/core/tools/aibox_hid_health.cpp) 板端实测：
+[ttbox-hid-health](file:///g:/工作区/ttbox逆向/ttbox2/ttbox/core/tools/ttbox_hid_health.cpp) 板端实测：
 
 ```text
-=== aibox-hid-health (root=/home/ubuntu/aibox2/hid) ===
+=== ttbox-hid-health (root=/home/ubuntu/ttbox2/hid) ===
   [PASS] Package version        VERSION=0.0.1
   [PASS] Active package         0.0.1
   [PASS] Previous (rollback)    （无有效 previous）
@@ -137,18 +137,18 @@ rollback       → active=0.0.1        （恢复，禁止出现"无可用 HID Pa
   [PASS] Mouse                  hidg1 就绪
   [PASS] Config                 独立配置存在（不依赖 default.json）
   [PASS] Manifest               sha256 字段=Y signature 字段=Y
-=== aibox-hid-health: 11 PASS / 0 FAIL / 3 NOT-AVAILABLE ===
+=== ttbox-hid-health: 11 PASS / 0 FAIL / 3 NOT-AVAILABLE ===
 ```
 
 无真实输入设备时按 **NOT-AVAILABLE** 分类（不伪造数据、不误报 FAIL）；有设备但启动失败才判 FAIL。可作云端升级后 health check 的 commit 决策输入。
 
 ## 12. LocalSource —— PASS
 
-[LocalHidPackageSource](file:///g:/工作区/aibox逆向/aibox2/aibox/core/src/hid/IHidPackageSource.hpp)（`fetch_to` 复制本地包目录至 staging）。
+[LocalHidPackageSource](file:///g:/工作区/ttbox逆向/ttbox2/ttbox/core/src/hid/IHidPackageSource.hpp)（`fetch_to` 复制本地包目录至 staging）。
 
 ## 13. CloudSource 接口 —— PASS（占位）
 
-[CloudHidPackageSource](file:///g:/工作区/aibox逆向/aibox2/aibox/core/src/hid/IHidPackageSource.hpp)：**只做接口和占位**（返回 false），不连接真实云端。预留流程：云端检查版本 → 下载 → SHA256 → 签名 → 兼容性 → staging → activate → health check → commit。`test_hid_package` 单测 `hid_cloud_source_placeholder` 覆盖。
+[CloudHidPackageSource](file:///g:/工作区/ttbox逆向/ttbox2/ttbox/core/src/hid/IHidPackageSource.hpp)：**只做接口和占位**（返回 false），不连接真实云端。预留流程：云端检查版本 → 下载 → SHA256 → 签名 → 兼容性 → staging → activate → health check → commit。`test_hid_package` 单测 `hid_cloud_source_placeholder` 覆盖。
 
 ## 14. SHA256 字段 —— PASS
 
@@ -168,7 +168,7 @@ manifest 预留 `"signature": ""` + `"signing_key_id": ""`。正式版要求：�
 
 ## 18. A1-A8 回归 —— PASS
 
-板端 `aibox_core_tests`：**67 tests passed, 0 failed**（覆盖 manifest 字段 / VERSION / registry 生命周期 / 激活失败回滚 / 配置独立 / CloudSource 占位 / A7 ModelAdapter / A8 ModelRegistry / ROI/FOV / RGA / IPC / 最新帧等全部历史单测）。
+板端 `ttbox_core_tests`：**67 tests passed, 0 failed**（覆盖 manifest 字段 / VERSION / registry 生命周期 / 激活失败回滚 / 配置独立 / CloudSource 占位 / A7 ModelAdapter / A8 ModelRegistry / ROI/FOV / RGA / IPC / 最新帧等全部历史单测）。
 
 ## 19. 240FPS 回归 —— PASS（无退化）
 

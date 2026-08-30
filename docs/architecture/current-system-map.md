@@ -8,7 +8,7 @@
 
 ## B. Build System
 
-唯一明确 C++ 构建入口是 `core/CMakeLists.txt`，C++17；主机默认测试/工具开启，硬件测试关闭。Unix 下按环境探测 `librga` 与 `librknnrt`。Python 项目入口为 `pyproject.toml`，但仓库未提供可运行的 `aibox*` 包目录。
+唯一明确 C++ 构建入口是 `core/CMakeLists.txt`，C++17；主机默认测试/工具开启，硬件测试关闭。Unix 下按环境探测 `librga` 与 `librknnrt`。Python 项目入口为 `pyproject.toml`，但仓库未提供可运行的 `ttbox*` 包目录。
 
 ## C. Runtime Entry
 
@@ -36,7 +36,7 @@
 
 ## I. HID
 
-`core/src/hid/` 提供 HID 解析、包注册、运行时与 forwarder；`core/src/output/` 提供 `IHidOutput`、FIFO 与 AIBOX 输出实现。真实 hidraw/hidg/UDC 链路只能在 RK3588 验证；本阶段默认不启用真实 AI HID。
+`core/src/hid/` 提供 HID 解析、包注册、运行时与 forwarder；`core/src/output/` 提供 `IHidOutput`、FIFO 与 TTBOX 输出实现。真实 hidraw/hidg/UDC 链路只能在 RK3588 验证；本阶段默认不启用真实 AI HID。
 
 ## J. IPC
 
@@ -44,7 +44,7 @@
 
 ## K. Web
 
-仓库没有独立 Web 源码应用；原 `core/tools/web/`（AIBOX 旧 Python 控制台、静态页面与部署脚本）已于 Web 重置阶段整体移除，Web 前端待新底座重建。
+仓库没有独立 Web 源码应用；原 `core/tools/web/`（TTBOX 旧 Python 控制台、静态页面与部署脚本）已于 Web 重置阶段整体移除，Web 前端待新底座重建。
 
 ## L. API
 
@@ -84,7 +84,7 @@ CMake 注册 Core 单元测试、邮箱/AimThread/FOV 测试；硬件测试需�
 
 ## AIBox package reference (offline)
 
-已离线读取用户提供的四类 `.deb` 包目录与 service/路径清单：`aibox-rk3588` 提供 `aibox.service`、`/usr/bin/aibox`、`aibox-bl`、模型目录与 RKNN runtime；`aiboxkm` 提供 `aiboxkm.service`、USB udev rule 与 `/usr/bin/aiboxkm`；`web-aibox` 提供 `web-aibox.service`、`web-aibox-ctl` 与 `/opt/web-aibox/web`；`autobl_upgrade` 提供 `cloud-file-manager.service`、`CloudFileManagerBackend` 与 `/opt/autobl/webui`。这些包仅作为离线能力/运行方式参考，未复制其受版权保护的源码、未访问包内云端链接或凭证。
+已离线读取用户提供的四类 `.deb` 包目录与 service/路径清单：`ttbox-rk3588` 提供 `ttbox.service`、`/usr/bin/ttbox`、`ttbox-bl`、模型目录与 RKNN runtime；`ttboxkm` 提供 `ttboxkm.service`、USB udev rule 与 `/usr/bin/ttboxkm`；`web-ttbox` 提供 `web-ttbox.service`、`web-ttbox-ctl` 与 `/opt/web-ttbox/web`；`autobl_upgrade` 提供 `cloud-file-manager.service`、`CloudFileManagerBackend` 与 `/opt/autobl/webui`。这些包仅作为离线能力/运行方式参考，未复制其受版权保护的源码、未访问包内云端链接或凭证。
 
 ## Evidence boundary
 

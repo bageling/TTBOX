@@ -1,4 +1,4 @@
-# RK3588 性能报告 (aibox2)
+# RK3588 性能报告 (ttbox2)
 
 > 实测环境：OrangePi 5 Plus / DietPi Debian 12 / kernel 6.1.99-rockchip-rk3588 / RKNN Runtime 2.3.2 (librknnrt) / RKNN Driver 0.9.8 / RKNNLite 2.3.2 / Python 3.11.2 / numpy 2.4.6
 > 模型：yolo261n-rk3588.rknn (640×640, ONNX NCHW, 静态 shape)
@@ -252,7 +252,7 @@ process_width/height: 0      # 跟随模型 640
 
 ## 5.10.6 ModelStore metadata（目标6）
 
-【实测】[models.py](file:///g:\工作区\aibox逆向\aibox2\aibox\inference\models.py)：
+【实测】[models.py](file:///g:\工作区\ttbox逆向\ttbox2\ttbox\inference\models.py)：
 - `_infer_model_input_hw` 修复：不再把型号数字（yolo261n 的 261）当输入尺寸（仅匹配 `-640.` / `-512x512` 明确模式）
 - entry 增加 `metadata`：`input_width/input_height`（config 单一来源，fallback 文件名）、`layout=NHWC`、`dtype=uint8`、`classes`（config `model_class_names_text`）、`preferred_core_mask=0`
 - 实测：yolo261n-rk3588.rknn → `input_hw=(640,640)`, metadata 完整 ✅
