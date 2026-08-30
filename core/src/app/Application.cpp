@@ -12,6 +12,7 @@
 #include "model/ModelManagement.hpp"
 #include "output/AiboxHidOutput.hpp"
 #include "output/FifoHidOutput.hpp"
+#include "output/OutputBackend.hpp"
 #include "ttbox/core/version.hpp"
 
 #include <cstdio>
@@ -140,18 +141,37 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         config_.get_bool("model_pass_through", false);
 
     const std::string output_kind = config_.get_string("output_backend", "aibox");
+    bool enabled = config_.get_bool("output_enabled", false);
     if (output_kind == "fifo") {
         const std::string fifo_path =
             config_.get_string("output_fifo_path", "/tmp/ttbox_hid.fifo");
         hid_output_ = std::make_shared<output::FifoHidOutput>(fifo_path);
-    } else {
+    } else if (output_kind == "local_hid" || output_kind == "kmboxnet" ||
+               output_kind == "makcu" || output_kind == "ferrum" ||
+               output_kind == "kmboxb") {
+        // 统一 OutputBackend：按 kind 选择后端，行为与 AiboxHidOutput 完全一致
+        // （local_hid 即原 aibox 逻辑迁移；kmboxnet/makcu/ferrum/kmboxb 后续接入）。
+        auto backend = std::make_shared<output::OutputBackend>();
+        output::OutputBackend::Params bp;
+        bp.kind = output_kind;
+        bp.hidg_path = config_.get_string("output_hidg_path", "/dev/hidg0");
+        bp.enabled = enabled;
+        bp.runtime_config = &runtime_config_;
+        // button_source 由 Application::start 阶段绑定（见 add_hid_button_source 处）
+        std::string berr;
+        if (!backend->configure(bp, &berr)) {
+            TTBOX_LOG_WARN("OutputBackend 配置失败（回退 aibox）: " + berr);
+        } else {
+            hid_output_ = std::move(backend);
+        }
+    }
+    if (!hid_output_) {
         const std::string hidg_path =
             config_.get_string("output_hidg_path", "/dev/hidg0");
         auto output = std::make_shared<output::AiboxHidOutput>(hidg_path);
         // output_enabled 是后端静态总闸（不写配置时默认关闭，fail-closed）。
-        // mouse.enabled 由 AimThread 与 AiboxHidOutput 每周期实时读取 RuntimeConfig，
+        // mouse.enabled 由 AimThread 与输出后端每周期实时读取 RuntimeConfig，
         // 不在此快照 —— 用户改配置后无需重启即生效。
-        bool enabled = config_.get_bool("output_enabled", false);
         output->set_enabled(enabled);
         output->set_config_source(&runtime_config_);
         hid_output_ = std::move(output);

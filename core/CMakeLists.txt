@@ -45,6 +45,9 @@ set(CORE_SOURCES
   src/runtime/HardwareRunner.cpp
   src/output/FifoHidOutput.cpp
   src/output/AiboxHidOutput.cpp
+  src/output/OutputBackend.cpp
+  src/output/LocalHidBackend.cpp
+  src/output/KmboxNetBackend.cpp
   src/common/Logger.cpp
   src/common/Json.cpp
   src/config/ConfigManager.cpp
@@ -258,6 +261,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_coordinate_transform tests/test_coordinate_transform.cpp)
   target_link_libraries(test_coordinate_transform PRIVATE ttbox_core)
   add_test(NAME test_coordinate_transform COMMAND test_coordinate_transform)
+
+  # OutputBackend 统一接口测试（纯 C++，host 可测；Gate/选择/生命周期/零移动）
+  add_executable(test_output_backend tests/test_output_backend.cpp)
+  target_link_libraries(test_output_backend PRIVATE ttbox_core)
+  add_test(NAME test_output_backend COMMAND test_output_backend)
 
   # G1 metrics 测试：实例化 CoreRuntime（依赖 V4L2Capture/WorkerPool，仅板端编译）
   if(UNIX AND NOT APPLE)

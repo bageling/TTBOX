@@ -1,6 +1,7 @@
 // HardwareRunner.cpp — 严格的下游先停、上游后停生命周期。
 #include "runtime/HardwareRunner.hpp"
 #include "output/AiboxHidOutput.hpp"
+#include "output/OutputBackend.hpp"
 namespace ttbox::core {
 bool HardwareRunner::initialize(const Params& p,std::string* error){
  if(!p.output){if(error)*error="HardwareRunner 输出后端为空";return false;}
@@ -24,10 +25,12 @@ bool HardwareRunner::start(std::string* error){
  if(!workers_->start(wp,error)){capture_->stop();capture_->close();running_=false;return false;}
  std::string mouse_error;
  if(!mouse_reader_.start("", &mouse_error)){ if(error)*error="物理鼠标读取器启动失败: "+mouse_error; workers_->stop(); capture_->stop(); capture_->close(); running_=false; return false; }
- if (auto aibox = std::dynamic_pointer_cast<output::AiboxHidOutput>(params_.output)) {
-     // 最终输出门控必须读取同一个真实鼠标 event11 按钮源，避免 AimThread 与输出端状态分裂。
-     // 放行掩码不再在此快照/写死：绑定 RuntimeConfig 后，每次发送由 AiboxHidOutput
-     // 实时读取 aim_hotkey|aim_hotkey2 与 mouse.enabled —— 改热键配置即时生效，无需重启。
+ if (auto backend = std::dynamic_pointer_cast<output::OutputBackend>(params_.output)) {
+     // 统一后端：最终输出门控读取同一个真实鼠标 event11 按钮源。
+     backend->set_button_source(mouse_reader_.button_source());
+     backend->set_config_source(params_.runtime_config);
+ } else if (auto aibox = std::dynamic_pointer_cast<output::AiboxHidOutput>(params_.output)) {
+     // 旧实现兼容：保持原绑定路径，避免旧测试/旧调用者行为变化。
      aibox->set_button_source(mouse_reader_.button_source());
      aibox->set_config_source(params_.runtime_config);
  }
