@@ -654,7 +654,8 @@ app = Flask(
 # ====================================================================
 @app.after_request
 def add_no_cache_headers(response):
-    if request.path.startswith('/api/'):
+    # HTML 页面和 API 全部禁缓存（防止浏览器缓存旧 JS/旧数据导致页面异常）
+    if not request.path.startswith('/static/') or request.path.endswith('.html'):
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
         response.headers['Pragma'] = 'no-cache'
     return response
