@@ -41,6 +41,173 @@ DEFAULT_LICENSE = {
     'status': 'valid', 'message': '',
 }
 
+
+# ====================================================================
+# 板载资源采集（真实 procfs/sysfs 读数，非占位）
+# ====================================================================
+_CPU_T0 = [0, 0.0]  # [样本次数, 累计 idle] —— 双采样差分算 CPU%
+_CPU_TOTAL0 = [0, 0.0]
+
+
+def _read_float(path, default=0.0):
+    try:
+        with open(path, 'r') as f:
+            return float(f.read().strip())
+    except Exception:
+        return default
+
+
+def _read_int(path, default=0):
+    try:
+        with open(path, 'r') as f:
+            return int(f.read().strip())
+    except Exception:
+        return default
+
+
+def _cpu_percent():
+    """两次 /proc/stat 采样差分 → CPU 占用%（0~100）。"""
+    try:
+        with open('/proc/stat') as f:
+            parts = f.readline().split()
+        vals = [int(x) for x in parts[1:]]
+        if len(vals) < 4:
+            return 0.0
+        idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+        total = sum(vals)
+        if _CPU_T0[0] > 0:
+            didle = idle - _CPU_T0[1]
+            dtotal = total - _CPU_TOTAL0[1]
+            _CPU_T0[0] += 1
+            _CPU_TOTAL0[0] += 1
+            if dtotal > 0:
+                return round(max(0.0, min(100.0, 100.0 * (1.0 - didle / dtotal))), 1)
+        _CPU_T0[0] += 1
+        _CPU_TOTAL0[0] += 1
+        _CPU_T0[1] = idle
+        _CPU_TOTAL0[1] = total
+        return 0.0
+    except Exception:
+        return 0.0
+
+
+def _memory():
+    try:
+        with open('/proc/meminfo') as f:
+            mem = {}
+            for line in f:
+                k, _, v = line.partition(':')
+                if k in ('MemTotal', 'MemFree', 'MemAvailable', 'Buffers', 'Cached'):
+                    mem[k] = int(v.strip().split()[0]) * 1024
+        total = mem.get('MemTotal', 0)
+        avail = mem.get('MemAvailable', mem.get('MemFree', 0))
+        used = max(0, total - avail)
+        return {
+            'total': total, 'used': used, 'free': avail,
+            'percent': round(100.0 * used / total, 1) if total else 0.0,
+        }
+    except Exception:
+        return {'total': 0, 'used': 0, 'free': 0, 'percent': 0.0}
+
+
+def _temperature():
+    """优先 SoC 温度（thermal_zone0 soc-thermal），回退第一个可用 zone。"""
+    best = None
+    try:
+        import glob
+        for z in sorted(glob.glob('/sys/class/thermal/thermal_zone*')):
+            try:
+                with open(z + '/type') as f:
+                    ztype = f.read().strip()
+            except Exception:
+                continue
+            temp = _read_float(z + '/temp', 0.0) / 1000.0
+            if temp <= 0:
+                continue
+            if ztype == 'soc-thermal':
+                return {'celsius': round(temp, 1), 'label': 'SoC', 'zone': ztype}
+            if best is None:
+                best = (temp, ztype)
+    except Exception:
+        pass
+    if best:
+        return {'celsius': round(best[0], 1), 'label': best[1], 'zone': best[1]}
+    return {'celsius': 0.0, 'label': 'thermal', 'zone': ''}
+
+
+def _storage():
+    try:
+        st = os.statvfs('/')
+        total = st.f_blocks * st.f_frsize
+        free = st.f_bfree * st.f_frsize
+        used = total - free
+        avail = st.f_bavail * st.f_frsize
+        return {
+            'total': total, 'used': used, 'free': avail,
+            'percent': round(100.0 * used / total, 1) if total else 0.0,
+        }
+    except Exception:
+        return {'total': 0, 'used': 0, 'free': 0, 'percent': 0.0}
+
+
+def _load_average():
+    try:
+        with open('/proc/loadavg') as f:
+            parts = f.read().split()
+        return [float(x) for x in parts[:3]]
+    except Exception:
+        return []
+
+
+def _hostname():
+    try:
+        import socket as _s
+        return _s.gethostname()
+    except Exception:
+        return 'ttbox'
+
+
+def _lan_ipv4():
+    try:
+        import subprocess as _sp
+        out = _sp.check_output(['hostname', '-I'], text=True, timeout=2).split()
+        for ip in out:
+            if ip and not ip.startswith('127.'):
+                return ip
+    except Exception:
+        pass
+    return ''
+
+
+def _uptime_seconds():
+    try:
+        with open('/proc/uptime') as f:
+            return float(f.read().split()[0])
+    except Exception:
+        return 0.0
+
+
+def collect_system_stats() -> dict:
+    return {
+        'hostname': _hostname(),
+        'uptime_seconds': _uptime_seconds(),
+        'cpu_percent': _cpu_percent(),
+        'load_average': _load_average(),
+        'memory': _memory(),
+        'temperature': _temperature(),
+        'storage': _storage(),
+        'lan_ipv4': _lan_ipv4(),
+        'lan_url': '',
+        'mdns_url': '',
+        'web_port': LISTEN_PORT,
+        'os': 'Orange Pi 1.2.0',
+        'version': '',
+        'app_version': 'ttbox-0.1.0',
+    }
+
+
+# ====================================================================
+# IPC 通信
 # ====================================================================
 # IPC 通信
 # ====================================================================
@@ -525,31 +692,19 @@ def get_announcement():
 
 @app.get('/api/system')
 def get_system_status():
-    st = _get_status()
-    return jsonify({
-        'ok': True,
-        'data': {
-            'hostname': 'ttbox',
-            'uptime': st.get('uptime', 0),
-            'cpu_temp': st.get('cpu_temp', 0),
-            'cpu_usage': st.get('cpu_usage', 0),
-            'memory_usage': st.get('memory_usage', 0),
-            'version': str(st.get('version', '')),
-            'app_version': 'ttbox-' + str(st.get('version', '')),
-            'os': 'Orange Pi 1.2.0',
-        },
-    })
+    return jsonify({'ok': True, 'data': collect_system_stats()})
 
 
 @app.get('/api/system/storage')
 def get_storage_status():
+    s = _storage()
     return jsonify({
         'ok': True,
         'data': {
-            'total': 14 * 1024,
-            'used': 5 * 1024,
-            'available': 8 * 1024,
-            'usage_percent': 40,
+            'total': s['total'], 'used': s['used'], 'free': s['free'],
+            'percent': s['percent'],
+            'rootfs': {'ok': True, 'percent': s['percent'],
+                       'total': s['total'], 'used': s['used'], 'free': s['free']},
         },
     })
 
