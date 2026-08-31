@@ -1004,7 +1004,36 @@ def select_model():
         json.dump(cfg, open(cpath, 'w'), indent=2, ensure_ascii=False)
     except Exception:
         pass
-    return jsonify({'ok': True, 'data': {'message': '模型已切换，重启 AI 后生效'}})
+    # 自动重启 AI 流水线：切换模型立即可用（无感热切换）
+    ipc_request('RUNTIME_CONTROL', {'action': 'stop'})
+    import time as _t
+    _t.sleep(0.5)
+    r2 = ipc_request('RUNTIME_CONTROL', {'action': 'start'})
+    if r2.get('status') != 0:
+        return jsonify({'ok': True, 'data': {'message': '模型已切换，AI 重启失败请手动启动', 'restart': False}})
+    ml = ipc_request('MODEL_LIST')
+    models_out = []
+    if ml.get('status') == 0:
+        for mm in (ml.get('data', {}) or {}).get('models', []):
+            models_out.append({'id': mm.get('model_id'), 'model_id': mm.get('model_id'),
+                               'name': mm.get('label') or mm.get('model_id'),
+                               'display_name': mm.get('label') or mm.get('model_id'),
+                               'backend': 'rknn', 'enabled': True, 'imported': True,
+                               'input_width': mm.get('input_width', 0),
+                               'input_height': mm.get('input_height', 0),
+                               'output_count': mm.get('output_count', 0),
+                               'class_count': mm.get('class_count', 0),
+                               'class_names': mm.get('class_names') or [],
+                               'rknn_concurrency': mm.get('rknn_concurrency', 1)})
+    active = (ml.get('data', {}) or {}).get('active', model_id)
+    return jsonify({'ok': True, 'data': {
+        'message': '模型已切换并重启 AI', 'restart': True,
+        'models': models_out, 'selected_model_id': active,
+        'model': {'id': model_id, 'model_id': model_id,
+                   'name': model_id, 'display_name': model_id, 'backend': 'rknn'},
+        'config': profile_to_yu(prof),
+        'presets': [],
+    }})
 
 
 @app.post('/api/models/bind-preset')
