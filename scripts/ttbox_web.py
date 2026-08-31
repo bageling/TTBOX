@@ -546,17 +546,21 @@ def collect_yu_state() -> dict:
     prof = _get_runtime_profile()
     ml = ipc_request('MODEL_LIST')
     ml_data = (ml.get('data', {}) or {}) if ml.get('status') == 0 else {}
-    # 与 /api/models 同款映射（前端模型卡片消费 model.id）
+    # YU 同构：state.models = 数组，字段对齐前端模型卡片（id/display_name/backend/enabled/尺寸）
     models = []
     for mm in ml_data.get('models', []):
         models.append({
             'id': mm.get('model_id'),
             'model_id': mm.get('model_id'),
             'name': mm.get('label') or mm.get('model_id'),
+            'display_name': mm.get('label') or mm.get('model_id'),
             'label': mm.get('label'),
             'version': mm.get('version'),
             'status': mm.get('status_name') or ('installed' if mm.get('status') == 2 else 'staging'),
             'origin': mm.get('origin'),
+            'backend': 'rknn',
+            'enabled': True,
+            'imported': True,
         })
     active_model = ml_data.get('active', '')
 
@@ -571,7 +575,8 @@ def collect_yu_state() -> dict:
             'app_version': 'ttbox-' + str(st.get('version', '')),
             'version': str(st.get('version', '')),
             'config': config_yu,
-            'models': {'models': models, 'active': active_model},
+            'models': models,  # YU 同构：数组
+            'selected_model_id': active_model,
             'presets': {'presets': []},
             'state': {
                 'aim': {'active': m.get('aim_active', False), 'last_error': ''},
