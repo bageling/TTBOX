@@ -57,7 +57,7 @@ public:
     void set_config_provider(ConfigProvider p) { config_provider_ = std::move(p); }
 
     // Phase2：预览快照回调（返回 JPEG 字节；无帧返回 false）
-    using PreviewProvider = std::function<bool(std::vector<uint8_t>*)>;
+    using PreviewProvider = std::function<bool(std::vector<uint8_t>*, uint64_t*)>;  // 出参2: 帧序号（seq，供 web 去重）
     void set_preview_provider(PreviewProvider p) { preview_provider_ = std::move(p); }
 
     // 配置写入回调（SET_CONFIG）：由 Application 注入。

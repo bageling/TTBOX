@@ -980,7 +980,35 @@ def update_model_remote_frame_format():
 
 @app.post('/api/models/rknn-concurrency')
 def update_model_rknn_concurrency():
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    body = request.get_json(silent=True) or {}
+    model_id = body.get('model_id', '')
+    conc = body.get('rknn_concurrency')
+    if not model_id or conc is None:
+        return jsonify({'ok': False, 'error': '缺少 model_id / rknn_concurrency'})
+    try:
+        conc = int(conc)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': 'rknn_concurrency 必须是数字'})
+    conc = max(1, min(3, conc))
+    # YU 语义：并发数 = NPU worker 数。映射到 worker_cores（1→单核, 2→双核, 3→三核并行）
+    cores_map = {1: '1', 2: '1,2', 3: '1,2,4'}
+    cpath = os.environ.get('TTBOX_CONFIG', '/opt/ttbox/config/default.json')
+    try:
+        cfg = json.load(open(cpath))
+        cfg['worker_cores'] = cores_map[conc]
+        json.dump(cfg, open(cpath, 'w'), indent=2, ensure_ascii=False)
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': f'写配置失败: {exc}'})
+    # 同时记进模型 manifest（前端显示用）
+    manifest_path = f'/opt/ttbox/models/installed/{model_id}/manifest.json'
+    if os.path.exists(manifest_path):
+        try:
+            manifest = json.load(open(manifest_path))
+            manifest['rknn_concurrency'] = conc
+            json.dump(manifest, open(manifest_path, 'w'), indent=2, ensure_ascii=False)
+        except Exception:
+            pass
+    return jsonify({'ok': True, 'data': {'message': f'并发已设为 {conc}，重启 AI 后生效', 'rknn_concurrency': conc}})
 
 
 @app.post('/api/models/hailo-pipeline-depth')
@@ -1458,17 +1486,21 @@ def preview_stream():
     def generate():
         # YU 同款防糊策略：只在核心端缓存更新（seq 变化）时推新帧，
         # 不重复推同一帧（浏览器 img 绘制跟不上会导致 multipart 积压 → 半帧横线花屏）。
-        last_len = -1
+        last_seq = -1
+        last_push = time.time()
         while True:
             r = ipc_request('GET_PREVIEW', timeout=2)
+            now = time.time()
             if r.get('status') == 0:
                 d = r.get('data', {})
                 b64 = d.get('jpeg_base64')
-                nbytes = d.get('bytes', 0)
-                if b64 and nbytes != last_len:
+                seq = d.get('seq', 0)
+                # seq 变化 = 核心端编码了新帧 → 推；兜底：>1s 没推也推一次（防浏览器黑屏）
+                if b64 and (seq != last_seq or now - last_push > 1.0):
                     px = base64.b64decode(b64)
                     if px:
-                        last_len = nbytes
+                        last_seq = seq
+                        last_push = now
                         yield b'--ttboxframe\r\n'
                         yield b'Content-Type: image/jpeg\r\n'
                         yield f'Content-Length: {len(px)}\r\n\r\n'.encode()

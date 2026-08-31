@@ -399,7 +399,8 @@ IpcResponse IpcServer::handle_request(const JsonValue& request) {
             return resp;
         }
         std::vector<uint8_t> jpeg;
-        if (!preview_provider_(&jpeg) || jpeg.empty()) {
+        uint64_t pseq = 0;
+        if (!preview_provider_(&jpeg, &pseq) || jpeg.empty()) {
             resp.status = IpcError::kNotFound;
             resp.error = "暂无预览帧";
             return resp;
@@ -420,6 +421,7 @@ IpcResponse IpcServer::handle_request(const JsonValue& request) {
         JsonValue pd = JsonValue::object();
         pd.set("jpeg_base64", JsonValue::string(b64));
         pd.set("bytes", JsonValue::number(static_cast<double>(jpeg.size())));
+        pd.set("seq", JsonValue::number(static_cast<double>(pseq)));
         resp.status = IpcError::kOk;
         resp.data = std::move(pd);
         return resp;

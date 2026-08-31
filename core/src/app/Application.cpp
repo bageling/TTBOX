@@ -333,10 +333,14 @@ int Application::initialize(int argc, char** argv) {
 
     // ---- 5. 启动 IPC 服务 ----
     ipc_.set_status_provider([this] { return status_provider(); });
-    ipc_.set_preview_provider([this](std::vector<uint8_t>* out) {
-        return core_runtime_ && core_runtime_->preview() && core_runtime_->preview()->running()
+    ipc_.set_preview_provider([this](std::vector<uint8_t>* out, uint64_t* seq) {
+        const bool ok = core_runtime_ && core_runtime_->preview() && core_runtime_->preview()->running()
                    ? core_runtime_->preview()->snapshot(out)
                    : false;
+        if (ok && seq) {
+            *seq = core_runtime_->preview()->metrics().frames.load();
+        }
+        return ok;
     });
     ipc_.set_config_provider([this] { return config_provider(); });
     ipc_.set_config_update_handler(
