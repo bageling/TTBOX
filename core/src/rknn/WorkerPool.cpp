@@ -207,12 +207,12 @@ void InferenceWorker::loop() {
     while (running_.load()) {
         auto frame = params_.latest->get();
         if (!frame) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
             continue;
         }
         const uint32_t seq = frame->info.sequence;
         if (seq == last_seq_) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
             continue;  // 本 worker 已处理过该帧
         }
         // 认领规则：seq % N == id（帧只被一个 worker 处理，无重复）
