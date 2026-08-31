@@ -1366,12 +1366,23 @@ def update_display_hardware():
         result = {'exit': r.returncode, 'log': (r.stdout + r.stderr)[-400:]}
         if r.returncode != 0:
             return jsonify({'ok': False, 'error': f'EDID 应用失败: {r.stderr or r.stdout}'[-300:]})
-    # 返回 YU 兼容结构（前端 populateDisplayHardware 消费）
-    return jsonify({'ok': True, 'data': {
-        'config': cur,
-        'result': result,
-        'message': '显示器配置已应用',
-    }})
+    # 返回 YU 兼容结构（前端 populateDisplayHardware 消费 display_mode/loopout）
+    # 简化：直接返回 GET 的完整结构（含 real_monitor/available_modes/advertised）
+    with app.test_request_context('/api/hardware/display'):
+        pass
+    gv = get_display_hardware()
+    gv_data = gv.get_json().get('data', {})
+    gv_data['config'] = cur
+    gv_data['result'] = result
+    gv_data['message'] = '显示器配置已应用'
+    gv_data['loopout'] = {
+        'enabled': bool(cur.get('loopout_enabled')),
+        'overlay_enabled': bool(cur.get('loopout_overlay_enabled')),
+        'pixel_format': cur.get('loopout_pixel_format', 'rgb888'),
+        'width': 0, 'height': 0, 'refresh': 0,
+        'overlay_status': '等待环出' if cur.get('loopout_overlay_enabled') else '',
+    }
+    return jsonify({'ok': True, 'data': gv_data})
 
 
 # -- 网络/WiFi --
