@@ -52,7 +52,8 @@ DEFAULT_LICENSE = {
 # ====================================================================
 # 板载资源采集（真实 procfs/sysfs 读数，非占位）
 # ====================================================================
-_CPU_T0 = [0, 0.0]  # [样本次数, 累计 idle] —— 双采样差分算 CPU%
+_CPU_T0 = [0, 0.0]
+_DISPLAY_CACHE = {'ts': 0.0, 'data': None}  # [样本次数, 累计 idle] —— 双采样差分算 CPU%
 _CPU_TOTAL0 = [0, 0.0]
 
 
@@ -1229,11 +1230,15 @@ def update_mouse_proxy_timing():
 
 @app.get('/api/hardware/display')
 def get_display_hardware():
+    # 缓存 3 秒：v4l2-ctl query-dv-timing 在信号重协商时阻塞，防止 waitress 线程耗尽
+    now = time.time()
+    if _DISPLAY_CACHE['data'] is not None and now - _DISPLAY_CACHE['ts'] < 3:
+        return jsonify({'ok': True, 'data': _DISPLAY_CACHE['data']})
     hdmi = {'connected': False, 'locked': False, 'width': 0, 'height': 0, 'refresh': 0}
     try:
         r = subprocess.run(
             ['v4l2-ctl', '-d', '/dev/video0', '--query-dv-timing'],
-            capture_output=True, text=True, timeout=3,
+            capture_output=True, text=True, timeout=1.5,
         )
         txt = r.stdout
         if r.returncode == 0 and 'Active width' in txt:
@@ -1321,13 +1326,16 @@ def get_display_hardware():
     data = dict(hdmi)
     data['available'] = hdmi.get('connected', False)
     data['config'] = cfg_disp
+    status_text = ''
     # 真实显示器身份：从当前生效 EDID 读取（hdmirx_edid --status）
     edid_name, edid_vendor, edid_pid, edid_serial = '', '', '', ''
     edid_valid = False
+    status_text = ''
     try:
         out = subprocess.check_output(
             ['/opt/aiassistance/bin/hdmirx_edid', '--status'],
             text=True, timeout=5)
+        status_text = out
         nm = re.search(r'name=(\S+)', out)
         vd = re.search(r'vendor=(\S+)', out)
         pid = re.search(r'product=(0x[0-9a-fA-F]+)', out)
@@ -1340,6 +1348,7 @@ def get_display_hardware():
             edid_valid = True
     except Exception:
         pass
+    data['status'] = {'output': status_text or 'EDID 状态读取失败'}
     data['display_mode'] = {
         'real_monitor': {
             'connected': hdmi.get('connected', False),
@@ -1354,6 +1363,8 @@ def get_display_hardware():
         'advertised_modes': advertised[:16],
         'available_modes': available_modes,
     }
+    _DISPLAY_CACHE['ts'] = time.time()
+    _DISPLAY_CACHE['data'] = data
     return jsonify({'ok': True, 'data': data})
 
 
@@ -1382,7 +1393,7 @@ def update_display_hardware():
     if apply_now:
         r = subprocess.run(['bash', '/opt/ttbox/scripts/edid/edid_apply.sh'],
                            capture_output=True, text=True, timeout=60)
-        result = {'exit': r.returncode, 'log': (r.stdout + r.stderr)[-400:]}
+        result = {'exit': r.returncode, 'output': (r.stdout + r.stderr).strip()[-500:]}
         if r.returncode != 0:
             return jsonify({'ok': False, 'error': f'EDID 应用失败: {r.stderr or r.stdout}'[-300:]})
     # 返回 YU 兼容结构（前端 populateDisplayHardware 消费 display_mode/loopout）
