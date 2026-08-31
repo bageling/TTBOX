@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "common/Logger.hpp"
+#include "common/CpuAffinity.hpp"
 #include "model/ModelManagement.hpp"
 #include "output/AiboxHidOutput.hpp"
 #include "output/FifoHidOutput.hpp"
@@ -236,6 +237,19 @@ int Application::initialize(int argc, char** argv) {
     Logger::instance().add_sink(std::make_shared<ConsoleSink>());
     TTBOX_LOG_INFO("=== " + std::string(kAppName) + " v" +
                    std::string(kVersion) + " 启动 ===");
+
+    // ---- CPU 频率下限锁定（默认 70%，0=不锁）----
+    // 需求：CPU 要锁 Hz 最低 70%（governor=performance 下锁 scaling_min_freq），
+    // 防降频抖动。失败仅告警（权限/内核差异），不阻塞启动。
+    {
+        const int pct = static_cast<int>(config_.get_int("cpu_min_freq_percent", 70));
+        auto fr = CpuAffinity::lock_min_freq_percent(pct);
+        if (fr.freq_ok) {
+            TTBOX_LOG_INFO("CPU 频率下限锁定完成: " + fr.detail);
+        } else {
+            TTBOX_LOG_WARN("CPU 频率锁定部分失败: " + fr.detail);
+        }
+    }
 
     if (config_path_.empty()) config_path_ = kDefaultConfigPath;
     std::string cfg_error;

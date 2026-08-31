@@ -22,6 +22,7 @@ namespace ttbox::core {
 
 #include "capture/DmaBuf.hpp"
 #include "common/Logger.hpp"
+#include "common/CpuAffinity.hpp"
 
 namespace ttbox::core {
 
@@ -356,6 +357,16 @@ bool V4L2Capture::start(std::string* error) {
 
     running_.store(true);
     capture_thread_ = std::thread(&V4L2Capture::capture_loop, this);
+    // 采集线程绑定大核（CPU4~7）：采集是硬实时链路，避免被调度到小核造成抖动。
+    // 失败仅告警（调度策略仍可用），不影响启动。
+    {
+        std::string aerr;
+        if (!CpuAffinity::set_thread_affinity(CpuAffinity::kBigCoreMask, &aerr)) {
+            TTBOX_LOG_WARN("capture 线程绑定大核失败: " + aerr);
+        } else {
+            TTBOX_LOG_INFO("capture 线程已绑定大核 (cpu4-7)");
+        }
+    }
     TTBOX_LOG_INFO("capture thread 已启动");
     return true;
 }

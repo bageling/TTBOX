@@ -48,6 +48,7 @@ set(CORE_SOURCES
   src/output/OutputBackend.cpp
   src/output/LocalHidBackend.cpp
   src/common/Logger.cpp
+  src/common/CpuAffinity.cpp
   src/common/Json.cpp
   src/config/ConfigManager.cpp
   src/ipc/IpcServer.cpp

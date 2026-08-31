@@ -12,6 +12,7 @@ namespace ttbox::core {
 #include <thread>
 
 #include "common/Logger.hpp"
+#include "common/CpuAffinity.hpp"
 
 namespace ttbox::core {
 
@@ -152,6 +153,16 @@ bool InferenceWorker::start(const Params& params, std::string* error) {
 
     running_.store(true);
     thread_ = std::thread(&InferenceWorker::loop, this);
+    // 推理线程绑定大核（CPU4~7）：RGA 缩放 + NMS 后处理都是 CPU 密集，
+    // 与采集线程同域，避免小核调度抖动；NPU 三核并行由 core_mask 1/2/4 保证。
+    {
+        std::string aerr;
+        if (!CpuAffinity::set_thread_affinity(CpuAffinity::kBigCoreMask, &aerr)) {
+            TTBOX_LOG_WARN("worker[" + std::to_string(id_) + "] 绑定大核失败: " + aerr);
+        } else {
+            TTBOX_LOG_INFO("worker[" + std::to_string(id_) + "] 已绑定大核 (cpu4-7)");
+        }
+    }
     return true;
 }
 
