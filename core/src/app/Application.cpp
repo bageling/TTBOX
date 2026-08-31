@@ -253,6 +253,16 @@ int Application::initialize(int argc, char** argv) {
         }
     }
 
+
+    if (config_path_.empty()) config_path_ = kDefaultConfigPath;
+    std::string cfg_error;
+    if (!config_.load(config_path_, &cfg_error)) {
+        TTBOX_LOG_ERROR(cfg_error);
+        TTBOX_LOG_ERROR("配置加载失败，拒绝启动");
+        return 1;
+    }
+    TTBOX_LOG_INFO("配置已加载: " + config_path_);
+
     // ---- CPU 频率锁定（YU 行为：启动时锁最高，防降频抖动）----
     // 默认 100% = scaling_min_freq 锁到 max_freq（governor=performance 下等效满频运行）。
     // 失败仅告警（权限/内核差异），不阻塞启动。
@@ -265,15 +275,6 @@ int Application::initialize(int argc, char** argv) {
             TTBOX_LOG_WARN("CPU 频率锁定部分失败: " + fr.detail);
         }
     }
-
-    if (config_path_.empty()) config_path_ = kDefaultConfigPath;
-    std::string cfg_error;
-    if (!config_.load(config_path_, &cfg_error)) {
-        TTBOX_LOG_ERROR(cfg_error);
-        TTBOX_LOG_ERROR("配置加载失败，拒绝启动");
-        return 1;
-    }
-    TTBOX_LOG_INFO("配置已加载: " + config_path_);
 
     // ---- 3. 授权层初始化（等价 cardVerifyThreadFunc）----
     license_client_ = std::make_unique<auth::AiboxLicenseClient>();
