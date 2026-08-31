@@ -990,7 +990,25 @@ def update_model_hailo_pipeline_depth():
 
 @app.post('/api/models/class-names')
 def update_model_class_names():
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    body = request.get_json(silent=True) or {}
+    model_id = body.get('model_id', '')
+    names = body.get('class_names')
+    if not model_id:
+        return jsonify({'ok': False, 'error': '缺少 model_id'})
+    if not isinstance(names, list):
+        return jsonify({'ok': False, 'error': 'class_names 必须是字符串数组'})
+    names = [str(x).strip() for x in names if str(x).strip()]
+    manifest_path = f'/opt/ttbox/models/installed/{model_id}/manifest.json'
+    if not os.path.exists(manifest_path):
+        return jsonify({'ok': False, 'error': f'模型不存在: {model_id}'})
+    try:
+        manifest = json.load(open(manifest_path))
+        manifest['class_names'] = names
+        manifest['class_count'] = len(names)
+        json.dump(manifest, open(manifest_path, 'w'), indent=2, ensure_ascii=False)
+        return jsonify({'ok': True, 'data': {'message': '类别已更新', 'class_names': names}})
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': f'写入失败: {exc}'})
 
 
 # -- 预设 --

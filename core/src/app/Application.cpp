@@ -5,12 +5,16 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <sstream>
 #include <thread>
 
 #include "common/Logger.hpp"
 #include "common/CpuAffinity.hpp"
 #include "model/ModelManagement.hpp"
+#ifdef TTBOX_CORE_HAS_RKNN
+#include "rknn/RKNNEngine.hpp"
+#endif
 #include "output/AiboxHidOutput.hpp"
 #include "output/FifoHidOutput.hpp"
 #include "output/OutputBackend.hpp"
@@ -354,7 +358,38 @@ int Application::initialize(int argc, char** argv) {
             TTBOX_LOG_WARN("ModelRegistry 初始化失败（模型管理不可用）: " + mm_error);
             model_management_.reset();
         } else {
-            model_management_->set_validator(ModelManagement::file_level_validator);
+            #ifdef TTBOX_CORE_HAS_RKNN
+    // 真 RKNN 探测校验器：试加载模型拿 input/output 真实信息（类别名不在模型文件里，用户可在 UI 配置）
+    model_management_->set_validator([](const std::string& rknn_path, JsonValue* meta_out,
+                                        std::string* error) -> bool {
+        std::error_code fec;
+        if (!std::filesystem::exists(rknn_path, fec)) {
+            if (error) *error = "模型文件不存在: " + rknn_path;
+            return false;
+        }
+        RKNNEngine probe;
+        RKNNEngine::Params pp;
+        pp.model_path = rknn_path;
+        pp.core_mask = 0;
+        std::string perr;
+        if (!probe.init(pp, &perr)) {
+            if (error) *error = "RKNN 探测加载失败: " + perr;
+            return false;
+        }
+        const auto& info = probe.info();
+        if (meta_out) {
+            JsonValue obj = JsonValue::object();
+            obj.set("input_width", JsonValue::number(static_cast<double>(info.input_width)));
+            obj.set("input_height", JsonValue::number(static_cast<double>(info.input_height)));
+            obj.set("output_count", JsonValue::number(static_cast<double>(info.n_outputs)));
+            *meta_out = std::move(obj);
+        }
+        probe.destroy();
+        return true;
+    });
+#else
+    model_management_->set_validator(ModelManagement::file_level_validator);
+#endif
             ipc_.set_model_list_handler([this] { return handle_model_list(); });
             ipc_.set_model_import_handler(
                 [this](const std::string& src, const std::string& id,

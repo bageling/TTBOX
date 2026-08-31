@@ -55,6 +55,12 @@ struct ModelManifest {
     std::string runtime_version;   // 运行时版本
     ModelStatus status = ModelStatus::kStaging;
     int64_t created_at = 0;        // epoch ms
+    // 探测/用户配置元数据（validate 时探测，class_names 用户可编辑）
+    uint32_t input_width = 0;
+    uint32_t input_height = 0;
+    uint32_t output_count = 0;
+    uint32_t class_count = 0;
+    std::vector<std::string> class_names;
 
     JsonValue to_json() const;
     static ModelManifest from_json(const JsonValue& v);
