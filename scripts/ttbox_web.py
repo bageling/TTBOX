@@ -847,8 +847,22 @@ def update_auto_start_setting():
 @app.get('/api/models')
 def list_models():
     r = ipc_request('MODEL_LIST')
-    models = (r.get('data', {}) or {}).get('models', []) if r.get('status') == 0 else []
-    return jsonify({'ok': True, 'data': {'models': models, 'ok': True}})
+    if r.get('status') != 0:
+        return jsonify({'ok': True, 'data': {'models': [], 'active': '', 'ok': True}})
+    d = r.get('data', {}) or {}
+    out = []
+    for m in d.get('models', []):
+        out.append({
+            'id': m.get('model_id'),
+            'model_id': m.get('model_id'),
+            'name': m.get('label') or m.get('model_id'),
+            'label': m.get('label'),
+            'version': m.get('version'),
+            'status': m.get('status_name') or ('installed' if m.get('status') == 2 else 'staging'),
+            'origin': m.get('origin'),
+            'created_at': m.get('created_at'),
+        })
+    return jsonify({'ok': True, 'data': {'models': out, 'active': d.get('active', ''), 'ok': True}})
 
 
 @app.get('/api/models/device-code')
@@ -863,11 +877,40 @@ def add_cloud_encrypted_model():
 
 @app.post('/api/models/import')
 def import_model():
-    return jsonify({'ok': True, 'data': {'message': '开发中'}})
+    f = request.files.get('file')
+    if f is None or not f.filename:
+        return jsonify({'ok': False, 'error': '缺少模型文件'})
+    fname = f.filename
+    if not fname.lower().endswith('.rknn'):
+        return jsonify({'ok': False, 'error': '仅支持 .rknn 模型文件'})
+    model_id = re.sub(r'\.rknn$', '', fname, flags=re.I)
+    model_id = re.sub(r'[^A-Za-z0-9_\-]', '_', model_id)[:64] or 'model'
+    incoming = Path('/opt/ttbox/models/_incoming')
+    incoming.mkdir(parents=True, exist_ok=True)
+    dst = incoming / f'{model_id}.rknn'
+    f.save(str(dst))
+    r1 = ipc_request('MODEL_IMPORT', {'src_path': str(dst), 'model_id': model_id, 'label': model_id})
+    if r1.get('status') != 0:
+        dst.unlink(missing_ok=True)
+        return jsonify({'ok': False, 'error': r1.get('error', '导入失败')})
+    r2 = ipc_request('MODEL_VALIDATE', {'model_id': model_id})
+    if r2.get('status') != 0:
+        return jsonify({'ok': False, 'error': r2.get('error', '校验失败')})
+    r3 = ipc_request('MODEL_INSTALL', {'model_id': model_id})
+    if r3.get('status') != 0:
+        return jsonify({'ok': False, 'error': r3.get('error', '安装失败')})
+    return jsonify({'ok': True, 'data': {'message': '导入成功', 'model_id': model_id}})
 
 
 @app.post('/api/models/delete')
 def delete_model():
+    body = request.get_json(silent=True) or {}
+    model_id = body.get('model_id', '')
+    if not model_id:
+        return jsonify({'ok': False, 'error': '缺少 model_id'})
+    r = ipc_request('MODEL_REMOVE', {'model_id': model_id})
+    if r.get('status') != 0:
+        return jsonify({'ok': False, 'error': r.get('error', '删除失败')})
     return jsonify({'ok': True, 'data': {'message': '已删除'}})
 
 
@@ -875,10 +918,29 @@ def delete_model():
 def select_model():
     body = request.get_json(force=True)
     model_id = body.get('model_id', '')
+    if not model_id:
+        return jsonify({'ok': False, 'error': '缺少 model_id'})
+    ra = ipc_request('MODEL_ACTIVATE', {'model_id': model_id})
+    if ra.get('status') != 0:
+        return jsonify({'ok': False, 'error': ra.get('error', '激活失败')})
     prof = _get_runtime_profile()
     prof['model_id'] = model_id
-    r = ipc_request('SET_CONFIG', {'profile': prof})
-    return jsonify({'ok': True, 'data': {'message': '模型已切换'}})
+    ipc_request('SET_CONFIG', {'profile': prof})
+    # 同步 config 的 model_path/model_label 到已安装模型（runtime 重启后加载新模型）
+    inst = f'/opt/ttbox/models/installed/{model_id}/model.rknn'
+    cpath = os.environ.get('TTBOX_CONFIG', '/opt/ttbox/config/default.json')
+    try:
+        cfg = json.load(open(cpath))
+        if os.path.exists(inst):
+            cfg['model_path'] = inst
+            cfg['model_label'] = model_id
+        else:
+            cfg['model_label'] = model_id
+            cfg.pop('model_path', None)
+        json.dump(cfg, open(cpath, 'w'), indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'data': {'message': '模型已切换，重启 AI 后生效'}})
 
 
 @app.post('/api/models/bind-preset')
