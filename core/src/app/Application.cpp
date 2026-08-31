@@ -127,7 +127,7 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         static_cast<uint32_t>(config_.get_int("model_input_width", 640));
     out_params.workers.out_h =
         static_cast<uint32_t>(config_.get_int("model_input_height", 640));
-    out_params.preview.fps = static_cast<int>(config_.get_int("preview_fps", 5));
+    out_params.preview.fps = static_cast<int>(config_.get_int("preview_fps", 60));
     out_params.preview.out_width = static_cast<uint32_t>(config_.get_int("preview_width", 640));
     out_params.preview.out_height = static_cast<uint32_t>(config_.get_int("preview_height", 360));
     out_params.preview.jpeg_quality = static_cast<int>(config_.get_int("preview_quality", 60));

@@ -31,8 +31,8 @@ public:
     struct Params {
         uint32_t out_width = 640;    // 预览输出宽（yu UI 预览框尺寸量级）
         uint32_t out_height = 360;   // 预览输出高
-        int fps = 10;                // 预览帧率（5~15 合理）
-        int jpeg_quality = 70;       // JPEG 质量（低帧预览 70 足够）
+        int fps = 60;                // 预览帧率（1~60；RGA 1~3ms + JPEG ~10ms ≈ 12.7ms < 16.6ms 预算）
+        int jpeg_quality = 70;       // JPEG 质量
     };
 
     PreviewModule() = default;

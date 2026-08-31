@@ -258,7 +258,7 @@ def yu_body_to_profile(body: dict) -> dict:
     if lat.get('preview_interval_ms') is not None:
         iv = int(lat['preview_interval_ms'])
         if iv > 0:
-            preview['fps'] = max(1, min(15, int(1000 / iv)))
+            preview['fps'] = max(1, min(60, int(1000 / iv)))
 
     prof: dict = {
         'mouse': mouse,
@@ -1152,7 +1152,7 @@ def preview_stream():
                     yield f'Content-Length: {len(px)}\r\n\r\n'.encode()
                     yield px
                     yield b'\r\n'
-            time.sleep(0.067)  # ≈15fps 上限，与 Core PreviewModule fps 对齐
+            time.sleep(0.016)  # ≈60fps 上限，与 Core PreviewModule 对齐
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=ttboxframe')
 
 
