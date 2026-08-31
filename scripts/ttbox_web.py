@@ -92,14 +92,36 @@ def _get_status() -> dict:
 
 # ====================================================================
 # 参数翻译（YU 格式 ↔ RuntimeProfile 格式）
+# 映射依据：YU 前端 collectConfig()（web/static/app.js:5663）+ YU daemon
+# 二进制字段名实测。predict_x/y 是 Pid1Controller 的 I 通道增益（无量纲），
+# rate_x/y 是 kp_gain_rate，smooth_x/y 是 soft-limit 宽度——三者全部直通。
 # ====================================================================
 HOTKEY_BITS = {'left': 1, 'right': 2, 'middle': 4, 'back': 8, 'forward': 16}
 BIT_HOTKEYS = {v: k for k, v in HOTKEY_BITS.items()}
 
-CONTROLLER_MAP = {
+
+def _hotkey_to_bits(v, default=0):
+    """YU 热键字符串（'left'/'right'/''）→ 位掩码。"""
+    if isinstance(v, str):
+        return HOTKEY_BITS.get(v.strip().lower(), default)
+    if isinstance(v, (int, float)):
+        return int(v)
+    return default
+
+
+def _bits_to_hotkey(v):
+    """位掩码 → YU 热键字符串（0 → ''）。"""
+    try:
+        return BIT_HOTKEYS.get(int(v), '')
+    except (TypeError, ValueError):
+        return ''
+
+
+# controller 内的数值/布尔直通字段（YU key → mouse key）
+CONTROLLER_NUMS = {
     'kp_x': 'kp_x', 'kp_y': 'kp_y',
-    'kd_x': 'kd_x', 'kd_y': 'kd_y',
     'ki_x': 'ki_x', 'ki_y': 'ki_y',
+    'kd_x': 'kd_x', 'kd_y': 'kd_y',
     'predict_x': 'predict_x', 'predict_y': 'predict_y',
     'rate_x': 'rate_x', 'rate_y': 'rate_y',
     'smooth_x': 'smooth_x', 'smooth_y': 'smooth_y',
@@ -107,44 +129,103 @@ CONTROLLER_MAP = {
     'selector_lost_grace_ms': 'lost_grace_ms',
     'aim_reference_offset_x': 'aim_offset_x',
     'aim_reference_offset_y': 'aim_offset_y',
-    'y_axis_fire_hotkey': 'y_axis_fire_hotkey',
     'y_axis_fire_release_delay_sec': 'y_axis_fire_release_delay_sec',
+}
+# controller 内的布尔直通字段
+CONTROLLER_BOOLS = {
     'aim_fire_lock_y': 'aim_fire_lock_y',
+    'block_physical_mouse_x_while_aiming': 'block_physical_x',
+    'block_physical_mouse_y_while_aiming': 'block_physical_y',
+    'continuous_lead_enabled': '_cl_enabled',
+    'pull_curve_enabled': '_pc_enabled',
+    'humanize_enabled': '_hz_enabled',
 }
 
 
 def yu_body_to_profile(body: dict) -> dict:
-    """YU 前端保存的配置格式 → RuntimeProfile 格式。"""
+    """YU 前端保存的配置格式（collectConfig 扁平结构）→ RuntimeProfile。"""
     ctrl = (body.get('ai') or {}).get('controller') or {}
-    mouse = {}
-    for yk, tk in CONTROLLER_MAP.items():
-        if ctrl.get(yk) is not None:
-            mouse[tk] = HOTKEY_BITS.get(ctrl[yk], ctrl[yk]) if yk == 'y_axis_fire_hotkey' else ctrl[yk]
+    mouse: dict = {}
 
+    # 1) controller 数值/布尔直通
+    for yk, tk in CONTROLLER_NUMS.items():
+        if ctrl.get(yk) is not None:
+            mouse[tk] = ctrl[yk]
+    for yk, tk in CONTROLLER_BOOLS.items():
+        if ctrl.get(yk) is not None:
+            if tk.startswith('_'):
+                continue  # 嵌套结构开关，下面统一处理
+            mouse[tk] = bool(ctrl[yk])
+    # 热键：字符串 → 位掩码
+    if ctrl.get('y_axis_fire_hotkey') is not None:
+        mouse['y_axis_fire_hotkey'] = _hotkey_to_bits(ctrl['y_axis_fire_hotkey'], 1)
+
+    # 2) 插件结构（pull_curve / continuous_lead / humanize）
+    pull_curve: dict = {}
+    if ctrl.get('pull_curve_enabled') is not None:
+        pull_curve['enabled'] = bool(ctrl['pull_curve_enabled'])
+    for yk, tk in [('pull_curve_strength', 'strength'),
+                   ('pull_curve_jitter_px', 'jitter_px'),
+                   ('pull_curve_min_distance', 'min_distance')]:
+        if ctrl.get(yk) is not None:
+            pull_curve[tk] = ctrl[yk]
+    if pull_curve:
+        mouse['pull_curve'] = pull_curve
+
+    continuous_lead: dict = {}
+    if ctrl.get('continuous_lead_enabled') is not None:
+        continuous_lead['enabled'] = bool(ctrl['continuous_lead_enabled'])
+    for yk, tk in [('continuous_lead_enter_distance', 'enter_distance'),
+                   ('continuous_lead_scale', 'scale'),
+                   ('continuous_lead_fade_in_ms', 'fade_in_ms'),
+                   ('continuous_lead_fade_out_ms', 'fade_out_ms'),
+                   ('continuous_lead_near_disable_ratio', 'near_disable_ratio')]:
+        if ctrl.get(yk) is not None:
+            continuous_lead[tk] = ctrl[yk]
+    if continuous_lead:
+        mouse['continuous_lead'] = continuous_lead
+
+    # 3) 目标选择
+    if ctrl.get('selector_lost_grace_ms') is not None:
+        mouse['lost_grace_ms'] = ctrl['selector_lost_grace_ms']
+
+    # 4) aim_profiles[0]：热键 / 瞄准点 / profile 灵敏度
     profiles = body.get('aim_profiles') or []
     p0 = profiles[0] if profiles else {}
     if p0.get('hotkey') is not None:
-        mouse['aim_hotkey'] = HOTKEY_BITS.get(p0['hotkey'], 0)
+        mouse['aim_hotkey'] = _hotkey_to_bits(p0['hotkey'], 2) or 2
     if p0.get('hotkey2') is not None:
-        mouse['aim_hotkey2'] = HOTKEY_BITS.get(p0['hotkey2'], 0)
+        mouse['aim_hotkey2'] = _hotkey_to_bits(p0['hotkey2'], 0)
     if p0.get('hotkey_mode') is not None:
-        mouse['aim_hotkey_mode'] = p0['hotkey_mode']
-    if p0.get('sensitivity') is not None:
-        mouse['sensitivity'] = p0['sensitivity']
+        mouse['aim_hotkey_mode'] = 1 if p0['hotkey_mode'] == 'all' else 0
+    aim_point_vals: dict = {}
+    if p0.get('offset_x') is not None:
+        aim_point_vals['offset_x'] = p0['offset_x']
+    if p0.get('offset_y') is not None:
+        aim_point_vals['offset_y'] = p0['offset_y']
+
+    # 5) 全局量：sens / pos / range_factor
+    #    sens → sensitivity（输出全局缩放）；pos → aim_point.offset_y（瞄准高度）
     if body.get('sens') is not None:
         mouse['sensitivity'] = body['sens']
+    if body.get('pos') is not None:
+        aim_point_vals['offset_y'] = body['pos']
+    # RuntimeProfile::from_json 读平铺的 offset_x/offset_y（mouse.aim_point 是内部结构，
+    # JSON 层平铺为 mouse.offset_x/mouse.offset_y），此处按 Core 契约平铺写入。
+    for k, v in aim_point_vals.items():
+        mouse[k] = v
 
-    inference = {}
+    # 6) 推理参数
+    inference: dict = {}
     if body.get('video_detection_confidence') is not None:
         inference['confidence'] = body['video_detection_confidence']
     if body.get('video_detection_iou') is not None:
         inference['iou'] = body['video_detection_iou']
-    if body.get('video_detection_class_filter') is not None:
-        inference['class_filter'] = body['video_detection_class_filter']
-    if body.get('video_detection_max_detections') is not None:
-        inference['max_detections'] = body['video_detection_max_detections']
+    if inference:
+        pass  # confidence/iou 语义：0 = 用模型默认（Core 已处理）
 
-    capture = {}
+    # 7) 采集
+    capture: dict = {}
     cap = body.get('capture') or {}
     if cap.get('crop_size') is not None:
         capture['width'] = cap['crop_size']
@@ -154,33 +235,32 @@ def yu_body_to_profile(body: dict) -> dict:
     if cap.get('crop_offset_y') is not None:
         capture['offset_y'] = cap['crop_offset_y']
 
-    fov = {}
-    prev_fov = {}
+    # 8) FOV（range_factor <1 = 启用圆形选择区）
+    fov: dict = {}
     try:
-        p0 = _get_runtime_profile()
-        prev_fov = p0.get('fov') or {}
+        prev = _get_runtime_profile()
+        prev_fov = prev.get('fov') or {}
     except Exception:
-        pass
-    if prev_fov.get('shape') is not None:
-        fov['shape'] = prev_fov['shape']
-    if prev_fov.get('center_x') is not None:
-        fov['center_x'] = prev_fov['center_x']
-    if prev_fov.get('center_y') is not None:
-        fov['center_y'] = prev_fov['center_y']
+        prev_fov = {}
+    fov['shape'] = prev_fov.get('shape', 0)
+    fov['center_x'] = prev_fov.get('center_x', 0.5)
+    fov['center_y'] = prev_fov.get('center_y', 0.5)
     if body.get('range_factor') is not None:
         fov['radius'] = body['range_factor']
         fov['enabled'] = body['range_factor'] < 1.0
-    elif prev_fov.get('enabled') is not None:
-        fov['enabled'] = prev_fov['enabled']
+    else:
+        fov['enabled'] = prev_fov.get('enabled', False)
+        fov['radius'] = prev_fov.get('radius', 0.5)
 
-    preview = {}
+    # 9) 预览帧率
+    preview: dict = {}
     lat = body.get('latency') or {}
     if lat.get('preview_interval_ms') is not None:
         iv = int(lat['preview_interval_ms'])
         if iv > 0:
             preview['fps'] = max(1, min(15, int(1000 / iv)))
 
-    prof = {
+    prof: dict = {
         'mouse': mouse,
         'inference': inference,
         'capture': capture,
@@ -195,44 +275,96 @@ def yu_body_to_profile(body: dict) -> dict:
 
 
 def profile_to_yu(prof: dict) -> dict:
-    """RuntimeProfile 格式 → YU 前端需要的格式。"""
+    """RuntimeProfile → YU 前端需要的格式（populate 回读完整字段）。"""
     mouse = prof.get('mouse') or {}
-    ctrl = {}
-    for yk, tk in CONTROLLER_MAP.items():
-        if mouse.get(tk) is not None:
-            ctrl[yk] = BIT_HOTKEYS.get(mouse[tk], mouse[tk]) if tk == 'y_axis_fire_hotkey' else mouse[tk]
-
+    # aim_point 在 Core JSON 层是平铺的 mouse.offset_x/mouse.offset_y
+    # （RuntimeProfile::to_json 平铺输出，from_json 平铺读取）；
+    # mouse.aim_point 子对象只在 C++ 结构体内部存在，JSON 层没有。
+    ap = {
+        'offset_x': mouse.get('offset_x', 0.5),
+        'offset_y': mouse.get('offset_y', 0.5),
+    }
+    pc = mouse.get('pull_curve') or {}
+    cl = mouse.get('continuous_lead') or {}
+    hz = mouse.get('humanize') or {}
     fov_p = prof.get('fov') or {}
     prev_p = prof.get('preview') or {}
+    inf = prof.get('inference') or {}
+    cap = prof.get('capture') or {}
+
+    ctrl = {
+        'kp_x': mouse.get('kp_x'), 'kp_y': mouse.get('kp_y'),
+        'ki_x': mouse.get('ki_x'), 'ki_y': mouse.get('ki_y'),
+        'kd_x': mouse.get('kd_x'), 'kd_y': mouse.get('kd_y'),
+        'predict_x': mouse.get('predict_x'), 'predict_y': mouse.get('predict_y'),
+        'rate_x': mouse.get('rate_x'), 'rate_y': mouse.get('rate_y'),
+        'smooth_x': mouse.get('smooth_x'), 'smooth_y': mouse.get('smooth_y'),
+        'output_deadzone': mouse.get('output_deadzone'),
+        'selector_lost_grace_ms': mouse.get('lost_grace_ms'),
+        'aim_reference_offset_x': mouse.get('aim_offset_x'),
+        'aim_reference_offset_y': mouse.get('aim_offset_y'),
+        'aim_fire_lock_y': mouse.get('aim_fire_lock_y', False),
+        'block_physical_mouse_x_while_aiming': mouse.get('block_physical_x', False),
+        'block_physical_mouse_y_while_aiming': mouse.get('block_physical_y', False),
+        'y_axis_fire_hotkey': _bits_to_hotkey(mouse.get('y_axis_fire_hotkey', 1)) or 'left',
+        'y_axis_fire_release_delay_sec': mouse.get('y_axis_fire_release_delay_sec', 0.3),
+        'pull_curve_enabled': pc.get('enabled', True),
+        'pull_curve_strength': pc.get('strength', 0.8),
+        'pull_curve_jitter_px': pc.get('jitter_px', 3.0),
+        'pull_curve_min_distance': pc.get('min_distance', 80),
+        'continuous_lead_enabled': cl.get('enabled', False),
+        'continuous_lead_enter_distance': cl.get('enter_distance', 150),
+        'continuous_lead_scale': cl.get('scale', 0.5),
+        'continuous_lead_fade_in_ms': cl.get('fade_in_ms', 300),
+        'continuous_lead_fade_out_ms': cl.get('fade_out_ms', 300),
+        'continuous_lead_near_disable_ratio': cl.get('near_disable_ratio', 0.66),
+        'humanize_enabled': hz.get('enabled', True),
+        'humanize_curve_strength': hz.get('curve_strength', 0.45),
+        'humanize_jitter_px': hz.get('jitter_px', 0.25),
+        'humanize_jitter_frequency': hz.get('jitter_frequency', 8),
+        'selector_search_radius': mouse.get('selector_search_radius', 170),
+    }
+
     lat = {}
     if prev_p.get('fps') not in (None, 0):
-        lat['preview_interval_ms'] = max(1, int(1000 / int(prev_p['fps'])))
+        try:
+            lat['preview_interval_ms'] = max(1, int(1000 / int(prev_p['fps'])))
+        except (TypeError, ValueError, ZeroDivisionError):
+            lat['preview_interval_ms'] = 66
+    else:
+        lat['preview_interval_ms'] = 66
 
     return {
         'model_id': prof.get('model_id', ''),
-        'video_detection_confidence': (prof.get('inference') or {}).get('confidence'),
-        'video_detection_iou': (prof.get('inference') or {}).get('iou'),
+        'video_detection_confidence': inf.get('confidence'),
+        'video_detection_iou': inf.get('iou'),
         'capture': {
             'device': '/dev/video0',
-            'crop_size': (prof.get('capture') or {}).get('width'),
-            'crop_offset_x': (prof.get('capture') or {}).get('offset_x'),
-            'crop_offset_y': (prof.get('capture') or {}).get('offset_y'),
+            'crop_size': cap.get('width'),
+            'crop_offset_x': cap.get('offset_x'),
+            'crop_offset_y': cap.get('offset_y'),
         },
-        'range_factor': fov_p.get('radius') if fov_p.get('enabled') else 1.0,
-        'sens': mouse.get('sensitivity'),
+        'range_factor': fov_p.get('radius', 1.0) if fov_p.get('enabled') else 1.0,
+        'sens': mouse.get('sensitivity', 1.0),
+        'pos': ap.get('offset_y', 0.5),
         'ai': {'controller': ctrl},
         'aim_profiles': [{
-            'hotkey': BIT_HOTKEYS.get(mouse.get('aim_hotkey'), ''),
-            'hotkey2': BIT_HOTKEYS.get(mouse.get('aim_hotkey2'), ''),
-            'hotkey_mode': mouse.get('aim_hotkey_mode', 'any'),
-            'sensitivity': mouse.get('sensitivity'),
-            'offset_x': 0.5, 'offset_y': 0.5,
+            'hotkey': _bits_to_hotkey(mouse.get('aim_hotkey', 2)) or 'right',
+            'hotkey2': _bits_to_hotkey(mouse.get('aim_hotkey2', 0)),
+            'hotkey_mode': 'all' if mouse.get('aim_hotkey_mode') == 1 else 'any',
+            'sensitivity': mouse.get('sensitivity', 1.0),
+            'offset_x': ap.get('offset_x', 0.5),
+            'offset_y': ap.get('offset_y', 0.5),
+            'alternate_offset_x': 0.5, 'alternate_offset_y': 0.5,
             'class_filter_mask': 0, 'fov_scale': 1.0,
+            'class_offsets': [],
+            'offset_switch_enabled': False, 'offset_switch_hotkey': '',
         }],
         'recoil': {}, 'rapid_fire': {}, 'auto_back_flick': {}, 'crosshair': {},
+        'auto_trigger': {'enabled': False, 'profiles': []},
         'hotkey_guard': {'enabled': False, 'toggle_hotkey': 'middle'},
-        'mouse_output': {}, 'latency': lat, 'fan_control': {}, 'loopout_overlay': {},
-        'pos': 0.5,
+        'mouse_output': {'mode': 'passthrough'},
+        'latency': lat, 'fan_control': {}, 'loopout_overlay': {},
     }
 
 
@@ -244,10 +376,8 @@ def collect_yu_state() -> dict:
     models = (ml.get('data', {}) or {}).get('models', []) if ml.get('status') == 0 else []
 
     m = st.get('metrics', {})
-    mouse = prof.get('mouse', {})
-    inf = prof.get('inference', {})
-    cap = prof.get('capture', {})
-    fov = prof.get('fov', {})
+    # config 回读直接复用 profile_to_yu（单一真源，避免两处翻译漂移）
+    config_yu = profile_to_yu(prof)
     running = bool(st.get('running')) and bool(st.get('runtime_running'))
 
     return {
@@ -255,47 +385,11 @@ def collect_yu_state() -> dict:
         'data': {
             'app_version': 'ttbox-' + str(st.get('version', '')),
             'version': str(st.get('version', '')),
-            'config': {
-                'ai': {'controller': {
-                    'kp_x': mouse.get('kp_x'),
-                    'kp_y': mouse.get('kp_y'),
-                    'kd_x': mouse.get('kd_x'),
-                    'kd_y': mouse.get('kd_y'),
-                    'ki_x': mouse.get('ki_x'),
-                    'ki_y': mouse.get('ki_y'),
-                    'predict_x': mouse.get('predict_x'),
-                    'predict_y': mouse.get('predict_y'),
-                    'rate_x': mouse.get('rate_x'),
-                    'rate_y': mouse.get('rate_y'),
-                    'smooth_x': mouse.get('smooth_x'),
-                    'smooth_y': mouse.get('smooth_y'),
-                    'output_deadzone': mouse.get('output_deadzone'),
-                    'selector_lost_grace_ms': mouse.get('lost_grace_ms'),
-                    'y_axis_fire_hotkey': mouse.get('y_axis_fire_hotkey'),
-                    'y_axis_fire_release_delay_sec': mouse.get('y_axis_fire_release_delay_sec'),
-                    'aim_fire_lock_y': mouse.get('aim_fire_lock_y'),
-                    'aim_reference_offset_x': mouse.get('aim_offset_x'),
-                    'aim_reference_offset_y': mouse.get('aim_offset_y'),
-                }},
-                'aim_profiles': [],
-                'capture': {
-                    'crop_size': cap.get('width'),
-                    'crop_offset_x': cap.get('offset_x'),
-                    'crop_offset_y': cap.get('offset_y'),
-                    'device': '/dev/video0',
-                },
-                'hotkey_guard': {'enabled': False},
-                'model_id': prof.get('model_id', ''),
-                'pos': mouse.get('aim_offset_x', 0.5) / 100.0 if mouse.get('aim_offset_x') is not None else 0.5,
-                'sens': mouse.get('sensitivity', 1.0),
-                'range_factor': fov.get('radius', 1.0),
-                'video_detection_confidence': inf.get('confidence'),
-                'video_detection_iou': inf.get('iou'),
-            },
+            'config': config_yu,
             'models': {'models': models},
             'presets': {'presets': []},
             'state': {
-                'aim': {'active': False, 'last_error': ''},
+                'aim': {'active': m.get('aim_active', False), 'last_error': ''},
                 'capture': {
                     'input_width': 0, 'input_height': 0,
                     'capture_fps': m.get('capture_fps', 0),
@@ -516,6 +610,22 @@ def events():
 
 
 # -- 配置 --
+def _deep_merge_profile(base: dict, patch: dict) -> dict:
+    """RuntimeProfile 深合并：子对象（capture/fov/mouse/...）按键级合并而非整体替换。
+
+    YU 前端每次 PUT 都是全量 collectConfig，但翻译层只产出非空子集；
+    若浅合并，未提交的子对象（如 geometry_filter）会被 partial dict 整体顶掉，
+    导致"保存一个字段 → 其它字段全丢"的参数失效问题。
+    """
+    merged = dict(base)
+    for k, v in patch.items():
+        if isinstance(v, dict) and isinstance(merged.get(k), dict):
+            merged[k] = _deep_merge_profile(merged[k], v)
+        else:
+            merged[k] = v
+    return merged
+
+
 @app.put('/api/config')
 def update_config():
     body = request.get_json(force=True)
@@ -523,12 +633,13 @@ def update_config():
         return jsonify({'ok': False, 'error': '非法请求体'}), 400
     translated = yu_body_to_profile(body)
     base = _get_runtime_profile()
-    prof = dict(base)
-    prof.update(translated)
+    prof = _deep_merge_profile(base, translated)
     r = ipc_request('SET_CONFIG', {'profile': prof})
     if r.get('status') != 0:
         return jsonify({'ok': False, 'error': r.get('error', '配置保存失败')}), 502
-    return jsonify({'ok': True, 'data': profile_to_yu(prof)})
+    # 回读 canonical（Core 是唯一真源，UI 永远不领先 Core）
+    rr = _get_runtime_profile()
+    return jsonify({'ok': True, 'data': profile_to_yu(rr)})
 
 
 @app.get('/api/config')
