@@ -59,7 +59,7 @@ bool CoreRuntime::start(std::string* error) {
         running_ = false;
         return false;
     }
-    if (!aim_thread_.start(mailbox_.get(), output_, 1000, runtime_config_)) {
+    if (!aim_thread_.start(mailbox_.get(), output_, 4000, runtime_config_)) {
         workers_->stop();
         capture_->stop();
         capture_->close();
