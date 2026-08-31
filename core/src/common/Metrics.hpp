@@ -14,6 +14,9 @@ struct PipelineMetrics {
     double fps = 0.0;          // 推理 FPS（worker 完成帧数 / 运行秒数，累计均值）
     double capture_fps = 0.0;  // 采集 FPS（V4L2 滚动统计，真实发布到 latest 的帧）
     double capture_ms = 0.0;   // 采集耗时（现有统计未细分，恒 0 = unavailable）
+    double buffer_age_ms = 0.0;        // 采集排队：最新帧龄（steady_now - 帧时间戳）
+    uint64_t last_dequeued_count = 0;  // 采集排队：当前被占用（DQBUF 后未归还）的 buffer 数
+    uint32_t buffer_count = 0;         // 采集排队：驱动 buffer 总数
     double resize_ms = 0.0;    // 预处理耗时（uint8->FP16 转换 avg；INT8 模型为 0）
     double infer_ms = 0.0;     // 推理耗时（RKNN set_input+run+output avg）
     double infer_set_input_ms = 0.0; // 推理分段：输入拷贝+量化 avg

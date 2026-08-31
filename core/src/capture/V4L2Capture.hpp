@@ -55,6 +55,7 @@ struct V4L2Metrics {
     std::atomic<uint64_t> poll_timeouts{0};
     std::atomic<uint64_t> errors{0};
     std::atomic<double> capture_fps{0.0};
+    std::atomic<int64_t> last_frame_ts_ms{0};   // 最新帧 v4l2 单调时间戳（ms，供 buffer_age_ms 计算）
 };
 
 // ---------------------------------------------------------------------------
@@ -112,6 +113,8 @@ public:
     const FormatInfo& format() const { return format_; }
     const V4L2Metrics& metrics() const { return metrics_; }
     uint32_t buffer_count() const { return buffer_count_; }
+    // 当前被占用（已 DQBUF 未 QBUF 归还）的 buffer 数（排队深度探测）
+    uint32_t in_use_count() const;
 
     // 调试/验收：每个 buffer 主 plane 的 DMA-BUF fd 列表
     std::vector<int> dma_fds() const;

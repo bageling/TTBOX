@@ -254,7 +254,7 @@ def _collect_yu_state():
             'presets': {'presets': []},
             'state': {
                 'aim': {'active': False, 'last_error': ''},
-                'capture': {'input_width': 0, 'input_height': 0, 'capture_fps': m.get('capture_fps', 0)},
+                'capture': {'input_width': 0, 'input_height': 0, 'capture_fps': m.get('capture_fps', 0), 'buffer_age_ms': m.get('buffer_age_ms', 0), 'last_dequeued_count': m.get('last_dequeued_count', 0), 'buffer_count': m.get('buffer_count', 0)},
                 'core': {'installed': True, 'loaded': True, 'status': 'loaded', 'message': 'TTBOX Core 已加载', 'version': str(status_data.get('version', ''))},
                 'detection': {'detections': m.get('detect_count', 0), 'inference_fps': m.get('fps', 0), 'inference_ms': m.get('infer_ms', 0), 'model_loaded': False},
                 'latency': {'capture_to_mouse_send_ms': m.get('e2e_ms', 0), 'preprocess_to_track_ms': m.get('e2e_ms', 0)},

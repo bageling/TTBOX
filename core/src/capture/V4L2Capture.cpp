@@ -497,6 +497,9 @@ void V4L2Capture::capture_loop() {
         }
 
         // 5. 发布到 LatestFrame（旧帧被覆盖 → 进入待归还）
+        // 记录最新帧时间戳（v4l2 单调时钟，与 steady_clock 同基准）——
+        // 供 buffer_age_ms（帧龄）计算：采集健康时 ≈ 0~7ms，停流/积压时持续增大
+        metrics_.last_frame_ts_ms.store(static_cast<int64_t>(frame->info.timestamp_ms));
         auto old = latest_.publish(std::move(frame));
         if (old) {
             metrics_.dropped_latest_frames.fetch_add(1);
@@ -563,6 +566,14 @@ void V4L2Capture::release_ready_buffers() {
 // ===========================================================================
 // 查询
 // ===========================================================================
+
+uint32_t V4L2Capture::in_use_count() const {
+    uint32_t n = 0;
+    for (const auto& c : impl_->captured) {
+        if (c) ++n;
+    }
+    return n;
+}
 
 std::vector<int> V4L2Capture::dma_fds() const {
     std::vector<int> fds;

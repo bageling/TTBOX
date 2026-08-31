@@ -3,6 +3,7 @@
 #include "common/Logger.hpp"
 
 #include <chrono>
+#include <algorithm>
 
 namespace ttbox::core {
 
@@ -123,6 +124,15 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->frames_total = cm.capture_frames.load();
         out->dropped_frames = cm.dropped_latest_frames.load();
         out->capture_fps = cm.capture_fps.load();
+        // 采集排队（真实测量，无估算）：
+        //   buffer_age_ms = 当前时刻 − 最新帧 v4l2 时间戳（单调时钟同基准）；
+        //   last_dequeued_count = 已 DQBUF 未归还的 buffer 数（captured[] 置位计数）；
+        //   buffer_count = 驱动实际 buffer 总数
+        const int64_t now_ms = static_cast<int64_t>(steady_now_ms());
+        const int64_t fts = cm.last_frame_ts_ms.load();
+        out->buffer_age_ms = fts > 0 ? std::max(0.0, static_cast<double>(now_ms - fts)) : 0.0;
+        out->last_dequeued_count = capture_->in_use_count();
+        out->buffer_count = capture_->buffer_count();
     }
     if (workers_ && workers_->worker_count() > 0) {
         // 聚合所有 worker：published 累计 → 推理 FPS；耗时 avg 直接平均

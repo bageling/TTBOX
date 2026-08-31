@@ -393,6 +393,9 @@ def collect_yu_state() -> dict:
                 'capture': {
                     'input_width': 0, 'input_height': 0,
                     'capture_fps': m.get('capture_fps', 0),
+                    'buffer_age_ms': m.get('buffer_age_ms', 0),
+                    'last_dequeued_count': m.get('last_dequeued_count', 0),
+                    'buffer_count': m.get('buffer_count', 0),
                 },
                 'core': {
                     'installed': True, 'loaded': True,

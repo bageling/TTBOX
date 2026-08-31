@@ -703,6 +703,9 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("preview_bytes", JsonValue::number(static_cast<double>(status.metrics.preview_bytes)));
     m.set("preview_frames", JsonValue::number(static_cast<double>(status.metrics.preview_frames)));
     m.set("preview_dropped", JsonValue::number(static_cast<double>(status.metrics.preview_dropped)));
+    m.set("buffer_age_ms", JsonValue::number(status.metrics.buffer_age_ms));
+    m.set("last_dequeued_count", JsonValue::number(static_cast<double>(status.metrics.last_dequeued_count)));
+    m.set("buffer_count", JsonValue::number(static_cast<double>(status.metrics.buffer_count)));
     m.set("capture_ms", JsonValue::number(status.metrics.capture_ms));
     m.set("resize_ms", JsonValue::number(status.metrics.resize_ms));
     m.set("infer_ms", JsonValue::number(status.metrics.infer_ms));
