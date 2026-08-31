@@ -563,6 +563,12 @@ def collect_yu_state() -> dict:
             'backend': 'rknn',
             'enabled': True,
             'imported': True,
+            'input_width': mm.get('input_width', 0),
+            'input_height': mm.get('input_height', 0),
+            'output_count': mm.get('output_count', 0),
+            'class_count': mm.get('class_count', 0),
+            'class_names': mm.get('class_names') or [],
+            'rknn_concurrency': mm.get('rknn_concurrency', 1),
         })
     active_model = ml_data.get('active', '')
 
@@ -893,6 +899,13 @@ def list_models():
             'status': m.get('status_name') or ('installed' if m.get('status') == 2 else 'staging'),
             'origin': m.get('origin'),
             'created_at': m.get('created_at'),
+            'backend': 'rknn',
+            'input_width': m.get('input_width', 0),
+            'input_height': m.get('input_height', 0),
+            'output_count': m.get('output_count', 0),
+            'class_count': m.get('class_count', 0),
+            'class_names': m.get('class_names') or [],
+            'rknn_concurrency': m.get('rknn_concurrency', 1),
         })
     return jsonify({'ok': True, 'data': {'models': out, 'active': d.get('active', ''), 'ok': True}})
 

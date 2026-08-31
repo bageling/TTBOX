@@ -310,6 +310,10 @@ void InferenceWorker::loop() {
             input_bytes = engine_->info().input_size;
         }
 
+        // 预处理完成：立即释放采集帧引用（buffer 提前归还驱动，排队占用降到 1）
+        // recv_ms 已在预处理前拷贝，e2e 统计不受影响
+        frame.reset();
+
         // ---- RKNN 推理（本 worker 独立 context）+ 原生输出 + Decode/NMS ----
         std::string ierr;
         const auto t_infer0 = clock::now();

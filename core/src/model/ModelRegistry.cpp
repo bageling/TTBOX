@@ -65,7 +65,8 @@ JsonValue ModelManifest::to_json() const {
     root.set("class_count", JsonValue::number(static_cast<double>(class_count)));
     JsonValue jnames = JsonValue::array();
     for (const auto& n : class_names) jnames.push_back(JsonValue::string(n));
-    root.set("class_names", std::move(jnames));
+    root.set("class_names", std::move(jnames));
+    root.set("rknn_concurrency", JsonValue::number(static_cast<double>(rknn_concurrency)));
     root.set("status", JsonValue::number(static_cast<double>(static_cast<int>(status))));
     root.set("status_name", JsonValue::string(model_status_name(status)));
     root.set("created_at", JsonValue::number(static_cast<double>(created_at)));
@@ -100,6 +101,8 @@ ModelManifest ModelManifest::from_json(const JsonValue& v) {
     m.input_height = get_int_fn("input_height");
     m.output_count = get_int_fn("output_count");
     m.class_count = get_int_fn("class_count");
+    m.rknn_concurrency = get_int_fn("rknn_concurrency");
+    if (m.rknn_concurrency == 0) m.rknn_concurrency = 1;
     if (const JsonValue* jn = v.find("class_names"); jn && jn->is_array()) {
         for (const auto& e : jn->as_array()) {
             if (e.is_string()) {
