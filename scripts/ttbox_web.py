@@ -1356,17 +1356,25 @@ def preview_stream():
     # MJPEG 流：读 Core PreviewModule 缓存（Core 端 10~15fps 生成），
     # 无帧时短暂等待而非密集空转；Core 是唯一生产节拍，本端只做搬运。
     def generate():
+        # YU 同款防糊策略：只在核心端缓存更新（seq 变化）时推新帧，
+        # 不重复推同一帧（浏览器 img 绘制跟不上会导致 multipart 积压 → 半帧横线花屏）。
+        last_len = -1
         while True:
             r = ipc_request('GET_PREVIEW', timeout=2)
-            if r.get('status') == 0 and r.get('data', {}).get('jpeg_base64'):
-                px = base64.b64decode(r['data']['jpeg_base64'])
-                if px:
-                    yield b'--ttboxframe\r\n'
-                    yield b'Content-Type: image/jpeg\r\n'
-                    yield f'Content-Length: {len(px)}\r\n\r\n'.encode()
-                    yield px
-                    yield b'\r\n'
-            time.sleep(0.016)  # ≈60fps 上限，与 Core PreviewModule 对齐
+            if r.get('status') == 0:
+                d = r.get('data', {})
+                b64 = d.get('jpeg_base64')
+                nbytes = d.get('bytes', 0)
+                if b64 and nbytes != last_len:
+                    px = base64.b64decode(b64)
+                    if px:
+                        last_len = nbytes
+                        yield b'--ttboxframe\r\n'
+                        yield b'Content-Type: image/jpeg\r\n'
+                        yield f'Content-Length: {len(px)}\r\n\r\n'.encode()
+                        yield px
+                        yield b'\r\n'
+            time.sleep(0.03)  # 轮询节奏 33ms（Core 端 fps 决定实际帧率）
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=ttboxframe')
 
 
