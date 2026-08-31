@@ -591,7 +591,8 @@ def collect_yu_state() -> dict:
             'config': config_yu,
             'models': models,  # YU 同构：数组
             'selected_model_id': registry_active or active_model,
-            'presets': {'presets': []},
+            'presets': sorted(Path(PRESETS_DIR).glob('*.json')) and
+                       [p.stem for p in sorted(Path(PRESETS_DIR).glob('*.json'))] or [],
             'state': {
                 'aim': {'active': m.get('aim_active', False), 'last_error': ''},
                 'capture': {
