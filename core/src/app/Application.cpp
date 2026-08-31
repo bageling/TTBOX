@@ -242,11 +242,11 @@ int Application::initialize(int argc, char** argv) {
     TTBOX_LOG_INFO("=== " + std::string(kAppName) + " v" +
                    std::string(kVersion) + " 启动 ===");
 
-    // ---- CPU 频率下限锁定（默认 70%，0=不锁）----
-    // 需求：CPU 要锁 Hz 最低 70%（governor=performance 下锁 scaling_min_freq），
-    // 防降频抖动。失败仅告警（权限/内核差异），不阻塞启动。
+    // ---- CPU 频率锁定（YU 行为：启动时锁最高，防降频抖动）----
+    // 默认 100% = scaling_min_freq 锁到 max_freq（governor=performance 下等效满频运行）。
+    // 失败仅告警（权限/内核差异），不阻塞启动。
     {
-        const int pct = static_cast<int>(config_.get_int("cpu_min_freq_percent", 70));
+        const int pct = static_cast<int>(config_.get_int("cpu_min_freq_percent", 100));
         auto fr = CpuAffinity::lock_min_freq_percent(pct);
         if (fr.freq_ok) {
             TTBOX_LOG_INFO("CPU 频率下限锁定完成: " + fr.detail);

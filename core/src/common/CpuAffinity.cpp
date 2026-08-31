@@ -90,7 +90,7 @@ bool CpuAffinity::set_thread_affinity(uint64_t mask, std::string* error) {
 
 CpuAffinity::Result CpuAffinity::lock_min_freq_percent(int percent) {
     Result res;
-    if (percent <= 0 || percent >= 100) {
+    if (percent <= 0 || percent > 100) {
         res.detail = "percent=" + std::to_string(percent) + " 越界，跳过锁频";
         res.freq_ok = true;  // 未配置 = 不锁，视为成功（不阻塞启动）
         return res;

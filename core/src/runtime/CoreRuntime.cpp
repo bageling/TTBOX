@@ -133,13 +133,9 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->frames_total = cm.capture_frames.load();
         out->dropped_frames = cm.dropped_latest_frames.load();
         out->capture_fps = cm.capture_fps.load();
-        // 采集排队（真实测量，无估算）：
-        //   buffer_age_ms = 当前时刻 − 最新帧 v4l2 时间戳（单调时钟同基准）；
-        //   last_dequeued_count = 已 DQBUF 未归还的 buffer 数（captured[] 置位计数）；
-        //   buffer_count = 驱动实际 buffer 总数
-        const int64_t now_ms = static_cast<int64_t>(steady_now_ms());
-        const int64_t fts = cm.last_frame_ts_ms.load();
-        out->buffer_age_ms = fts > 0 ? std::max(0.0, static_cast<double>(now_ms - fts)) : 0.0;
+        // 采集排队（YU buffer_age 同口径）：
+        //   buffer_age_ms = worker 认领等待（帧时间戳 → 认领，真实排队时间）
+        //   last_dequeued_count = 已 DQBUF 未归还的 buffer 数；buffer_count = 驱动 buffer 总数
         out->last_dequeued_count = capture_->in_use_count();
         out->buffer_count = capture_->buffer_count();
     }
@@ -151,6 +147,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         double decode_avg_us = 0.0;
         double e2e_avg_us = 0.0;
         double convert_avg_us = 0.0;
+        double qwait_avg_us = 0.0;
         size_t n = workers_->worker_count();
         // 分位数：合并各 worker 样本到临时收集器（不污染 worker 统计），
         // 再算统一 P50/P95/P99/Max（跨 worker 真实分位，非分位均值）。
@@ -166,6 +163,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             decode_avg_us += s.decode_stages.total.avg();
             e2e_avg_us += s.e2e.avg();
             convert_avg_us += s.convert.avg();
+            qwait_avg_us += s.queue_wait.avg();
             e2e_all.absorb(s.e2e);
             infer_all.absorb(s.stages.total);
             decode_all.absorb(s.decode_stages.total);
@@ -187,6 +185,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->decode_ms = decode_avg_us / static_cast<double>(n) / 1000.0;
         out->e2e_ms = e2e_avg_us / static_cast<double>(n) / 1000.0;
         out->resize_ms = convert_avg_us / static_cast<double>(n) / 1000.0;
+        out->buffer_age_ms = qwait_avg_us / static_cast<double>(n) / 1000.0;  // YU 口径：排队等待
         // 真实分位数（us → ms；无样本时 percentile 返回 0）
         out->e2e_p50_ms = e2e_all.percentile(50) / 1000.0;
         out->e2e_p95_ms = e2e_all.percentile(95) / 1000.0;
