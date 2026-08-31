@@ -3,7 +3,6 @@
 #include "common/Logger.hpp"
 
 #include <chrono>
-#include <algorithm>
 
 namespace ttbox::core {
 
@@ -59,7 +58,7 @@ bool CoreRuntime::start(std::string* error) {
         running_ = false;
         return false;
     }
-    if (!aim_thread_.start(mailbox_.get(), output_, 1000, runtime_config_)) {
+    if (!aim_thread_.start(mailbox_.get(), output_, 4000, runtime_config_)) {
         workers_->stop();
         capture_->stop();
         capture_->close();
@@ -71,21 +70,12 @@ bool CoreRuntime::start(std::string* error) {
         std::string perr;
         preview_ = std::make_unique<PreviewModule>();
         PreviewModule::Params pp = preview_params_;
-        pp.runtime_config = runtime_config_;  // 预览跟随截取区域（capture ROI，YU 同款语义）
         // 预览帧率热配置：runtime_profile.preview.fps > 0 时覆盖 config 默认值
         // （yu latency.preview_interval_ms 经网关/bridge 翻译为 preview.fps）
-        // 输出尺寸对齐 YU：有 ROI 时 1:1 输出 ROI 尺寸（不拉伸），无 ROI 保持 config 默认
         if (runtime_config_) {
             if (auto snap = runtime_config_->snapshot()) {
                 if (snap->preview.fps > 0 && snap->preview.fps <= 60) {
                     pp.fps = static_cast<int>(snap->preview.fps);
-                }
-                const auto& cap = snap->capture;
-                const auto& fmt = capture_->format();
-                if (cap.width > 0 && cap.height > 0 &&
-                    cap.width <= fmt.width && cap.height <= fmt.height) {
-                    pp.out_width = cap.width;
-                    pp.out_height = cap.height;
                 }
             }
         }
@@ -133,21 +123,14 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->frames_total = cm.capture_frames.load();
         out->dropped_frames = cm.dropped_latest_frames.load();
         out->capture_fps = cm.capture_fps.load();
-        // 采集排队（YU buffer_age 同口径）：
-        //   buffer_age_ms = worker 认领等待（帧时间戳 → 认领，真实排队时间）
-        //   last_dequeued_count = 已 DQBUF 未归还的 buffer 数；buffer_count = 驱动 buffer 总数
-        out->last_dequeued_count = capture_->in_use_count();
-        out->buffer_count = capture_->buffer_count();
     }
     if (workers_ && workers_->worker_count() > 0) {
         // 聚合所有 worker：published 累计 → 推理 FPS；耗时 avg 直接平均
         uint64_t published = 0;
         double infer_avg_us = 0.0;
-        double si_avg_us = 0.0, run_avg_us = 0.0, out_avg_us = 0.0;
         double decode_avg_us = 0.0;
         double e2e_avg_us = 0.0;
         double convert_avg_us = 0.0;
-        double qwait_avg_us = 0.0;
         size_t n = workers_->worker_count();
         // 分位数：合并各 worker 样本到临时收集器（不污染 worker 统计），
         // 再算统一 P50/P95/P99/Max（跨 worker 真实分位，非分位均值）。
@@ -157,13 +140,9 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             const auto& s = w->stats();
             published += s.published.load();
             infer_avg_us += s.stages.total.avg();
-            si_avg_us += s.stages.set_input.avg();
-            run_avg_us += s.stages.run.avg();
-            out_avg_us += s.stages.output.avg();
             decode_avg_us += s.decode_stages.total.avg();
             e2e_avg_us += s.e2e.avg();
             convert_avg_us += s.convert.avg();
-            qwait_avg_us += s.queue_wait.avg();
             e2e_all.absorb(s.e2e);
             infer_all.absorb(s.stages.total);
             decode_all.absorb(s.decode_stages.total);
@@ -179,13 +158,9 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             }
         }
         out->infer_ms = infer_avg_us / static_cast<double>(n) / 1000.0;
-        out->infer_set_input_ms = si_avg_us / static_cast<double>(n) / 1000.0;
-        out->infer_run_ms = run_avg_us / static_cast<double>(n) / 1000.0;
-        out->infer_output_ms = out_avg_us / static_cast<double>(n) / 1000.0;
         out->decode_ms = decode_avg_us / static_cast<double>(n) / 1000.0;
         out->e2e_ms = e2e_avg_us / static_cast<double>(n) / 1000.0;
         out->resize_ms = convert_avg_us / static_cast<double>(n) / 1000.0;
-        out->buffer_age_ms = qwait_avg_us / static_cast<double>(n) / 1000.0;  // YU 口径：排队等待
         // 真实分位数（us → ms；无样本时 percentile 返回 0）
         out->e2e_p50_ms = e2e_all.percentile(50) / 1000.0;
         out->e2e_p95_ms = e2e_all.percentile(95) / 1000.0;
@@ -205,8 +180,6 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             out->detect_count = task.detections.size();
         }
     }
-    // YU 同语义 tracks：当前跟踪中的目标数（AimThread 实时状态）
-    out->tracks = aim_thread_.status().tracks;
     if (preview_) {
         const auto& pm = preview_->metrics();
         out->preview_fps = pm.fps.load();

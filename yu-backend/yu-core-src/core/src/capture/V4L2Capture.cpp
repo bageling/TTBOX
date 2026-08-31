@@ -22,7 +22,6 @@ namespace ttbox::core {
 
 #include "capture/DmaBuf.hpp"
 #include "common/Logger.hpp"
-#include "common/CpuAffinity.hpp"
 
 namespace ttbox::core {
 
@@ -40,19 +39,20 @@ int ioctl_call(int fd, unsigned long request, void* arg) {
 // ===========================================================================
 
 std::shared_ptr<FrameBuffer> LatestFrame::publish(std::shared_ptr<FrameBuffer> frame) {
-    // 无锁化（C++17 原子 shared_ptr 自由函数）：capture 线程不再与 3 worker/preview 抢 mutex，
-    // 消除 publish 阻塞导致的帧延迟抖动。
-    auto old = std::atomic_load_explicit(&current_, std::memory_order_acquire);
-    std::atomic_store_explicit(&current_, std::move(frame), std::memory_order_release);
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto old = current_;
+    current_ = std::move(frame);
     return old;
 }
 
 std::shared_ptr<FrameBuffer> LatestFrame::get() const {
-    return std::atomic_load_explicit(&current_, std::memory_order_acquire);
+    std::lock_guard<std::mutex> lock(mutex_);
+    return current_;
 }
 
 void LatestFrame::clear() {
-    std::atomic_store_explicit(&current_, std::shared_ptr<FrameBuffer>(), std::memory_order_release);
+    std::lock_guard<std::mutex> lock(mutex_);
+    current_.reset();
 }
 
 // ===========================================================================
@@ -356,16 +356,6 @@ bool V4L2Capture::start(std::string* error) {
 
     running_.store(true);
     capture_thread_ = std::thread(&V4L2Capture::capture_loop, this);
-    // 采集线程绑定大核（CPU4~7）：采集是硬实时链路，避免被调度到小核造成抖动。
-    // 失败仅告警（调度策略仍可用），不影响启动。
-    {
-        std::string aerr;
-        if (!CpuAffinity::set_thread_affinity(CpuAffinity::kBigCoreMask, &aerr)) {
-            TTBOX_LOG_WARN("capture 线程绑定大核失败: " + aerr);
-        } else {
-            TTBOX_LOG_INFO("capture 线程已绑定大核 (cpu4-7)");
-        }
-    }
     TTBOX_LOG_INFO("capture thread 已启动");
     return true;
 }
@@ -491,16 +481,11 @@ void V4L2Capture::capture_loop() {
         frame->info.num_planes = format_.num_planes;
         frame->info.dma_fd = impl_->buffers[index].planes.empty() ? -1
                                : impl_->buffers[index].planes[0].dma_fd.fd();
-        frame->info.cpu_va = impl_->buffers[index].planes.empty() ? nullptr
-                               : impl_->buffers[index].planes[0].addr;
         if (!format_.sizeimage.empty()) {
             frame->size = format_.sizeimage[0];
         }
 
         // 5. 发布到 LatestFrame（旧帧被覆盖 → 进入待归还）
-        // 记录最新帧时间戳（v4l2 单调时钟，与 steady_clock 同基准）——
-        // 供 buffer_age_ms（帧龄）计算：采集健康时 ≈ 0~7ms，停流/积压时持续增大
-        metrics_.last_frame_ts_ms.store(static_cast<int64_t>(frame->info.timestamp_ms));
         auto old = latest_.publish(std::move(frame));
         if (old) {
             metrics_.dropped_latest_frames.fetch_add(1);
@@ -567,14 +552,6 @@ void V4L2Capture::release_ready_buffers() {
 // ===========================================================================
 // 查询
 // ===========================================================================
-
-uint32_t V4L2Capture::in_use_count() const {
-    uint32_t n = 0;
-    for (const auto& c : impl_->captured) {
-        if (c) ++n;
-    }
-    return n;
-}
 
 std::vector<int> V4L2Capture::dma_fds() const {
     std::vector<int> fds;

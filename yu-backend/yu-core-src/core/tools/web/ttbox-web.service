@@ -1,0 +1,13 @@
+[Unit]
+Description=TTBox Mini Web console (:8080)
+After=ttbox-firstboot.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/ttbox/web/ttbox_web.py
+Restart=always
+RestartSec=2
+Environment=TTBOX_WEB_PORT=8080
+
+[Install]
+WantedBy=multi-user.target

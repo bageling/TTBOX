@@ -1,0 +1,13 @@
+[Unit]
+Description=TTBox HID gadget + package + health (oneshot)
+After=ttbox-firstboot.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ttbox/runtime/ttbox-hid-init.sh
+ExecStart=/opt/ttbox/scripts/a9_setup_hid_gadget.sh enable
+ExecStart=/opt/ttbox/runtime/ttbox-hid-health --root /opt/ttbox/hid
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

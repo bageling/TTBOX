@@ -5,16 +5,11 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
-#include <filesystem>
 #include <sstream>
 #include <thread>
 
 #include "common/Logger.hpp"
-#include "common/CpuAffinity.hpp"
 #include "model/ModelManagement.hpp"
-#ifdef TTBOX_CORE_HAS_RKNN
-#include "rknn/RKNNEngine.hpp"
-#endif
 #include "output/AiboxHidOutput.hpp"
 #include "output/FifoHidOutput.hpp"
 #include "output/OutputBackend.hpp"
@@ -132,7 +127,7 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         static_cast<uint32_t>(config_.get_int("model_input_width", 640));
     out_params.workers.out_h =
         static_cast<uint32_t>(config_.get_int("model_input_height", 640));
-    out_params.preview.fps = static_cast<int>(config_.get_int("preview_fps", 60));
+    out_params.preview.fps = static_cast<int>(config_.get_int("preview_fps", 5));
     out_params.preview.out_width = static_cast<uint32_t>(config_.get_int("preview_width", 640));
     out_params.preview.out_height = static_cast<uint32_t>(config_.get_int("preview_height", 360));
     out_params.preview.jpeg_quality = static_cast<int>(config_.get_int("preview_quality", 60));
@@ -242,18 +237,6 @@ int Application::initialize(int argc, char** argv) {
     TTBOX_LOG_INFO("=== " + std::string(kAppName) + " v" +
                    std::string(kVersion) + " 启动 ===");
 
-    // ---- 风扇满转（YU fan_control min_pwm=100 同款）：防热节流拖慢 NPU ----
-    {
-        std::ofstream pwm("/sys/class/hwmon/hwmon8/pwm1");
-        if (pwm) {
-            pwm << 255;
-            TTBOX_LOG_INFO("风扇已设满转（防热节流）");
-        } else {
-            TTBOX_LOG_WARN("风扇控制不可用（hwmon8/pwm1）");
-        }
-    }
-
-
     if (config_path_.empty()) config_path_ = kDefaultConfigPath;
     std::string cfg_error;
     if (!config_.load(config_path_, &cfg_error)) {
@@ -262,26 +245,6 @@ int Application::initialize(int argc, char** argv) {
         return 1;
     }
     TTBOX_LOG_INFO("配置已加载: " + config_path_);
-
-    // ---- CPU 调频策略（实测：CPU 占用仅 15%，NPU 才是主力且频率独立）----
-    // governor=schedutil（动态调频：忙时自动满频，闲时降频降温）+ min 下限 50% 防深睡。
-    // 实测与 performance+锁死 性能完全一致（e2e/fps 无差异），温度更低。
-    {
-        for (const char* pol : {"policy0", "policy4", "policy6"}) {
-            std::ofstream g(std::string("/sys/devices/system/cpu/cpufreq/") + pol + "/scaling_governor");
-            if (g) {
-                g << "schedutil";
-                if (!g.good()) TTBOX_LOG_WARN(std::string("governor 切换失败: ") + pol);
-            }
-        }
-        const int pct = static_cast<int>(config_.get_int("cpu_min_freq_percent", 50));
-        auto fr = CpuAffinity::lock_min_freq_percent(pct);
-        if (fr.freq_ok) {
-            TTBOX_LOG_INFO("CPU 调频策略完成（schedutil+min" + std::to_string(pct) + "%）: " + fr.detail);
-        } else {
-            TTBOX_LOG_WARN("CPU 调频策略部分失败: " + fr.detail);
-        }
-    }
 
     // ---- 3. 授权层初始化（等价 cardVerifyThreadFunc）----
     license_client_ = std::make_unique<auth::AiboxLicenseClient>();
@@ -352,14 +315,10 @@ int Application::initialize(int argc, char** argv) {
 
     // ---- 5. 启动 IPC 服务 ----
     ipc_.set_status_provider([this] { return status_provider(); });
-    ipc_.set_preview_provider([this](std::vector<uint8_t>* out, uint64_t* seq) {
-        const bool ok = core_runtime_ && core_runtime_->preview() && core_runtime_->preview()->running()
+    ipc_.set_preview_provider([this](std::vector<uint8_t>* out) {
+        return core_runtime_ && core_runtime_->preview() && core_runtime_->preview()->running()
                    ? core_runtime_->preview()->snapshot(out)
                    : false;
-        if (ok && seq) {
-            *seq = core_runtime_->preview()->metrics().frames.load();
-        }
-        return ok;
     });
     ipc_.set_config_provider([this] { return config_provider(); });
     ipc_.set_config_update_handler(
@@ -381,38 +340,7 @@ int Application::initialize(int argc, char** argv) {
             TTBOX_LOG_WARN("ModelRegistry 初始化失败（模型管理不可用）: " + mm_error);
             model_management_.reset();
         } else {
-            #ifdef TTBOX_CORE_HAS_RKNN
-    // 真 RKNN 探测校验器：试加载模型拿 input/output 真实信息（类别名不在模型文件里，用户可在 UI 配置）
-    model_management_->set_validator([](const std::string& rknn_path, JsonValue* meta_out,
-                                        std::string* error) -> bool {
-        std::error_code fec;
-        if (!std::filesystem::exists(rknn_path, fec)) {
-            if (error) *error = "模型文件不存在: " + rknn_path;
-            return false;
-        }
-        RKNNEngine probe;
-        RKNNEngine::Params pp;
-        pp.model_path = rknn_path;
-        pp.core_mask = 0;
-        std::string perr;
-        if (!probe.init(pp, &perr)) {
-            if (error) *error = "RKNN 探测加载失败: " + perr;
-            return false;
-        }
-        const auto& info = probe.info();
-        if (meta_out) {
-            JsonValue obj = JsonValue::object();
-            obj.set("input_width", JsonValue::number(static_cast<double>(info.input_width)));
-            obj.set("input_height", JsonValue::number(static_cast<double>(info.input_height)));
-            obj.set("output_count", JsonValue::number(static_cast<double>(info.n_outputs)));
-            *meta_out = std::move(obj);
-        }
-        probe.destroy();
-        return true;
-    });
-#else
-    model_management_->set_validator(ModelManagement::file_level_validator);
-#endif
+            model_management_->set_validator(ModelManagement::file_level_validator);
             ipc_.set_model_list_handler([this] { return handle_model_list(); });
             ipc_.set_model_import_handler(
                 [this](const std::string& src, const std::string& id,
@@ -482,7 +410,6 @@ void Application::run() {
     //      是板端常见瞬时故障，几秒后即可恢复）。
     //   2) 运行中崩溃/退出：主循环每 tick 检测到 runtime 停但 want=true 时自动重启。
     // 用户 /api/control/stop 会把 want 置 false，此后不再自动拉起。
-    std::string rt_error;
     if (want_runtime_running_.load()) {
         if (core_runtime_ && core_runtime_->start(&rt_error)) {
             runtime_started_ = true;

@@ -1,0 +1,12 @@
+[Unit]
+Description=TTBox first-boot initialization (oneshot)
+After=network-online.target systemd-networkd-wait-online.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ttbox/scripts/ttbox-firstboot.sh
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
