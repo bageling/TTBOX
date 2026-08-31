@@ -1247,12 +1247,71 @@ def get_display_hardware():
             if fps: hdmi['refresh'] = float(fps.group(1))
     except Exception:
         pass
-    return jsonify({'ok': True, 'data': hdmi})
+    # YU 兼容结构：前端 populateDisplayHardware 消费 available/config/display_mode
+    cfg_disp = {}
+    cpath = '/opt/ttbox/config/hardware_display.json'
+    try:
+        if os.path.exists(cpath):
+            cfg_disp = json.load(open(cpath))
+    except Exception:
+        pass
+    # 可用模式列表（从 hdmirx_edid --list 解析当前 EDID 广播的模式）
+    advertised = []
+    try:
+        out = subprocess.check_output(
+            ['/opt/aiassistance/bin/hdmirx_edid', '--list'],
+            text=True, timeout=5)
+        for lm in out.splitlines():
+            lm = lm.strip()
+            if lm and not lm.startswith(('Profiles', 'Modes', '---')) and '[' in lm:
+                advertised.append(lm)
+    except Exception:
+        pass
+    data = dict(hdmi)
+    data['available'] = hdmi.get('connected', False)
+    data['config'] = cfg_disp
+    data['display_mode'] = {
+        'real_monitor': {'width': hdmi.get('width', 0), 'height': hdmi.get('height', 0),
+                          'refresh': hdmi.get('refresh', 0)},
+        'advertised_modes': advertised[:16],
+    }
+    return jsonify({'ok': True, 'data': data})
 
 
 @app.put('/api/hardware/display')
 def update_display_hardware():
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    body = request.get_json(silent=True) or {}
+    cfg_in = body.get('config') or {}
+    apply_now = bool(body.get('apply'))
+    if not cfg_in:
+        return jsonify({'ok': False, 'error': '缺少 config'})
+    cpath = '/opt/ttbox/config/hardware_display.json'
+    try:
+        cur = json.load(open(cpath)) if os.path.exists(cpath) else {}
+    except Exception:
+        cur = {}
+    # 只合并白名单键（防注入）
+    for k in ('device', 'name', 'vendor', 'product_id', 'serial',
+              'native_mode', 'native_only', 'profile',
+              'loopout_enabled', 'loopout_overlay_enabled',
+              'loopout_pixel_format', 'loopout_overlay_thickness', 'loopout_overlay_color'):
+        if k in cfg_in:
+            cur[k] = cfg_in[k]
+    json.dump(cur, open(cpath, 'w'), indent=2, ensure_ascii=False)
+
+    result = {}
+    if apply_now:
+        r = subprocess.run(['bash', '/opt/ttbox/scripts/edid/edid_apply.sh'],
+                           capture_output=True, text=True, timeout=60)
+        result = {'exit': r.returncode, 'log': (r.stdout + r.stderr)[-400:]}
+        if r.returncode != 0:
+            return jsonify({'ok': False, 'error': f'EDID 应用失败: {r.stderr or r.stdout}'[-300:]})
+    # 返回 YU 兼容结构（前端 populateDisplayHardware 消费）
+    return jsonify({'ok': True, 'data': {
+        'config': cur,
+        'result': result,
+        'message': '显示器配置已应用',
+    }})
 
 
 # -- 网络/WiFi --
