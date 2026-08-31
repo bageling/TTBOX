@@ -15,6 +15,8 @@ PROFILE=""
 PROFILE=${PROFILE:-boot-safe-full}
 DEV=$(python3 -c "import json;print(json.load(open('$CONFIG')).get('device',''))" 2>/dev/null)
 DEV=${DEV:-auto}
+NATIVE_MODE=$(python3 -c "import json;print(json.load(open('$CONFIG')).get('native_mode',''))" 2>/dev/null)
+NATIVE_MODE=${NATIVE_MODE:-1080p240}
 
 mkdir -p "$OPT/run" "$OPT/edid"
 echo "[edid-apply] $(date -Is) profile=$PROFILE device=$DEV" >> "$LOG"
@@ -29,9 +31,9 @@ fi
 # 2. 注入（C 工具内部完成 生成+S_EDID+校验）
 if [ -x "$HDMIRX_TOOL" ]; then
   if [ "$DEV" != "auto" ] && [ -n "$DEV" ]; then
-    "$HDMIRX_TOOL" --profile "$PROFILE" --apply --device "$DEV" >> "$LOG" 2>&1
+    "$HDMIRX_TOOL" --native "$NATIVE_MODE" --apply --device "$DEV" >> "$LOG" 2>&1
   else
-    "$HDMIRX_TOOL" --profile "$PROFILE" --apply >> "$LOG" 2>&1
+    "$HDMIRX_TOOL" --native "$NATIVE_MODE" --apply >> "$LOG" 2>&1
   fi
   RC=$?
 else
