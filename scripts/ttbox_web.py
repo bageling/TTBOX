@@ -41,6 +41,8 @@ IPC_SOCKET = os.environ.get('TTBOX_IPC_SOCKET', '/tmp/ttbox_core.sock')
 LISTEN_HOST = os.environ.get('TTBOX_WEB_HOST', '0.0.0.0')
 LISTEN_PORT = int(os.environ.get('TTBOX_WEB_PORT', '8081'))
 
+PRESETS_DIR = '/opt/ttbox/presets'
+
 DEFAULT_LICENSE = {
     'activated': True, 'valid': True, 'mode': 'ttbox',
     'status': 'valid', 'message': '',
@@ -734,11 +736,22 @@ def get_storage_status():
 
 @app.post('/api/system/storage/expand')
 def expand_storage():
-    return jsonify({'ok': True, 'data': {'message': '存储扩展已触发'}})
+    try:
+        out = subprocess.run(['lsblk', '-b', '-n', '-o', 'NAME,SIZE', '/dev/mmcblk0'], capture_output=True, text=True, timeout=5)
+        return jsonify({'ok': True, 'data': {'message': '根分区在线检测完成，扩容需重启进恢复流程', 'detail': out.stdout[:300]}})
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': f'检测失败: {exc}'})
 
 
 @app.put('/api/system/hostname')
 def update_system_hostname():
+    body = request.get_json(silent=True) or {}
+    hostname = str(body.get('hostname', '')).strip()
+    if not hostname or len(hostname) > 63:
+        return jsonify({'ok': False, 'error': '主机名无效'})
+    r = subprocess.run(['hostnamectl', 'set-hostname', hostname], capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
+        return jsonify({'ok': False, 'error': r.stderr or '设置失败'})
     return jsonify({'ok': True, 'data': {'message': '主机名已更新'}})
 
 
@@ -779,12 +792,12 @@ def master_reactivate_device():
 
 @app.post('/api/system/reboot')
 def reboot_system():
-    return jsonify({'ok': True, 'data': {'message': '系统即将重启'}})
+    threading.Thread(target=lambda: (time.sleep(1.5), os.system('systemctl reboot')), daemon=True).start()
 
 
 @app.post('/api/system/poweroff')
 def poweroff_system():
-    return jsonify({'ok': True, 'data': {'message': '系统即将关机'}})
+    threading.Thread(target=lambda: (time.sleep(1.5), os.system('systemctl poweroff')), daemon=True).start()
 
 
 @app.get('/api/events')
@@ -1042,16 +1055,59 @@ def update_model_class_names():
 # -- 预设 --
 @app.get('/api/presets')
 def list_presets():
-    return jsonify({'ok': True, 'data': {'presets': []}})
+    d = Path(PRESETS_DIR)
+    d.mkdir(parents=True, exist_ok=True)
+    names = sorted(p.stem for p in d.glob('*.json'))
+    return jsonify({'ok': True, 'data': {'presets': names}})
 
 
 @app.post('/api/presets')
 def save_or_delete_preset():
+    body = request.get_json(silent=True) or {}
+    name = str(body.get('name', '')).strip()
+    action = body.get('action', 'save')
+    if not name:
+        return jsonify({'ok': False, 'error': '缺少预设名'})
+    d = Path(PRESETS_DIR)
+    d.mkdir(parents=True, exist_ok=True)
+    safe = re.sub('[^\\w\\-]', '_', name)[:64]
+    pf = d / (safe + '.json')
+    if action == 'delete':
+        pf.unlink(missing_ok=True)
+        return jsonify({'ok': True, 'data': {'message': '已删除'}})
+    if action == 'rename':
+        new_name = str(body.get('new_name', '')).strip()
+        safe2 = re.sub('[^\\w\\-]', '_', new_name)[:64]
+        pf2 = d / (safe2 + '.json')
+        pf2.write_text(pf.read_text() if pf.exists() else '{}')
+        pf.unlink(missing_ok=True)
+        return jsonify({'ok': True, 'data': {'message': '已重命名'}})
+    config = body.get('config')
+    if config is None:
+        return jsonify({'ok': False, 'error': '缺少 config'})
+    pf.write_text(json.dumps(config, ensure_ascii=False, indent=2))
     return jsonify({'ok': True, 'data': {'message': '已保存'}})
 
 
 @app.post('/api/presets/load')
 def load_preset():
+    body = request.get_json(silent=True) or {}
+    name = str(body.get('name', '')).strip()
+    safe = re.sub('[^\\w\\-]', '_', name)[:64]
+    pf = Path(PRESETS_DIR) / (safe + '.json')
+    if not pf.exists():
+        return jsonify({'ok': False, 'error': '预设不存在'})
+    try:
+        config = json.loads(pf.read_text())
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': f'预设损坏: {exc}'})
+    if not isinstance(config, dict) or not config:
+        return jsonify({'ok': False, 'error': '预设内容为空'})
+    translated = yu_body_to_profile(config)
+    prof = _deep_merge_profile(_get_runtime_profile(), translated)
+    r = ipc_request('SET_CONFIG', {'profile': prof})
+    if r.get('status') != 0:
+        return jsonify({'ok': False, 'error': r.get('error', '应用失败')})
     return jsonify({'ok': True, 'data': {'message': '已加载'}})
 
 
@@ -1121,13 +1177,18 @@ def get_events():
 # -- 硬件 --
 @app.get('/api/hardware/mouse')
 def get_mouse_hardware():
+    # 真实探测：HID gadget 设备 + 核心端注入开关
+    import glob
+    hidg = sorted(glob.glob('/dev/hidg*'))
+    prof = _get_runtime_profile()
+    mouse = prof.get('mouse') or {}
     return jsonify({
         'ok': True,
         'data': {
             'mode': 'proxy',
-            'device': '/dev/hidg0',
-            'enabled': True,
-            'connected': True,
+            'device': hidg[0] if hidg else '',
+            'enabled': bool(mouse.get('enabled', False)),
+            'connected': bool(hidg),
         },
     })
 
