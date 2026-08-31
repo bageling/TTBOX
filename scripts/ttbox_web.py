@@ -405,7 +405,7 @@ def collect_yu_state() -> dict:
                     'inference_ms': m.get('infer_ms', 0),
                     'model_loaded': bool(prof.get('model_id')),
                 },
-                'latency': {'capture_to_mouse_send_ms': m.get('e2e_ms', 0)},
+                'latency': {'capture_to_mouse_send_ms': m.get('e2e_ms', 0), 'preprocess_to_track_ms': m.get('e2e_ms', 0)},
                 'license': DEFAULT_LICENSE,
                 'mouse_output': {},
                 # MJPEG 流（动态预览）：img 标签原生支持 multipart/x-mixed-replace，
