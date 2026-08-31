@@ -343,6 +343,17 @@ bool V4L2Capture::start(std::string* error) {
     }
     TTBOX_LOG_INFO("STREAMON OK");
 
+    // 重置采集指标（G1 纪律：每次 start 都是新采集会话，FPS=本会话帧数/本会话秒数）。
+    // 若不复位，capture_frames 是进程级累计值，restart 后 start_time 归零而帧数不归零，
+    // 导致 capture_fps 虚高（曾实测 149 万 fps，实为累计帧数/秒的假象）。
+    metrics_.capture_frames = 0;
+    metrics_.dqbuf_frames = 0;
+    metrics_.qbuf_frames = 0;
+    metrics_.dropped_latest_frames = 0;
+    metrics_.poll_timeouts = 0;
+    metrics_.errors = 0;
+    metrics_.capture_fps = 0.0;
+
     running_.store(true);
     capture_thread_ = std::thread(&V4L2Capture::capture_loop, this);
     TTBOX_LOG_INFO("capture thread 已启动");

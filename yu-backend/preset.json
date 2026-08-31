@@ -1,0 +1,152 @@
+{
+  "ai": {
+    "controller": {
+      "aim_fire_lock_y": false,
+      "aim_reference_offset_x": 0,
+      "aim_reference_offset_y": 0,
+      "block_physical_mouse_x_while_aiming": false,
+      "block_physical_mouse_y_while_aiming": false,
+      "calibration": {
+        "calibrated_at": "",
+        "capture_height": 0,
+        "capture_width": 0,
+        "confidence": 0.0,
+        "crop_size": 0,
+        "gain_x_px_per_count": 0.550000011920929,
+        "gain_y_px_per_count": 0.550000011920929,
+        "model_id": "",
+        "response_delay_ms": 8.333000183105469,
+        "valid": false
+      },
+      "continuous_lead_enabled": false,
+      "continuous_lead_enter_distance": 150,
+      "continuous_lead_fade_in_ms": 300,
+      "continuous_lead_fade_out_ms": 300,
+      "continuous_lead_near_disable_ratio": 0.6600000262260437,
+      "continuous_lead_scale": 0.5,
+      "kd_x": 0.0,
+      "kd_y": 0.0,
+      "ki_x": 0.0,
+      "ki_y": 0.0,
+      "kp_x": 15.0,
+      "kp_y": 15.0,
+      "output_deadzone": 1.0,
+      "personal_motion_enabled": false,
+      "predict_x": 0.5,
+      "predict_y": 0.4000000059604645,
+      "pull_curve_enabled": true,
+      "pull_curve_jitter_px": 3.0,
+      "pull_curve_min_distance": 80,
+      "pull_curve_strength": 0.800000011920929,
+      "rate_x": 0.4000000059604645,
+      "rate_y": 0.30000001192092896,
+      "selector_lost_grace_ms": 30,
+      "selector_search_radius": 170,
+      "smooth_x": 9900.0,
+      "smooth_y": 9900.0,
+      "y_axis_fire_hotkey": "left",
+      "y_axis_fire_release_delay_sec": 0.30000001192092896
+    }
+  },
+  "aim_profiles": [
+    {
+      "alternate_offset_x": 0.5,
+      "alternate_offset_y": 0.5,
+      "class_filter_mask": 1073741823,
+      "class_offsets": [],
+      "fov_scale": 1.0,
+      "hotkey": "left",
+      "hotkey2": "",
+      "hotkey_mode": "any",
+      "offset_switch_enabled": false,
+      "offset_switch_hotkey": "",
+      "offset_x": 0.5,
+      "offset_y": 0.5,
+      "pos": 0.5,
+      "sensitivity": 1.0
+    }
+  ],
+  "auto_back_flick": {
+    "class_configs": [],
+    "class_filter_mask": 1,
+    "class_id": 0,
+    "cooldown_ms": 3000,
+    "dodge_away_from_target": false,
+    "enabled": false,
+    "random_direction": false,
+    "return_random": 20,
+    "steps": 100,
+    "turn_pixels": 3000,
+    "turn_random": 50,
+    "wait_ms": 150
+  },
+  "auto_trigger": {
+    "activation_hotkey": "auto",
+    "continuous_mode": false,
+    "cooldown_max_ms": 220,
+    "cooldown_min_ms": 120,
+    "enabled": false,
+    "enter_delay_max_ms": 0,
+    "enter_delay_min_ms": 0,
+    "fire_mode": "tap",
+    "profiles": [],
+    "spray_recoil_assist": false,
+    "spray_release_delay_ms": 500
+  },
+  "capture": {
+    "crop_offset_x": 0,
+    "crop_offset_y": 0,
+    "crop_size": 256
+  },
+  "crosshair": {
+    "detection_enabled": false,
+    "fire_hotkey": "left",
+    "hotkey": "left",
+    "hotkey2": "",
+    "hotkey_mode": "any",
+    "only_when_fire_held": true,
+    "preset_colors": [
+      "red"
+    ],
+    "roi_h": 50,
+    "roi_w": 50
+  },
+  "hotkey_guard": {
+    "enabled": false,
+    "toggle_hotkey": "middle"
+  },
+  "loopout_overlay": {
+    "class_mask": 1073741823,
+    "color": "#ff5edb",
+    "thickness": 2,
+    "use_class_colors": true
+  },
+  "pos": 0.5,
+  "preset_schema": "aiassistance.control.v1",
+  "range_factor": 1.0,
+  "rapid_fire": {
+    "enabled": false,
+    "hotkey": "forward",
+    "interval_base_ms": 13,
+    "press_base_ms": 170
+  },
+  "recoil": {
+    "enabled": false,
+    "hotkey": "left",
+    "hotkey2": "",
+    "hotkey_mode": "any",
+    "humanize_curve_strength": 0.44999998807907104,
+    "humanize_enabled": true,
+    "humanize_jitter_frequency": 8.0,
+    "humanize_jitter_px": 0.25,
+    "only_when_target_visible": true,
+    "speed": 1.0,
+    "strength": 0.0,
+    "target_lost_release_ms": 200,
+    "trigger_delay_enabled": false,
+    "trigger_delay_ms": 120
+  },
+  "sens": 1.0,
+  "video_detection_confidence": 0.25,
+  "video_detection_iou": 0.44999998807907104
+}

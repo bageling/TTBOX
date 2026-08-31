@@ -404,26 +404,48 @@ void Application::run() {
         }
     }
 
+    // ---- 自动启动 AI 流水线（参考 yu auto-start 语义）----
+    // 语义：want_runtime_running_=true 时，尽力保持 runtime 运行。
+    //   1) 首次启动：先立即尝试一次；失败则进入后台重试（HDMI 未锁定 / V4L2 CMA 碎片
+    //      是板端常见瞬时故障，几秒后即可恢复）。
+    //   2) 运行中崩溃/退出：主循环每 tick 检测到 runtime 停但 want=true 时自动重启。
+    // 用户 /api/control/stop 会把 want 置 false，此后不再自动拉起。
     std::string rt_error;
-    if (core_runtime_ && !core_runtime_->start(&rt_error)) {
-        // G4 语义：采集/推理启动失败（如 HDMI 无信号、V4L2 CMA 碎片、模型缺失）
-        // 不再杀死整个进程——IPC 保持可用，Web 面板仍可读状态/改配置，
-        // GET_STATUS 的 runtime_running=false 且 metrics=0（unavailable）。
-        // 用户可通过 RUNTIME_CONTROL start 重试。
-        TTBOX_LOG_WARN("CoreRuntime 启动失败（进程保持运行，可通过 RUNTIME_CONTROL 重试）: " + rt_error);
-        runtime_started_ = false;
+    if (want_runtime_running_.load()) {
+        if (core_runtime_ && core_runtime_->start(&rt_error)) {
+            runtime_started_ = true;
+            TTBOX_LOG_INFO("CoreRuntime 已启动 (Ctrl+C/SIGTERM 退出)");
+        } else {
+            TTBOX_LOG_WARN("CoreRuntime 首次启动失败，进入后台自动重试: " + rt_error);
+            runtime_started_ = false;
+        }
     } else {
-        runtime_started_ = true;
-        TTBOX_LOG_INFO("CoreRuntime 已启动 (Ctrl+C/SIGTERM 退出)");
+        runtime_started_ = false;
     }
 
     constexpr auto kTickMs = std::chrono::milliseconds(50);
     constexpr auto kHeartbeatSec = std::chrono::seconds(10);
     auto last_heartbeat = std::chrono::steady_clock::now();
+    // 启动失败重试间隔（与 heartbeat 解耦：重试更激进，HDMI 恢复后 ~2s 内拉起）
+    constexpr auto kRetryInterval = std::chrono::seconds(2);
+    auto last_retry = std::chrono::steady_clock::now();
     while (!shutdown_flag().load()) {
         std::this_thread::sleep_for(kTickMs);
         // 授权失效时仍保持进程存活（通过 supervisor recover() 重启恢复），不主动自杀
         const auto now = std::chrono::steady_clock::now();
+        // 自动启停核心：want=true 但 runtime 没在跑 → 每 2s 重试一次（首次失败自恢复/崩溃自拉起）
+        if (want_runtime_running_.load() && core_runtime_ && !core_runtime_->running()) {
+            if (now - last_retry >= kRetryInterval) {
+                last_retry = now;
+                std::string retry_error;
+                if (core_runtime_->start(&retry_error)) {
+                    runtime_started_ = true;
+                    TTBOX_LOG_INFO("CoreRuntime 自动重试成功，流水线已恢复");
+                } else if (!retry_error.empty()) {
+                    TTBOX_LOG_DEBUG("CoreRuntime 自动重试中: " + retry_error);
+                }
+            }
+        }
         if (now - last_heartbeat >= kHeartbeatSec) {
             last_heartbeat = now;
             const bool rt_ok = core_runtime_ ? core_runtime_->running() : false;
@@ -570,19 +592,23 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
     }
     if (action == "start") {
         if (core_runtime_->running()) return true;  // 幂等
+        want_runtime_running_.store(true);
         if (!core_runtime_->start(error)) {
             if (error && error->empty()) *error = "CoreRuntime 启动失败";
+            // 启动失败仍保留 want=true：主循环每 2s 自动重试，直到 HDMI/模型就绪
             return false;
         }
         runtime_started_ = true;
         return true;
     }
     if (action == "stop") {
+        want_runtime_running_.store(false);
         core_runtime_->stop();
         runtime_started_ = false;
         return true;
     }
     if (action == "restart") {
+        want_runtime_running_.store(true);
         core_runtime_->stop();
         if (!core_runtime_->start(error)) {
             if (error && error->empty()) *error = "CoreRuntime 重启失败";

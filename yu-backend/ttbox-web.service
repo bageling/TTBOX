@@ -1,0 +1,16 @@
+[Unit]
+Description=TTBOX Web Gateway (8081)
+After=network.target ttbox-core.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/ttbox/web/ttbox_gateway.py
+Environment=TTBOX_IPC_SOCKET=/tmp/ttbox_core.sock
+Environment=TTBOX_WEB_HOST=0.0.0.0
+Environment=TTBOX_WEB_PORT=8081
+Environment=TTBOX_WEB_DIST=/opt/ttbox/web/dist
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

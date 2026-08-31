@@ -1,0 +1,23 @@
+[Unit]
+Description=aiAssistance Linux RK3588 Daemon
+After=network-online.target aiassistance-performance.service usb-proxy.service aiassistance-kmboxnet-usb.service aiassistance-makcu.service
+Wants=network-online.target aiassistance-performance.service usb-proxy.service aiassistance-kmboxnet-usb.service aiassistance-makcu.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aiassistance
+EnvironmentFile=-/etc/default/aiassistance
+ExecStartPre=-/opt/aiassistance/scripts/ensure_makcu_service.sh /opt/aiassistance
+ExecStart=/opt/aiassistance/scripts/run_daemon.sh
+Restart=always
+RestartSec=2
+LimitRTPRIO=99
+LimitNICE=-20
+LimitMEMLOCK=infinity
+Nice=-20
+CPUSchedulingPolicy=other
+IOSchedulingClass=realtime
+IOSchedulingPriority=0
+
+[Install]
+WantedBy=multi-user.target

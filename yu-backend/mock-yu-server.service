@@ -1,0 +1,12 @@
+[Unit]
+Description=YU Mock License/Update Server (local)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/mock_yu_server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,19 @@
+[
+  {
+    "backend": "rknn",
+    "class_count": 7,
+    "description": "",
+    "display_name": "巨无敌乱杀sjzv11_.rknn",
+    "encrypted": true,
+    "file_name": "巨无敌乱杀sjzv11_.rknn.enc",
+    "game": "123",
+    "id": "sjzv11",
+    "imported": true,
+    "input_height": 256,
+    "input_width": 256,
+    "name": "巨无敌乱杀sjzv11_.rknn",
+    "output_count": 6,
+    "preset_name": "巨无敌乱杀sjzv11_.rknn",
+    "rknn_concurrency": 3
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "license_id": "lic_c75670d854cf32e4",
+  "device_id": "opi-effa4ad936f81d0db6ee5b14",
+  "device_fingerprint_hash": "48b35fe432f77cd3029e3cbd8462ec6f33f413dc9acb99dd5e5ba76380ac3141",
+  "issued_at": "2026-07-01T00:00:00Z",
+  "plan": "permanent",
+  "features": ["capture", "inference", "aim", "ota"],
+  "max_version": "9999.99.99",
+  "ui_brand": "yu",
+  "license_version": "2",
+  "expires_at": "2099-12-31T23:59:59Z",
+  "online_required": false,
+  "check_interval_seconds": 1800,
+  "grace_seconds": 300,
+  "signature_algorithm": "Ed25519",
+  "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+}

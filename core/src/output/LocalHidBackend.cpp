@@ -3,6 +3,7 @@
 
 #if !defined(_WIN32)
 #include <cerrno>
+#include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
 #endif

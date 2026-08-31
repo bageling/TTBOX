@@ -84,6 +84,9 @@ private:
     std::shared_ptr<output::IHidOutput> hid_output_;
     std::unique_ptr<CoreRuntime> core_runtime_;
     bool runtime_started_ = false;
+    // 期望运行标志（自动启停核心）：true=应保持 runtime 运行，false=用户手动停止。
+    // 开机/start 时置 true；用户 /api/control/stop 置 false。主循环据此自动重试/自恢复。
+    std::atomic<bool> want_runtime_running_{true};
     // 模型仓库（v0.3）：root = 配置 model_registry_root 或 <项目>/models
     std::unique_ptr<ModelManagement> model_management_;
 

@@ -1,0 +1,13 @@
+{
+  "device": "auto",
+  "loopout_enabled": false,
+  "loopout_overlay_enabled": false,
+  "loopout_pixel_format": "rgb888",
+  "name": "PNG-FDB26B",
+  "native_mode": "1440p144",
+  "native_only": true,
+  "product_id": "0xb127",
+  "profile": "boot-safe-full",
+  "serial": "0xd3a5cb48",
+  "vendor": "PNG"
+}

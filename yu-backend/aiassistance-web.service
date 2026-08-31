@@ -1,0 +1,17 @@
+[Unit]
+Description=aiAssistance Linux RK3588 Web
+After=network.target aiassistance-wifi-bootstrap.service aiassistance-daemon.service
+Wants=aiassistance-wifi-bootstrap.service aiassistance-daemon.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aiassistance
+Environment=AIASSISTANCE_BIND=0.0.0.0
+Environment=AIASSISTANCE_PORT=8080
+ExecStartPre=/bin/true
+ExecStart=/opt/aiassistance/scripts/run_web.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
