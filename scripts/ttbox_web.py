@@ -780,7 +780,18 @@ def get_lan_blocklist():
 
 @app.post('/api/system/lan-blocklist/scan')
 def scan_lan_blocklist_devices():
-    return jsonify({'ok': True, 'data': {'devices': []}})
+    try:
+        out = subprocess.check_output(['arp', '-a'], text=True, timeout=5)
+        devices = []
+        for line in out.splitlines():
+            if '(' in line and ')' in line:
+                ip = line.split('(')[1].split(')')[0]
+                mac = next((w for w in line.split() if ':' in w), '')
+                if mac and mac != '<incomplete>':
+                    devices.append({'ip': ip, 'mac': mac})
+        return jsonify({'ok': True, 'data': {'devices': devices}})
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': f'扫描失败: {exc}'})
 
 
 @app.post('/api/system/lan-blocklist')
@@ -998,12 +1009,40 @@ def select_model():
 
 @app.post('/api/models/bind-preset')
 def bind_model_preset():
-    return jsonify({'ok': True, 'data': {'message': '已绑定'}})
+    body = request.get_json(silent=True) or {}
+    model_id = body.get('model_id', '')
+    preset_name = body.get('preset_name', '')
+    if not model_id:
+        return jsonify({'ok': False, 'error': '缺少 model_id'})
+    mp = f'/opt/ttbox/models/installed/{model_id}/manifest.json'
+    if not os.path.exists(mp):
+        return jsonify({'ok': False, 'error': f'模型不存在: {model_id}'})
+    try:
+        manifest = json.load(open(mp))
+        manifest['preset_name'] = preset_name
+        json.dump(manifest, open(mp, 'w'), indent=2, ensure_ascii=False)
+        return jsonify({'ok': True, 'data': {'message': '已绑定', 'preset_name': preset_name}})
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': f'绑定失败: {exc}'})
 
 
 @app.post('/api/models/game-profile')
 def update_model_game_profile():
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    body = request.get_json(silent=True) or {}
+    model_id = body.get('model_id', '')
+    game = body.get('game_profile', body.get('game', ''))
+    if not model_id:
+        return jsonify({'ok': False, 'error': '缺少 model_id'})
+    mp = f'/opt/ttbox/models/installed/{model_id}/manifest.json'
+    if not os.path.exists(mp):
+        return jsonify({'ok': False, 'error': f'模型不存在: {model_id}'})
+    try:
+        manifest = json.load(open(mp))
+        manifest['game_profile'] = game
+        json.dump(manifest, open(mp, 'w'), indent=2, ensure_ascii=False)
+        return jsonify({'ok': True, 'data': {'message': '已更新', 'game_profile': game}})
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': f'保存失败: {exc}'})
 
 
 @app.post('/api/models/remote-frame-format')
@@ -1215,7 +1254,18 @@ def get_mouse_hardware():
 
 @app.put('/api/hardware/mouse')
 def update_mouse_hardware():
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    body = request.get_json(silent=True) or {}
+    prof = _get_runtime_profile()
+    mouse = prof.get('mouse') or {}
+    # 前端字段：enabled/mode/device
+    for k in ('enabled', 'proxy_mode', 'mode'):
+        if k in body:
+            mouse[k] = body[k]
+    prof['mouse'] = mouse
+    r = ipc_request('SET_CONFIG', {'profile': prof})
+    if r.get('status') != 0:
+        return jsonify({'ok': False, 'error': r.get('error', '保存失败')})
+    return jsonify({'ok': True, 'data': {'message': '已更新', 'mouse': mouse}})
 
 
 @app.put('/api/hardware/mouse/mode')
@@ -1690,17 +1740,38 @@ def remote_delete():
 # -- 其他 --
 @app.get('/api/makcu/devices')
 def list_makcu_devices():
-    return jsonify({'ok': True, 'data': {'devices': []}})
+    return jsonify({'ok': True, 'data': {'devices': _list_serial_devices()}})
+
+
+def _list_serial_devices():
+    import glob
+    devs = []
+    for pattern in ('/dev/ttyUSB*', '/dev/ttyACM*'):
+        for d in glob.glob(pattern):
+            try:
+                desc = subprocess.check_output(['udevadm', 'info', '-q', 'property', '-n', d],
+                                               text=True, timeout=3)
+                vid = ''
+                model = ''
+                for line in desc.splitlines():
+                    if line.startswith('ID_VENDOR_ID='):
+                        vid = line.split('=')[1]
+                    if line.startswith('ID_MODEL='):
+                        model = line.split('=')[1]
+                devs.append({'path': d, 'vendor_id': vid, 'model': model, 'backend': 'serial'})
+            except Exception:
+                devs.append({'path': d, 'backend': 'serial'})
+    return devs
 
 
 @app.get('/api/ferrum/devices')
 def list_ferrum_devices():
-    return jsonify({'ok': True, 'data': {'devices': []}})
+    return jsonify({'ok': True, 'data': {'devices': _list_serial_devices()}})
 
 
 @app.get('/api/kmboxb/devices')
 def list_kmboxb_devices():
-    return jsonify({'ok': True, 'data': {'devices': []}})
+    return jsonify({'ok': True, 'data': {'devices': _list_serial_devices()}})
 
 
 @app.post('/api/mouse-output/test-circle')
