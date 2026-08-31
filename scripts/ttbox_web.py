@@ -616,11 +616,11 @@ def collect_yu_state() -> dict:
                 'brand_mark': 'TT',
                 'brand_eyebrow': 'TTBOX',
                 'brand_title': 'TTBOX 控制台',
-                'ui_brand': 'yu',
+                'ui_brand': 'ttbox',
                 'default_theme': 'dark',
                 'allow_theme_switch': True,
             },
-            'ui_brand': 'yu',
+            'ui_brand': 'ttbox',
         },
     }
 
@@ -642,7 +642,7 @@ app = Flask(
 def index():
     return render_template('index.html',
         app_title='TTBOX 控制台',
-        ui_brand='yu',
+        ui_brand='ttbox',
         brand_mark='TT',
         brand_eyebrow='TTBOX',
         brand_title='TTBOX 控制台',
@@ -662,7 +662,7 @@ def index():
 @app.get('/desktop')
 def desktop():
     return render_template('index.html', mode='desktop',
-        app_title='TTBOX 控制台', ui_brand='yu',
+        app_title='TTBOX 控制台', ui_brand='ttbox',
         brand_mark='TT', brand_eyebrow='TTBOX', brand_title='TTBOX 控制台',
         default_theme='dark',
         asset_version='2026.08.31.1',
@@ -680,7 +680,7 @@ def desktop():
 @app.get('/mobile')
 def mobile():
     return render_template('index.html', mode='mobile',
-        app_title='TTBOX 控制台', ui_brand='yu',
+        app_title='TTBOX 控制台', ui_brand='ttbox',
         brand_mark='TT', brand_eyebrow='TTBOX', brand_title='TTBOX 控制台',
         default_theme='dark',
         asset_version='2026.08.31.1',

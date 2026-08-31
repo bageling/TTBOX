@@ -488,8 +488,8 @@ function integrateXhFanSettings() {
 
 function normalizeUiBrand(value) {
   const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === UI_BRAND_XH || normalized === UI_BRAND_XCSH) return normalized;
-  return UI_BRAND_YU;
+  if (normalized === UI_BRAND_TTBOX || normalized === UI_BRAND_XH || normalized === UI_BRAND_XCSH) return normalized;
+  return UI_BRAND_TTBOX;
 }
 
 function brandFromPayload(payload) {
@@ -2642,7 +2642,7 @@ function modelBackendFilterValue(model) {
 }
 
 function shouldShowCloudEncryptedModelsInLibrary() {
-  return state.uiBrand === UI_BRAND_XCSH;
+  return state.uiBrand === UI_BRAND_XCSH || state.uiBrand === UI_BRAND_TTBOX;
 }
 
 function modelVisibleInLibrary(model) {
