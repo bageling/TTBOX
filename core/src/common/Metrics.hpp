@@ -41,6 +41,8 @@ struct PipelineMetrics {
     uint64_t target_frames = 0;// 有目标帧数
     uint64_t no_target_frames = 0; // 无目标帧数
     bool aim_active = false;   // 热键按下（AI 控制激活中）
+    double aim_error_x = 0.0;  // 瞄准误差 X（AimThread 实时，诊断用）
+    double aim_error_y = 0.0;  // 瞄准误差 Y
     // Phase2：预览指标（PreviewModule 真实统计）
     double preview_fps = 0.0;
     double preview_encode_ms = 0.0;

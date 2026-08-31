@@ -698,6 +698,8 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("target_frames", JsonValue::number(static_cast<double>(status.metrics.target_frames)));
     m.set("no_target_frames", JsonValue::number(static_cast<double>(status.metrics.no_target_frames)));
     m.set("aim_active", JsonValue::boolean(status.metrics.aim_active));
+    m.set("aim_error_x", JsonValue::number(status.metrics.aim_error_x));
+    m.set("aim_error_y", JsonValue::number(status.metrics.aim_error_y));
     m.set("preview_fps", JsonValue::number(status.metrics.preview_fps));
     m.set("preview_encode_ms", JsonValue::number(status.metrics.preview_encode_ms));
     m.set("preview_width", JsonValue::number(static_cast<double>(status.metrics.preview_width)));

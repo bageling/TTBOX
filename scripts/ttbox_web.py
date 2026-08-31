@@ -1247,9 +1247,49 @@ def stop_control():
     return jsonify({'ok': r.get('status') == 0, 'data': {'message': '已停止' if r.get('status') == 0 else '停止失败'}})
 
 
+# 瞄准轨迹记录（诊断）：后台线程按 50Hz 采样核心 aim 状态，存 /opt/ttbox/run/aim_trace.json
+_aim_trace = {'running': False, 'samples': [], 'started_at': 0, 'stop_at': 0, 'thread': None}
+
+
 @app.post('/api/diagnostics/aim-trace')
 def start_aim_trace():
-    return jsonify({'ok': True, 'data': {'message': '跟踪已开始'}})
+    body = request.get_json(silent=True) or {}
+    duration_sec = int(body.get('duration_sec', 10))
+    if duration_sec <= 0 or duration_sec > 120:
+        return jsonify({'ok': False, 'error': 'duration_sec 必须在 1~120 之间'})
+    if _aim_trace['running']:
+        return jsonify({'ok': False, 'error': '已有轨迹记录进行中'})
+    _aim_trace['running'] = True
+    _aim_trace['samples'] = []
+    _aim_trace['started_at'] = time.time()
+    _aim_trace['stop_at'] = time.time() + duration_sec
+
+    def _collect():
+        while _aim_trace['running'] and time.time() < _aim_trace['stop_at']:
+            try:
+                st = _get_status()
+                m = st.get('metrics', {})
+                _aim_trace['samples'].append({
+                    't': round(time.time() - _aim_trace['started_at'], 3),
+                    'err_x': round(m.get('aim_error_x', 0.0), 3),
+                    'err_y': round(m.get('aim_error_y', 0.0), 3),
+                    'move_x': m.get('mouse_dx', 0),
+                    'move_y': m.get('mouse_dy', 0),
+                    'target': m.get('target_frames', 0) > 0 or m.get('aim_active', False),
+                })
+            except Exception:
+                pass
+            time.sleep(0.02)
+        try:
+            with open('/opt/ttbox/run/aim_trace.json', 'w') as f:
+                json.dump({'samples': _aim_trace['samples'], 'duration_sec': duration_sec}, f)
+        except Exception:
+            pass
+        _aim_trace['running'] = False
+
+    _aim_trace['thread'] = threading.Thread(target=_collect, daemon=True)
+    _aim_trace['thread'].start()
+    return jsonify({'ok': True, 'data': {'message': f'轨迹记录已开始（{duration_sec} 秒）'}})
 
 
 @app.get('/api/diagnostics/usb-proxy.zip')

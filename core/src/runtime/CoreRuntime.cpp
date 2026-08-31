@@ -207,6 +207,9 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
     }
     // YU 同语义 tracks：当前跟踪中的目标数（AimThread 实时状态）
     out->tracks = aim_thread_.status().tracks;
+    const auto ast = aim_thread_.status();
+    out->aim_error_x = ast.error_x;
+    out->aim_error_y = ast.error_y;
     if (preview_) {
         const auto& pm = preview_->metrics();
         out->preview_fps = pm.fps.load();
