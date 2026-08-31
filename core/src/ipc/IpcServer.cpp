@@ -706,6 +706,9 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("capture_ms", JsonValue::number(status.metrics.capture_ms));
     m.set("resize_ms", JsonValue::number(status.metrics.resize_ms));
     m.set("infer_ms", JsonValue::number(status.metrics.infer_ms));
+    m.set("infer_set_input_ms", JsonValue::number(status.metrics.infer_set_input_ms));
+    m.set("infer_run_ms", JsonValue::number(status.metrics.infer_run_ms));
+    m.set("infer_output_ms", JsonValue::number(status.metrics.infer_output_ms));
     m.set("decode_ms", JsonValue::number(status.metrics.decode_ms));
     m.set("aim_ms", JsonValue::number(status.metrics.aim_ms));
     m.set("e2e_ms", JsonValue::number(status.metrics.e2e_ms));

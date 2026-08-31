@@ -128,6 +128,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         // 聚合所有 worker：published 累计 → 推理 FPS；耗时 avg 直接平均
         uint64_t published = 0;
         double infer_avg_us = 0.0;
+        double si_avg_us = 0.0, run_avg_us = 0.0, out_avg_us = 0.0;
         double decode_avg_us = 0.0;
         double e2e_avg_us = 0.0;
         double convert_avg_us = 0.0;
@@ -140,6 +141,9 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             const auto& s = w->stats();
             published += s.published.load();
             infer_avg_us += s.stages.total.avg();
+            si_avg_us += s.stages.set_input.avg();
+            run_avg_us += s.stages.run.avg();
+            out_avg_us += s.stages.output.avg();
             decode_avg_us += s.decode_stages.total.avg();
             e2e_avg_us += s.e2e.avg();
             convert_avg_us += s.convert.avg();
@@ -158,6 +162,9 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             }
         }
         out->infer_ms = infer_avg_us / static_cast<double>(n) / 1000.0;
+        out->infer_set_input_ms = si_avg_us / static_cast<double>(n) / 1000.0;
+        out->infer_run_ms = run_avg_us / static_cast<double>(n) / 1000.0;
+        out->infer_output_ms = out_avg_us / static_cast<double>(n) / 1000.0;
         out->decode_ms = decode_avg_us / static_cast<double>(n) / 1000.0;
         out->e2e_ms = e2e_avg_us / static_cast<double>(n) / 1000.0;
         out->resize_ms = convert_avg_us / static_cast<double>(n) / 1000.0;

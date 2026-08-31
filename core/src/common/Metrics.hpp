@@ -16,6 +16,9 @@ struct PipelineMetrics {
     double capture_ms = 0.0;   // 采集耗时（现有统计未细分，恒 0 = unavailable）
     double resize_ms = 0.0;    // 预处理耗时（uint8->FP16 转换 avg；INT8 模型为 0）
     double infer_ms = 0.0;     // 推理耗时（RKNN set_input+run+output avg）
+    double infer_set_input_ms = 0.0; // 推理分段：输入拷贝+量化 avg
+    double infer_run_ms = 0.0;       // 推理分段：NPU 纯计算 avg
+    double infer_output_ms = 0.0;    // 推理分段：输出取回 avg
     double decode_ms = 0.0;    // 后处理耗时（decode+NMS avg）
     double aim_ms = 0.0;       // 自瞄耗时（现有统计未细分，恒 0 = unavailable）
     double e2e_ms = 0.0;       // 端到端耗时（帧采集→推理完成 avg）
