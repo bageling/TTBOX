@@ -1,0 +1,8 @@
+{
+  "model": "/opt/ttbox/models/current/model.rknn",
+  "workers": 3,
+  "cores": "0,1,2",
+  "buffers": 8,
+  "in_w": 640,
+  "in_h": 640
+}

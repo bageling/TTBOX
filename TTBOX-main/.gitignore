@@ -1,0 +1,17 @@
+# Build and generated artifacts
+core/build*/
+core/cmake-build*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/Makefile
+**/cmake_install.cmake
+*.o
+*.a
+*.so
+*.d
+*.tmp
+__pycache__/
+*.pyc
+# Local runtime artifacts
+*.log
+/run/

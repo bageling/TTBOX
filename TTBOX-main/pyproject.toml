@@ -1,0 +1,23 @@
+[project]
+name = "aibox2"
+version = "0.0.1"
+description = "OrangePi RK3588 AI 采集/推理/自瞄系统"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "evdev>=1.7,<2.0",
+]
+
+[project.optional-dependencies]
+rknn = ["rknn-toolkit-lite2>=2.3.0"]
+dev = ["pytest>=7.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["aibox*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

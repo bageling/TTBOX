@@ -1,0 +1,14 @@
+[Unit]
+Description=TTBox HID transparent forwarder (hidraw -> hidg, resident)
+After=ttbox-hid.service network.target
+Wants=ttbox-hid.service
+
+[Service]
+Type=simple
+ExecStart=/opt/ttbox/runtime/ttbox-hid-forward --root /opt/ttbox/hid --log-interval 10
+Restart=always
+RestartSec=2
+# 保持 root 以访问 /dev/hidraw* 与 /dev/hidg*（默认 root）
+
+[Install]
+WantedBy=multi-user.target
