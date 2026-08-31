@@ -547,6 +547,11 @@ def collect_yu_state() -> dict:
     st = _get_status()
     prof = _get_runtime_profile()
     ml = ipc_request('MODEL_LIST')
+    ml_data0 = (ml.get('data', {}) or {}) if ml.get('status') == 0 else {}
+    # 真源统一：registry active 覆盖 profile.model_id（防止 PUT config 用旧缓存回写跳回）
+    registry_active = ml_data0.get('active', '')
+    if registry_active:
+        prof['model_id'] = registry_active
     ml_data = (ml.get('data', {}) or {}) if ml.get('status') == 0 else {}
     # YU 同构：state.models = 数组，字段对齐前端模型卡片（id/display_name/backend/enabled/尺寸）
     models = []
@@ -584,7 +589,7 @@ def collect_yu_state() -> dict:
             'version': str(st.get('version', '')),
             'config': config_yu,
             'models': models,  # YU 同构：数组
-            'selected_model_id': active_model,
+            'selected_model_id': registry_active or active_model,
             'presets': {'presets': []},
             'state': {
                 'aim': {'active': m.get('aim_active', False), 'last_error': ''},

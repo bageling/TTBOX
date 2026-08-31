@@ -2854,6 +2854,12 @@ html[data-theme="light"] .crosshair-color-swatch {
     var(--surface-strong);
 }
 
+.model-card.is-active {
+  transform: scale(1.03);
+  box-shadow: 0 0 0 1px rgba(121, 214, 197, 0.35), 0 10px 26px rgba(0, 0, 0, 0.34);
+  z-index: 1;
+}
+
 .model-card.is-missing {
   border-color: rgba(255, 105, 127, 0.64);
   background:
