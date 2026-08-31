@@ -249,15 +249,24 @@ void InferenceWorker::loop() {
                 const int32_t cy = static_cast<int32_t>(fh / 2) + (prof ? prof->capture.offset_y : 0);
                 const int32_t rx = std::max<int32_t>(0, std::min<int32_t>(cx - static_cast<int32_t>(rw / 2), static_cast<int32_t>(fw - rw)));
                 const int32_t ry = std::max<int32_t>(0, std::min<int32_t>(cy - static_cast<int32_t>(rh / 2), static_cast<int32_t>(fh - rh)));
+                // 最近邻采样：ROI（rw×rh）→ 模型输入（direct_w×direct_h）
+                // 用户 crop 尺寸≠模型输入时也必须正确缩放（否则输入错乱→永远检不出目标）。
                 const uint8_t* base = static_cast<const uint8_t*>(frame->info.cpu_va);
                 const uint32_t sstride = frame->info.stride;
-                const size_t need = static_cast<size_t>(rw) * rh * 3;
+                const uint32_t dw2 = direct_w > 0 ? direct_w : rw;
+                const uint32_t dh2 = direct_h > 0 ? direct_h : rh;
+                const size_t need = static_cast<size_t>(dw2) * dh2 * 3;
                 if (direct_buf_.size() < need) direct_buf_.resize(need);
                 uint8_t* dst = direct_buf_.data();
-                for (uint32_t y = 0; y < rh; ++y) {
-                    std::memcpy(dst + static_cast<size_t>(y) * rw * 3,
-                                base + static_cast<size_t>(ry + y) * sstride + static_cast<size_t>(rx) * 3,
-                                static_cast<size_t>(rw) * 3);
+                for (uint32_t y = 0; y < dh2; ++y) {
+                    const uint32_t sy = ry + std::min<uint32_t>(rh - 1, (y * rh) / dh2);
+                    const uint8_t* srow = base + static_cast<size_t>(sy) * sstride
+                                        + static_cast<size_t>(rx) * 3;
+                    uint8_t* drow = dst + static_cast<size_t>(y) * dw2 * 3;
+                    for (uint32_t x = 0; x < dw2; ++x) {
+                        const uint32_t sx = std::min<uint32_t>(rw - 1, (x * rw) / dw2);
+                        std::memcpy(drow + static_cast<size_t>(x) * 3, srow + static_cast<size_t>(sx) * 3, 3);
+                    }
                 }
                 direct_src = dst;
             }
@@ -283,7 +292,7 @@ void InferenceWorker::loop() {
         const uint8_t* input_ptr = nullptr;
         size_t input_bytes = 0;
         if (use_direct) {
-            // CPU 直拷：直接喂（BGR888 与 RGA 输出同格式）
+            // CPU 直拷：直接喂（BGR888 与 RGA 输出同格式，尺寸=模型输入）
             input_ptr = direct_buf_.data();
             input_bytes = static_cast<size_t>(direct_w) * direct_h * 3;
         }
