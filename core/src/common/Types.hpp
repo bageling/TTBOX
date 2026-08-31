@@ -28,6 +28,7 @@ struct FrameInfo {
 
     // --- DMA-BUF 信息（阶段 A-2 采集模块填充；-1 表示无 fd）---
     int dma_fd = -1;            // 主 plane 的 DMA-BUF fd（future RgaProcessor 消费入口）
+    void* cpu_va = nullptr;     // 采集侧 mmap 虚拟地址（CPU 直拷用；nullptr=不可用）
     uint32_t buffer_index = 0;  // V4L2 mmap buffer index
     uint32_t num_planes = 1;    // plane 数量
 };

@@ -234,12 +234,28 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame, std::vector<uint8_t>*
         if (error) *error = "帧尺寸无效";
         return false;
     }
+    // CPU 直拷优先（YU ultra 同款）：mmap va 行抽取 ROI → JPEG，完全避开 RGA 撕裂/花屏。
+    if (frame.info.cpu_va != nullptr && applied_roi_w_ > 0 && applied_roi_h_ > 0) {
+        const uint8_t* base = static_cast<const uint8_t*>(frame.info.cpu_va);
+        const uint32_t sstride = frame.info.stride;
+        const size_t row_bytes = static_cast<size_t>(applied_roi_w_) * 3;
+        std::vector<uint8_t> roi;
+        roi.reserve(static_cast<size_t>(applied_roi_w_) * applied_roi_h_ * 3);
+        for (uint32_t y = 0; y < applied_roi_h_; ++y) {
+            const uint8_t* src = base + static_cast<size_t>(applied_roi_y_ + y) * sstride
+                               + static_cast<size_t>(applied_roi_x_) * 3;
+            roi.insert(roi.end(), src, src + row_bytes);
+        }
+        return bgr3_to_jpeg(roi.data(), applied_roi_w_, applied_roi_h_,
+                            row_bytes, params_.jpeg_quality, jpeg_out, error);
+    }
+
     if (!rga_) {
         if (error) *error = "预览 RGA 未初始化";
         return false;
     }
 
-    // RGA 硬件缩放：DMA-BUF fd → 预览尺寸 BGR888（常驻输出 buffer，无 CPU memcpy）
+    // RGA 回退：DMA-BUF fd → 预览尺寸 BGR888（常驻输出 buffer，无 CPU memcpy）
     RgaOutput rga_out;
     std::string rerr;
     if (!rga_->process(frame, &rga_out, &rerr)) {

@@ -231,26 +231,63 @@ void InferenceWorker::loop() {
         const double recv_ms = frame->info.timestamp_ms;
         const auto e2e_t0 = clock::now();
 
-        // ---- RGA：DMA-BUF fd → 模型输入尺寸（本 worker 独立实例）----
+        // ---- 预处理：CPU 直拷优先（YU ultra 同款，0.02ms 级），RGA 回退 ----
+        // cpu_direct：mmap 虚拟地址按行 memcpy ROI → 模型输入缓冲，避开 RGA 对齐/撕裂。
         RgaOutput rga_out;
-        std::string perr;
-        const auto t_rga0 = clock::now();
-        if (!rga_->process(*frame, &rga_out, &perr)) {
-            stats_.errors.fetch_add(1);
-            if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] RGA: %s\n", id_, perr.c_str());
-            continue;
+        const uint8_t* direct_src = nullptr;
+        const uint32_t direct_w = params_.out_w, direct_h = params_.out_h;
+        if (frame->info.cpu_va != nullptr && params_.runtime_config != nullptr) {
+            auto prof = params_.runtime_config->snapshot();
+            const uint32_t rw = prof ? prof->capture.width : 0;
+            const uint32_t rh = prof ? prof->capture.height : 0;
+            const uint32_t fw = frame->info.width, fh = frame->info.height;
+            if (rw > 0 && rh > 0 && rw <= fw && rh <= fh) {
+                const int32_t cx = static_cast<int32_t>(fw / 2) + (prof ? prof->capture.offset_x : 0);
+                const int32_t cy = static_cast<int32_t>(fh / 2) + (prof ? prof->capture.offset_y : 0);
+                const int32_t rx = std::max<int32_t>(0, std::min<int32_t>(cx - static_cast<int32_t>(rw / 2), static_cast<int32_t>(fw - rw)));
+                const int32_t ry = std::max<int32_t>(0, std::min<int32_t>(cy - static_cast<int32_t>(rh / 2), static_cast<int32_t>(fh - rh)));
+                const uint8_t* base = static_cast<const uint8_t*>(frame->info.cpu_va);
+                const uint32_t sstride = frame->info.stride;
+                const size_t need = static_cast<size_t>(rw) * rh * 3;
+                if (direct_buf_.size() < need) direct_buf_.resize(need);
+                uint8_t* dst = direct_buf_.data();
+                for (uint32_t y = 0; y < rh; ++y) {
+                    std::memcpy(dst + static_cast<size_t>(y) * rw * 3,
+                                base + static_cast<size_t>(ry + y) * sstride + static_cast<size_t>(rx) * 3,
+                                static_cast<size_t>(rw) * 3);
+                }
+                direct_src = dst;
+            }
         }
-        stats_.rga.add(
-            std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - t_rga0).count());
-        stats_.rga_ok.fetch_add(1);
+        const bool use_direct = (direct_src != nullptr);
+        if (!use_direct) {
+            std::string perr;
+            const auto t_rga0 = clock::now();
+            if (!rga_->process(*frame, &rga_out, &perr)) {
+                stats_.errors.fetch_add(1);
+                if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] RGA: %s\n", id_, perr.c_str());
+                continue;
+            }
+            stats_.rga.add(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - t_rga0).count());
+            stats_.rga_ok.fetch_add(1);
+        } else {
+            stats_.direct_ok.fetch_add(1);
+        }
 
         // ---- 输入类型分流（以模型实际输入类型为准，不猜）----
         //   INT8/UINT8（黄瓦 320x320）：RGA 输出 uint8 直喂，零转换
         //   FLOAT16（yolo261n 640x640）：uint8 -> FP16 查表转换
         const uint8_t* input_ptr = nullptr;
         size_t input_bytes = 0;
+        if (use_direct) {
+            // CPU 直拷：直接喂（BGR888 与 RGA 输出同格式）
+            input_ptr = direct_buf_.data();
+            input_bytes = static_cast<size_t>(direct_w) * direct_h * 3;
+        }
         const int itype = engine_->info().input_type;
-        if (itype == 2 || itype == 3) {  // RKNN_TENSOR_INT8 / UINT8
+        if (use_direct) {
+            // 已在上方赋值（CPU 直拷路径）
+        } else if (itype == 2 || itype == 3) {  // RKNN_TENSOR_INT8 / UINT8
             input_ptr = static_cast<const uint8_t*>(rga_out.vir_addr);
             input_bytes = static_cast<size_t>(rga_out.width) * rga_out.height * 3;
         } else {

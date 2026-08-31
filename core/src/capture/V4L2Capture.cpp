@@ -492,6 +492,8 @@ void V4L2Capture::capture_loop() {
         frame->info.num_planes = format_.num_planes;
         frame->info.dma_fd = impl_->buffers[index].planes.empty() ? -1
                                : impl_->buffers[index].planes[0].dma_fd.fd();
+        frame->info.cpu_va = impl_->buffers[index].planes.empty() ? nullptr
+                               : impl_->buffers[index].planes[0].addr;
         if (!format_.sizeimage.empty()) {
             frame->size = format_.sizeimage[0];
         }

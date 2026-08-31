@@ -46,6 +46,7 @@ struct DecodeStageStats {
 struct WorkerStats {
     std::atomic<uint64_t> processed{0};  // 成功完成解码的帧数
     std::atomic<uint64_t> rga_ok{0};
+    std::atomic<uint64_t> direct_ok{0};  // CPU 直拷帧数（YU cpu_direct 路径）
     std::atomic<uint64_t> inference_ok{0};
     std::atomic<uint64_t> decode_ok{0};
     std::atomic<uint64_t> published{0};
@@ -106,6 +107,7 @@ private:
     std::unique_ptr<RKNNEngine> engine_;
     std::unique_ptr<Decoder> decoder_;       // 本 worker 独立解码器（A-7 Decoder 抽象；委托 DecodeNMS）
     std::vector<uint16_t> fp16_buf_;
+    std::vector<uint8_t> direct_buf_;   // CPU 直拷输入缓冲（ROI 行拷贝，对齐 YU cpu_direct）
     uint16_t u8_to_half_lut_[256];
     std::vector<std::vector<uint8_t>> raw_outputs_;  // 原生输出 buffer（want_float=0）
     std::vector<void*> raw_buf_ptrs_;
