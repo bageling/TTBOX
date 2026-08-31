@@ -68,10 +68,10 @@
         <button class="module-tab" type="button" data-page-target="hardware-page">
           <span>06</span>{{ module_labels[5] }}
         </button>
-        <button class="module-tab" type="button" data-page-target="hailo-page">
+        <button style="display:none" class="module-tab" type="button" data-page-target="hailo-page">
           <span>07</span>{{ module_labels[6] }}
         </button>
-        <button class="module-tab" type="button" data-page-target="kmbox-page">
+        <button style="display:none" class="module-tab" type="button" data-page-target="kmbox-page">
           <span>08</span>{{ module_labels[7] }}
         </button>
         <button class="module-tab" type="button" data-page-target="wifi-page">
@@ -81,7 +81,7 @@
           <span>10</span>{{ module_labels[9] }}
         </button>
         {% if ui_brand == "yu" %}
-        <button class="module-tab" type="button" data-page-target="theme-store-page">
+        <button style="display:none" class="module-tab" type="button" data-page-target="theme-store-page">
           <span>11</span>{{ module_labels[10] }}
         </button>
         {% endif %}
@@ -90,7 +90,7 @@
         </button>
       </nav>
     </aside>
-    <div class="workspace">
+    <div hidden class="workspace">
       <main class="page-stack">
         <section id="home-page" class="page-card is-active" data-page>
           <section id="homeActivationPanel" class="home-activation-panel" aria-label="设备激活">
@@ -1001,7 +1001,7 @@
           </div>
         </section>
 
-        <section id="hailo-page" class="page-card" data-page>
+        <section id="hailo-page" class="page-card" data-page hidden>
           <div class="page-head mobile-action-head">
             <div>
               <p>Hailo-8加速</p>
@@ -1063,7 +1063,7 @@
           </div>
         </section>
 
-        <section id="kmbox-page" class="page-card" data-page>
+        <section id="kmbox-page" class="page-card" data-page hidden>
           <div class="page-head mobile-action-head">
             <div>
               <p>外接键鼠盒子</p>
@@ -1269,7 +1269,7 @@
         </section>
 
         {% if ui_brand == "yu" %}
-        <section id="theme-store-page" class="page-card" data-page>
+        <section id="theme-store-page" class="page-card" data-page hidden>
           <div class="page-head mobile-action-head">
             <div>
               <p>视觉主题</p>
