@@ -71,7 +71,6 @@ bool CoreRuntime::start(std::string* error) {
         std::string perr;
         preview_ = std::make_unique<PreviewModule>();
         PreviewModule::Params pp = preview_params_;
-        pp.runtime_config = runtime_config_;  // 预览跟随截取区域（capture ROI）
         // 预览帧率热配置：runtime_profile.preview.fps > 0 时覆盖 config 默认值
         // （yu latency.preview_interval_ms 经网关/bridge 翻译为 preview.fps）
         if (runtime_config_) {

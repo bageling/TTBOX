@@ -161,28 +161,6 @@ void PreviewModule::loop() {
             continue;
         }
 
-        // 截取区域跟随（capture ROI）：预览显示 AI 看到的画面而非全屏。
-        // ROI 变化（含热更新 offset/size）时重新 set_roi；无 ROI 时保持全画面。
-        if (params_.runtime_config != nullptr) {
-            if (auto prof = params_.runtime_config->snapshot()) {
-                const uint32_t rw = prof->capture.width, rh = prof->capture.height;
-                const uint32_t fw = frame->info.width, fh = frame->info.height;
-                if (rw > 0 && rh > 0 && fw > 0 && fh > 0 && rw <= fw && rh <= fh) {
-                    const int32_t cx = static_cast<int32_t>(fw / 2) + prof->capture.offset_x;
-                    const int32_t cy = static_cast<int32_t>(fh / 2) + prof->capture.offset_y;
-                    const int32_t rx = std::max<int32_t>(0, std::min<int32_t>(
-                        cx - static_cast<int32_t>(rw / 2), static_cast<int32_t>(fw - rw)));
-                    const int32_t ry = std::max<int32_t>(0, std::min<int32_t>(
-                        cy - static_cast<int32_t>(rh / 2), static_cast<int32_t>(fh - rh)));
-                    if (rx != applied_roi_x_ || ry != applied_roi_y_ ||
-                        rw != applied_roi_w_ || rh != applied_roi_h_) {
-                        rga_->set_roi(static_cast<uint32_t>(rx), static_cast<uint32_t>(ry), rw, rh);
-                        applied_roi_x_ = rx; applied_roi_y_ = ry;
-                        applied_roi_w_ = rw; applied_roi_h_ = rh;
-                    }
-                }
-            }
-        }
 
         // 编码前一帧是否超时？若上次编码还占着（单线程不会有），此处无竞态。
         const auto te0 = clock::now();
