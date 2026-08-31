@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "capture/V4L2Capture.hpp"
+#include "model/RuntimeProfile.hpp"
 #include "rga/RgaProcessor.hpp"
 
 namespace ttbox::core {
@@ -33,6 +34,7 @@ public:
         uint32_t out_height = 360;   // 预览输出高
         int fps = 60;                // 预览帧率（1~60；RGA 1~3ms + JPEG ~10ms ≈ 12.7ms < 16.6ms 预算）
         int jpeg_quality = 70;       // JPEG 质量
+        RuntimeConfig* runtime_config = nullptr;  // 截取区域（capture ROI）热更新源：预览跟随 AI 视野
     };
 
     PreviewModule() = default;
@@ -71,6 +73,7 @@ private:
 
     // RGA 硬件缩放（替代 CPU 双线性：消除 Preview 对 AI 的 CPU 抢占）
     std::unique_ptr<RgaProcessor> rga_;
+    uint32_t applied_roi_x_ = 0, applied_roi_y_ = 0, applied_roi_w_ = 0, applied_roi_h_ = 0;  // 已应用 ROI（变化才 set_roi）
 
     // 最新 JPEG 缓存（单缓冲，覆盖语义）
     mutable std::mutex jpeg_mutex_;

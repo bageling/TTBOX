@@ -244,7 +244,8 @@ bool RgaProcessor::process(const FrameBuffer& input, RgaOutput* output,
 
     uint32_t crop_us = 0, resize_us = 0;
     const bool roi_enabled = (params_.roi_w > 0 && params_.roi_h > 0);
-    if (params_.center_crop) {
+    // ROI 显式启用时强制走 crop+resize（如预览跟随截取区域；center_crop=false 全画面拉伸仅对无 ROI 场景生效）
+    if (params_.center_crop || roi_enabled) {
         // ---- 2. crop：ROI（A-8）或 center crop（原语义）→ resize ----
         // 目标裁剪区域（在输入全帧坐标系）
         uint32_t cw = 0, ch = 0;
