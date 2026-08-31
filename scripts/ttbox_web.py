@@ -645,13 +645,20 @@ app = Flask(
     __name__,
     template_folder=str(TEMPLATE_DIR),
     static_folder=str(STATIC_DIR),
-    static_url_path='/static',
+
 )
 
 
 # ====================================================================
 # 页面路由
 # ====================================================================
+@app.after_request
+def add_no_cache_headers(response):
+    if request.path.startswith('/api/'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+    return response
+
 @app.get('/')
 def index():
     return render_template('index.html',
