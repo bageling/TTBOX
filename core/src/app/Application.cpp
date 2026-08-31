@@ -242,6 +242,17 @@ int Application::initialize(int argc, char** argv) {
     TTBOX_LOG_INFO("=== " + std::string(kAppName) + " v" +
                    std::string(kVersion) + " 启动 ===");
 
+    // ---- 风扇满转（YU fan_control min_pwm=100 同款）：防热节流拖慢 NPU ----
+    {
+        std::ofstream pwm("/sys/class/hwmon/hwmon8/pwm1");
+        if (pwm) {
+            pwm << 255;
+            TTBOX_LOG_INFO("风扇已设满转（防热节流）");
+        } else {
+            TTBOX_LOG_WARN("风扇控制不可用（hwmon8/pwm1）");
+        }
+    }
+
     // ---- CPU 频率锁定（YU 行为：启动时锁最高，防降频抖动）----
     // 默认 100% = scaling_min_freq 锁到 max_freq（governor=performance 下等效满频运行）。
     // 失败仅告警（权限/内核差异），不阻塞启动。
