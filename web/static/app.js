@@ -314,6 +314,7 @@ const DISPLAY_DYNAMIC_MODE_H_BLANK = 48 + 32 + 80;
 const DISPLAY_DYNAMIC_MODE_V_BLANK = 3 + 5 + 77;
 const DISCLAIMER_STORAGE_KEY = "aiassistance_disclaimer_ack_v1";
 const THEME_STORAGE_KEY = "aiassistance_theme";
+const UI_BRAND_TTBOX = "ttbox";
 const UI_BRAND_YU = "yu";
 const UI_BRAND_XH = "xh";
 const UI_BRAND_XCSH = "xcsh";
@@ -507,6 +508,18 @@ function brandFromPayload(payload) {
 
 function brandConfig(brand) {
   const uiBrand = normalizeUiBrand(brand);
+  if (uiBrand === UI_BRAND_TTBOX) {
+    return {
+      uiBrand: UI_BRAND_TTBOX,
+      title: "TTBOX 控制台",
+      eyebrow: "TTBOX SYSTEM",
+      mark: "TT",
+      allowThemeSwitch: true,
+      defaultLocalName: "ttbox",
+      defaultHotspotSsid: "TTBOX",
+      fallbackResetText: "重置默认 Wi-Fi",
+    };
+  }
   if (uiBrand === UI_BRAND_XCSH) {
     return {
       uiBrand: UI_BRAND_XCSH,
@@ -589,6 +602,7 @@ function applyBrand(payload) {
   const config = brandConfig(brandFromPayload(payload));
   state.uiBrand = config.uiBrand;
   document.documentElement.dataset.uiBrand = config.uiBrand;
+  document.body.classList.toggle("ui-brand-ttbox", config.uiBrand === UI_BRAND_TTBOX);
   document.body.classList.toggle("ui-brand-yu", config.uiBrand === UI_BRAND_YU);
   document.body.classList.toggle("ui-brand-xh", config.uiBrand === UI_BRAND_XH);
   document.body.classList.toggle("ui-brand-xcsh", config.uiBrand === UI_BRAND_XCSH);
