@@ -71,12 +71,21 @@ bool CoreRuntime::start(std::string* error) {
         std::string perr;
         preview_ = std::make_unique<PreviewModule>();
         PreviewModule::Params pp = preview_params_;
+        pp.runtime_config = runtime_config_;  // 预览跟随截取区域（capture ROI，YU 同款语义）
         // 预览帧率热配置：runtime_profile.preview.fps > 0 时覆盖 config 默认值
         // （yu latency.preview_interval_ms 经网关/bridge 翻译为 preview.fps）
+        // 输出尺寸对齐 YU：有 ROI 时 1:1 输出 ROI 尺寸（不拉伸），无 ROI 保持 config 默认
         if (runtime_config_) {
             if (auto snap = runtime_config_->snapshot()) {
                 if (snap->preview.fps > 0 && snap->preview.fps <= 60) {
                     pp.fps = static_cast<int>(snap->preview.fps);
+                }
+                const auto& cap = snap->capture;
+                const auto& fmt = capture_->format();
+                if (cap.width > 0 && cap.height > 0 &&
+                    cap.width <= fmt.width && cap.height <= fmt.height) {
+                    pp.out_width = cap.width;
+                    pp.out_height = cap.height;
                 }
             }
         }
