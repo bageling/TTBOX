@@ -1,4 +1,20 @@
 // ModelAdapter.cpp — 模型统一适配器实现
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：ModelAdapter.cpp
+ *
+ * 作用：
+ *   AI 模型适配器，负责读取模型元数据并适配不同格式的模型。
+ *
+ * 小白理解：
+ *   不同的 AI 模型有不同的输入输出格式。
+ *   这个模块负责适配各种模型，让 TTBOX 不挑食。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "model/ModelAdapter.hpp"
 
 #include <cmath>

@@ -6,6 +6,26 @@
 //   1) 速度 Kalman 的输入是 (error_diff + last_u)，而非仅 error_diff；
 //   2) smooth 非 0 时才启用 soft-limit；smooth=0 时 Kp/Ki/Kd 直通；
 //   3) K_i 的 soft outputScale 固定为 bandwidth-1000。
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：Pid1Controller.hpp
+ *
+ * 作用：
+ *   PID 控制器的实现。
+ *   计算鼠标移动量，使鼠标准星平滑地跟踪目标。
+ *
+ * 小白理解：
+ *   PID 控制器的目标是让鼠标准星和目标的偏差缩小到 0。
+ *   它用三个参数来控制：
+ *   - P（比例）：偏差越大，移动越快
+ *   - I（积分）：长期偏差，慢慢纠正
+ *   - D（微分）：防止超调，刹车作用
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #pragma once
 #include <algorithm>
 #include <cmath>

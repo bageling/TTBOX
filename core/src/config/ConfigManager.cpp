@@ -1,4 +1,20 @@
 // ConfigManager.cpp — 配置读取实现
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：ConfigManager.cpp
+ *
+ * 作用：
+ *   读取和管理 JSON 格式的配置文件。
+ *
+ * 小白理解：
+ *   TTBOX 的所有参数都存在 JSON 文件里。
+ *   这个模块负责读这些文件，并把参数分发给各个模块。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "config/ConfigManager.hpp"
 
 #include <sstream>

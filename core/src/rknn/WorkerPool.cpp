@@ -1,4 +1,24 @@
 // WorkerPool.cpp — 多 Worker 并发推理实现
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：WorkerPool.cpp
+ *
+ * 作用：
+ *   管理多个 AI 推理线程的线程池。
+ *   负责把采集到的帧分配给不同的 NPU 核心并行推理。
+ *
+ * 小白理解：
+ *   TTBOX 有 3 个 NPU 核心，可以同时推理多帧画面。
+ *   WorkerPool 就是管理这 3 个工人的监工：
+ *   - 每帧画面来了，分配给一个工人处理
+ *   - 工人处理完，把结果交上来
+ *   - 3 个工人轮流干，流水线不停
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "rknn/WorkerPool.hpp"
 
 #if defined(_WIN32)
@@ -12,7 +32,6 @@ namespace ttbox::core {
 #include <thread>
 
 #include "common/Logger.hpp"
-#include "common/CpuAffinity.hpp"
 
 namespace ttbox::core {
 
@@ -153,16 +172,6 @@ bool InferenceWorker::start(const Params& params, std::string* error) {
 
     running_.store(true);
     thread_ = std::thread(&InferenceWorker::loop, this);
-    // 推理线程绑定大核（CPU4~7）：RGA 缩放 + NMS 后处理都是 CPU 密集，
-    // 与采集线程同域，避免小核调度抖动；NPU 三核并行由 core_mask 1/2/4 保证。
-    {
-        std::string aerr;
-        if (!CpuAffinity::set_thread_affinity(CpuAffinity::kBigCoreMask, &aerr)) {
-            TTBOX_LOG_WARN("worker[" + std::to_string(id_) + "] 绑定大核失败: " + aerr);
-        } else {
-            TTBOX_LOG_INFO("worker[" + std::to_string(id_) + "] 已绑定大核 (cpu4-7)");
-        }
-    }
     return true;
 }
 
@@ -207,12 +216,12 @@ void InferenceWorker::loop() {
     while (running_.load()) {
         auto frame = params_.latest->get();
         if (!frame) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
         }
         const uint32_t seq = frame->info.sequence;
         if (seq == last_seq_) {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;  // 本 worker 已处理过该帧
         }
         // 认领规则：seq % N == id（帧只被一个 worker 处理，无重复）
@@ -230,93 +239,27 @@ void InferenceWorker::loop() {
         // ---- E2E 起点：帧采集时刻（v4l2 单调时钟，与 steady_clock 同基准）----
         const double recv_ms = frame->info.timestamp_ms;
         const auto e2e_t0 = clock::now();
-        // 排队等待（YU buffer_age 同口径）：帧时间戳 → worker 认领
-        const double claim_ms_q = std::chrono::duration<double, std::milli>(e2e_t0.time_since_epoch()).count();
-        stats_.queue_wait.add(static_cast<uint64_t>(std::max(0.0, (claim_ms_q - recv_ms) * 1000.0)));
 
-        // ---- 预处理：CPU 直拷优先（YU ultra 同款，0.02ms 级），RGA 回退 ----
-        // cpu_direct：mmap 虚拟地址按行 memcpy ROI → 模型输入缓冲，避开 RGA 对齐/撕裂。
+        // ---- RGA：DMA-BUF fd → 模型输入尺寸（本 worker 独立实例）----
         RgaOutput rga_out;
-        const uint8_t* direct_src = nullptr;
-        const uint32_t direct_w = params_.out_w, direct_h = params_.out_h;
-        if (frame->info.cpu_va != nullptr && params_.runtime_config != nullptr) {
-            auto prof = params_.runtime_config->snapshot();
-            const uint32_t rw = prof ? prof->capture.width : 0;
-            const uint32_t rh = prof ? prof->capture.height : 0;
-            const uint32_t fw = frame->info.width, fh = frame->info.height;
-            if (rw > 0 && rh > 0 && rw <= fw && rh <= fh) {
-                const int32_t cx = static_cast<int32_t>(fw / 2) + (prof ? prof->capture.offset_x : 0);
-                const int32_t cy = static_cast<int32_t>(fh / 2) + (prof ? prof->capture.offset_y : 0);
-                const int32_t rx = std::max<int32_t>(0, std::min<int32_t>(cx - static_cast<int32_t>(rw / 2), static_cast<int32_t>(fw - rw)));
-                const int32_t ry = std::max<int32_t>(0, std::min<int32_t>(cy - static_cast<int32_t>(rh / 2), static_cast<int32_t>(fh - rh)));
-                // 最近邻采样：ROI（rw×rh）→ 模型输入（direct_w×direct_h）
-                // 用户 crop 尺寸≠模型输入时也必须正确缩放（否则输入错乱→永远检不出目标）。
-                const uint8_t* base = static_cast<const uint8_t*>(frame->info.cpu_va);
-                const uint32_t sstride = frame->info.stride;
-                const uint32_t dw2 = direct_w > 0 ? direct_w : rw;
-                const uint32_t dh2 = direct_h > 0 ? direct_h : rh;
-                const size_t need = static_cast<size_t>(dw2) * dh2 * 3;
-                if (direct_buf_.size() < need) direct_buf_.resize(need);
-                uint8_t* dst = direct_buf_.data();
-                if (rw == dw2 && rh == dh2) {
-                    // 快速路径：ROI 尺寸 == 模型输入，整行 memcpy（无缩放）
-                    const size_t row_bytes = static_cast<size_t>(rw) * 3;
-                    for (uint32_t y = 0; y < dh2; ++y) {
-                        std::memcpy(dst + static_cast<size_t>(y) * row_bytes,
-                                    base + static_cast<size_t>(ry + y) * sstride + static_cast<size_t>(rx) * 3,
-                                    row_bytes);
-                    }
-                } else {
-                    // 慢路径：最近邻采样（X 偏移预计算，避免每像素除法）
-                    if (xmap_.size() < dw2 || xmap_rw_ != rw) {
-                        xmap_.resize(dw2);
-                        for (uint32_t x = 0; x < dw2; ++x) {
-                            xmap_[x] = std::min<uint32_t>(rw - 1, (x * rw) / dw2) * 3;
-                        }
-                        xmap_rw_ = rw;
-                    }
-                    for (uint32_t y = 0; y < dh2; ++y) {
-                        const uint32_t sy = ry + std::min<uint32_t>(rh - 1, (y * rh) / dh2);
-                        const uint8_t* srow = base + static_cast<size_t>(sy) * sstride
-                                            + static_cast<size_t>(rx) * 3;
-                        uint8_t* drow = dst + static_cast<size_t>(y) * dw2 * 3;
-                        for (uint32_t x = 0; x < dw2; ++x) {
-                            std::memcpy(drow + static_cast<size_t>(x) * 3, srow + xmap_[x], 3);
-                        }
-                    }
-                }
-                direct_src = dst;
-            }
+        std::string perr;
+        const auto t_rga0 = clock::now();
+        if (!rga_->process(*frame, &rga_out, &perr)) {
+            stats_.errors.fetch_add(1);
+            if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] RGA: %s\n", id_, perr.c_str());
+            continue;
         }
-        const bool use_direct = (direct_src != nullptr);
-        if (!use_direct) {
-            std::string perr;
-            const auto t_rga0 = clock::now();
-            if (!rga_->process(*frame, &rga_out, &perr)) {
-                stats_.errors.fetch_add(1);
-                if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] RGA: %s\n", id_, perr.c_str());
-                continue;
-            }
-            stats_.rga.add(std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - t_rga0).count());
-            stats_.rga_ok.fetch_add(1);
-        } else {
-            stats_.direct_ok.fetch_add(1);
-        }
+        stats_.rga.add(
+            std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - t_rga0).count());
+        stats_.rga_ok.fetch_add(1);
 
         // ---- 输入类型分流（以模型实际输入类型为准，不猜）----
         //   INT8/UINT8（黄瓦 320x320）：RGA 输出 uint8 直喂，零转换
         //   FLOAT16（yolo261n 640x640）：uint8 -> FP16 查表转换
         const uint8_t* input_ptr = nullptr;
         size_t input_bytes = 0;
-        if (use_direct) {
-            // CPU 直拷：直接喂（BGR888 与 RGA 输出同格式，尺寸=模型输入）
-            input_ptr = direct_buf_.data();
-            input_bytes = static_cast<size_t>(direct_w) * direct_h * 3;
-        }
         const int itype = engine_->info().input_type;
-        if (use_direct) {
-            // 已在上方赋值（CPU 直拷路径）
-        } else if (itype == 2 || itype == 3) {  // RKNN_TENSOR_INT8 / UINT8
+        if (itype == 2 || itype == 3) {  // RKNN_TENSOR_INT8 / UINT8
             input_ptr = static_cast<const uint8_t*>(rga_out.vir_addr);
             input_bytes = static_cast<size_t>(rga_out.width) * rga_out.height * 3;
         } else {
@@ -338,10 +281,6 @@ void InferenceWorker::loop() {
             input_ptr = reinterpret_cast<const uint8_t*>(fp16_buf_.data());
             input_bytes = engine_->info().input_size;
         }
-
-        // 预处理完成：立即释放采集帧引用（buffer 提前归还驱动，排队占用降到 1）
-        // recv_ms 已在预处理前拷贝，e2e 统计不受影响
-        frame.reset();
 
         // ---- RKNN 推理（本 worker 独立 context）+ 原生输出 + Decode/NMS ----
         std::string ierr;

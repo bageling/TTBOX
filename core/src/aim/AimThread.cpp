@@ -1,4 +1,23 @@
 // AimThread.cpp — 独立瞄准线程最小可验证实现。
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：AimThread.cpp
+ *
+ * 作用：
+ *   目标控制核心线程，负责跟踪目标并计算鼠标移动量。
+ *
+ * 小白理解：
+ *   选好目标后，AimThread 负责：
+ *   1. 跟踪目标的移动（目标会跑，你得跟上）
+ *   2. 预测目标的下一个位置（提前量）
+ *   3. 计算鼠标移动量（PID 控制算法）
+ *   4. 把移动指令发给鼠标输出模块
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "aim/AimThread.hpp"
 #include <chrono>
 #include <utility>
@@ -33,10 +52,7 @@ void AimThread::loop() {
             // 新控制链：目标选择 → 误差 → 纯 PID/P 控制 → OutputAction。
             TargetSelectorConfig scfg;
             scfg.roi_w = task.frame_width; scfg.roi_h = task.frame_height;
-            // 用户置信度阈值（RuntimeProfile.mouse.confidence）：0 = 用模型默认（选 0.25 底线）。
-            // 修复点：此前写死 0.0f 导致 Web 置信度阈值参数无效（中看不中用）。
-            float out_sensitivity = 1.0f, out_scale = 1.0f;
-            float out_deadzone = 1.0f;
+            scfg.confidence = 0.0f;
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
             if (runtime_config_) {
@@ -44,17 +60,11 @@ void AimThread::loop() {
                 if (profile) {
                     scfg.fov_range = profile->fov.enabled ? profile->fov.radius * 2.0f : 1.0f;
                     scfg.lost_grace_ms = profile->mouse.lost_grace_ms;
-                    scfg.confidence = profile->mouse.confidence > 0.0f
-                                          ? profile->mouse.confidence : 0.25f;
                     scfg.aim_ratio_x = profile->mouse.aim_point.offset_x;
                     scfg.aim_ratio_y = profile->mouse.aim_point.offset_y;
                     kp_x = profile->mouse.kp_x; kp_y = profile->mouse.kp_y;
                     kd_x = profile->mouse.kd_x; kd_y = profile->mouse.kd_y;
                     aim_point = profile->mouse.aim_point;
-                    // 输出链参数（YU 对齐）：sens 全局缩放 × output_scale × output_deadzone
-                    out_sensitivity = profile->mouse.sensitivity;
-                    out_scale = profile->mouse.output_scale;
-                    out_deadzone = profile->mouse.output_deadzone;
                     pid_x_.configure(kp_x, kd_x, profile->mouse.predict_x,
                                      profile->mouse.rate_x, profile->mouse.smooth_x);
                     pid_y_.configure(kp_y, kd_y, profile->mouse.predict_y,
@@ -138,16 +148,8 @@ void AimThread::loop() {
                 // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
                 const float aibox_x = static_cast<float>(pid_x_.update(control_x));
                 const float aibox_y = static_cast<float>(pid_y_.update(control_y));
-                // 输出链（YU 对齐）：P_PID 输出 × sens（全局灵敏度） × output_scale。
-                // rate_x/y 已在 Pid1 内部作为 kp_gain_rate 消费，此处不再重复。
-                const float out_gain = out_sensitivity * out_scale;
-                float scaled_x = aibox_x * out_gain;
-                float scaled_y = aibox_y * out_gain;
-                // output_deadzone（YU 自适应死区基准）：低于死区的输出归零（防微抖）。
-                if (std::abs(scaled_x) < out_deadzone) scaled_x = 0.0f;
-                if (std::abs(scaled_y) < out_deadzone) scaled_y = 0.0f;
                 // 保留小数余量，避免小幅连续误差被整数 HID count 截断。
-                remainder_x_ += scaled_x; remainder_y_ += scaled_y;
+                remainder_x_ += aibox_x; remainder_y_ += aibox_y;
                 // int16 截断保护：单帧输出 clamp 到 HID count 范围（-32768..32767），
                 // 防异常大值 static_cast 产生实现定义行为（乱飞）。
                 constexpr float kHidMax = 32767.0f;
@@ -175,11 +177,6 @@ void AimThread::loop() {
             status_.has_task = true;
             status_.has_target = selected.valid;
             if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
-            uint32_t active_tracks = 0;
-            for (const auto& te : selector_.tracks()) {
-                if (te.active) ++active_tracks;
-            }
-            status_.tracks = active_tracks;
             status_.predicted_x = selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f;
             status_.predicted_y = selected.valid ? (selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f) : 0.0f;
             status_.error_x = ex;

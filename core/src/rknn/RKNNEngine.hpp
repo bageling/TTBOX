@@ -9,6 +9,21 @@
 //
 // 接口边界（后续 A-5 Worker / A-6 Decode 依赖）：
 //   RKNNEngine::infer(input_buf) -> 输出张量（float32，want_float=1）
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：RKNNEngine.hpp
+ *
+ * 作用：
+ *   NPU 推理引擎的定义。
+ *
+ * 小白理解：
+ *   这是 RKNNEngine.cpp 的头文件，定义了 NPU 推理的接口。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #pragma once
 
 #include <cstdint>

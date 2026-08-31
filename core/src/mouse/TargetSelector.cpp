@@ -1,4 +1,23 @@
 // TargetSelector.cpp — A10 目标选择器实现（多目标追踪 + 分层选择）
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：TargetSelector.cpp
+ *
+ * 作用：
+ *   从多个检测结果中选择一个最佳目标进行瞄准。
+ *
+ * 小白理解：
+ *   AI 可能检测出 5 个目标，但一次只能瞄准一个。
+ *   TargetSelector 根据规则选一个：
+ *   - 离瞄准点最近的目标
+ *   - 连续出现多帧的目标（更稳定）
+ *   - 跟踪已有目标（不会突然跳走）
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "mouse/TargetSelector.hpp"
 
 #include <algorithm>

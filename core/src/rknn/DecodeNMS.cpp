@@ -4,6 +4,24 @@
 //   - 单输出 (1,C,M)：前 4 通道为 xywh 绝对坐标（模型输入空间），其余为类别分数
 //   - C-4==81 时带 objectness：score = objectness * max(class_probs)
 //   - conf 过滤 → classwise NMS（iou_thres）→ 坐标缩放回原图
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：DecodeNMS.cpp
+ *
+ * 作用：
+ *   把 AI 模型的原始输出解析成目标框（DetectionBox）。
+ *   包括 DFL 解码、NMS 去重、几何过滤。
+ *
+ * 小白理解：
+ *   AI 模型输出的不是"这里有个敌人"，而是一堆数字。
+ *   这个文件负责把这堆数字翻译成：目标框位置、置信度、类别。
+ *   NMS 负责去掉重复检测，几何过滤去掉不合理的目标。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "rknn/DecodeNMS.hpp"
 
 #include <algorithm>

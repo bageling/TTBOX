@@ -1,4 +1,21 @@
 // HidForwarder.cpp — A9 HID 透传转发器实现
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：HidForwarder.cpp
+ *
+ * 作用：
+ *   HID 报告转发器，将 AI 生成的鼠标指令转发到 USB 设备。
+ *   使用无锁队列（SPSC Queue）实现高性能转发。
+ *
+ * 小白理解：
+ *   这是从 AI 到 USB 鼠标的最后一公里。
+ *   它用一个高效的队列把鼠标指令排队，然后一个一个地发出去。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "hid/HidForwarder.hpp"
 
 #if defined(_WIN32)

@@ -6,6 +6,21 @@
 //   - 请求：{"id":<可选>,"type":"PING|GET_STATUS|GET_CONFIG|SET_CONFIG|RUNTIME_CONTROL","params":<可选>}
 //   - 响应：{"id":...,"type":...,"status":<错误码>,"data":{...},"error":<可选>}
 //   - 错误码：0 OK / 1 BAD_REQUEST / 2 NOT_FOUND / 3 INTERNAL / 4 UNSUPPORTED
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：IpcServer.hpp
+ *
+ * 作用：
+ *   IPC 通信服务器的定义。
+ *
+ * 小白理解：
+ *   Web 后端和 C++ 核心之间的电话线定义。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #pragma once
 
 #include <atomic>
@@ -57,7 +72,7 @@ public:
     void set_config_provider(ConfigProvider p) { config_provider_ = std::move(p); }
 
     // Phase2：预览快照回调（返回 JPEG 字节；无帧返回 false）
-    using PreviewProvider = std::function<bool(std::vector<uint8_t>*, uint64_t*)>;  // 出参2: 帧序号（seq，供 web 去重）
+    using PreviewProvider = std::function<bool(std::vector<uint8_t>*)>;
     void set_preview_provider(PreviewProvider p) { preview_provider_ = std::move(p); }
 
     // 配置写入回调（SET_CONFIG）：由 Application 注入。

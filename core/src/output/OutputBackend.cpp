@@ -1,4 +1,21 @@
 // OutputBackend.cpp — 设备选择器 + IHidOutput 兼容层
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：OutputBackend.cpp
+ *
+ * 作用：
+ *   将瞄准指令转换成真实的鼠标/外设输出。
+ *
+ * 小白理解：
+ *   AimThread 算出了"应该往右移动 10 个像素"，
+ *   OutputBackend 负责把这个指令发给 HID 设备，
+ *   HID 设备再通过 USB 线告诉电脑："鼠标向右动 10 个像素"。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "output/OutputBackend.hpp"
 
 #include <utility>

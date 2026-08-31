@@ -1,4 +1,22 @@
 // HidRuntime.cpp — HID Runtime 实现
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：HidRuntime.cpp
+ *
+ * 作用：
+ *   HID（人机交互设备）运行时管理。
+ *   负责加载和卸载 HID 设备包，管理 HID 输出。
+ *
+ * 小白理解：
+ *   HID 就是 USB 鼠标、键盘这类设备的统称。
+ *   这个模块负责把 TTBOX 生成的鼠标指令包装成 USB 协议，
+ *   然后通过 USB 线发送给电脑，让电脑以为是真的鼠标在动。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "hid/HidRuntime.hpp"
 
 #if defined(_WIN32)

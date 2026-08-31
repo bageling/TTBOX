@@ -1,4 +1,21 @@
 // RuntimeProfile.cpp — RuntimeProfile JSON 序列化/校验
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：RuntimeProfile.cpp
+ *
+ * 作用：
+ *   运行时配置文件的定义和翻译。
+ *   定义所有可调参数，并在 YU 格式和 TTBOX 内部格式之间转换。
+ *
+ * 小白理解：
+ *   你在 Web 页面上看到的每个参数（置信度、截取尺寸、PID 参数等），
+ *   都在这里定义。它还负责把 YU 格式的参数翻译成 TTBOX 内部格式。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

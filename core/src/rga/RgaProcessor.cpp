@@ -1,4 +1,21 @@
 // RgaProcessor.cpp — RGA 硬件缩放实现（librga/im2d，RK3588）
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：RgaProcessor.cpp
+ *
+ * 作用：
+ *   使用 RGA 硬件进行图像缩放和裁剪。
+ *   将采集到的全屏画面缩放到 AI 模型需要的输入尺寸。
+ *
+ * 小白理解：
+ *   摄像头拍到 2560x1440 的大图，但 AI 模型只能吃 256x256 的小图。
+ *   RGA 硬件模块负责把大图裁剪+缩放到小图，而且不占用 CPU 时间。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "rga/RgaProcessor.hpp"
 
 #if defined(_WIN32)
@@ -244,8 +261,7 @@ bool RgaProcessor::process(const FrameBuffer& input, RgaOutput* output,
 
     uint32_t crop_us = 0, resize_us = 0;
     const bool roi_enabled = (params_.roi_w > 0 && params_.roi_h > 0);
-    // ROI 显式启用时强制走 crop+resize（如预览跟随截取区域；center_crop=false 全画面拉伸仅对无 ROI 场景生效）
-    if (params_.center_crop || roi_enabled) {
+    if (params_.center_crop) {
         // ---- 2. crop：ROI（A-8）或 center crop（原语义）→ resize ----
         // 目标裁剪区域（在输入全帧坐标系）
         uint32_t cw = 0, ch = 0;

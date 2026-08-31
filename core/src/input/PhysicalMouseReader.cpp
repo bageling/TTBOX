@@ -1,4 +1,21 @@
 // PhysicalMouseReader.cpp — Logitech/USB 鼠标真实事件读取。
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：PhysicalMouseReader.cpp
+ *
+ * 作用：
+ *   读取物理鼠标的输入事件。
+ *   用于混合模式：AI 和物理鼠标同时工作。
+ *
+ * 小白理解：
+ *   当用户握住物理鼠标时，这个模块读取鼠标的移动和按键，
+ *   和 AI 的瞄准指令合并后一起输出，实现人机协同。
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "input/PhysicalMouseReader.hpp"
 #if !defined(_WIN32)
 #include <fcntl.h>

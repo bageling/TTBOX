@@ -1,4 +1,23 @@
 // RKNNEngine.cpp — RKNN C API 推理实现（librknnrt）
+/*
+ * TTBOX 文件说明
+ *
+ * 文件：RKNNEngine.cpp
+ *
+ * 作用：
+ *   NPU（神经网络处理器）推理引擎。
+ *   负责把图片数据送入 NPU 执行 AI 计算，并取回结果。
+ *
+ * 小白理解：
+ *   NPU 是专门用来跑 AI 的芯片。这个模块负责：
+ *   1. 把图片数据送进 NPU
+ *   2. 让 NPU 执行 AI 模型计算
+ *   3. 把计算结果取出来供后续处理
+ *
+ * 注意：
+ *   本注释仅用于说明代码，不改变程序逻辑。
+ */
+
 #include "rknn/RKNNEngine.hpp"
 
 #if defined(_WIN32)
