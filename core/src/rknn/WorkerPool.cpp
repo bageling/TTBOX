@@ -258,14 +258,31 @@ void InferenceWorker::loop() {
                 const size_t need = static_cast<size_t>(dw2) * dh2 * 3;
                 if (direct_buf_.size() < need) direct_buf_.resize(need);
                 uint8_t* dst = direct_buf_.data();
-                for (uint32_t y = 0; y < dh2; ++y) {
-                    const uint32_t sy = ry + std::min<uint32_t>(rh - 1, (y * rh) / dh2);
-                    const uint8_t* srow = base + static_cast<size_t>(sy) * sstride
-                                        + static_cast<size_t>(rx) * 3;
-                    uint8_t* drow = dst + static_cast<size_t>(y) * dw2 * 3;
-                    for (uint32_t x = 0; x < dw2; ++x) {
-                        const uint32_t sx = std::min<uint32_t>(rw - 1, (x * rw) / dw2);
-                        std::memcpy(drow + static_cast<size_t>(x) * 3, srow + static_cast<size_t>(sx) * 3, 3);
+                if (rw == dw2 && rh == dh2) {
+                    // 快速路径：ROI 尺寸 == 模型输入，整行 memcpy（无缩放）
+                    const size_t row_bytes = static_cast<size_t>(rw) * 3;
+                    for (uint32_t y = 0; y < dh2; ++y) {
+                        std::memcpy(dst + static_cast<size_t>(y) * row_bytes,
+                                    base + static_cast<size_t>(ry + y) * sstride + static_cast<size_t>(rx) * 3,
+                                    row_bytes);
+                    }
+                } else {
+                    // 慢路径：最近邻采样（X 偏移预计算，避免每像素除法）
+                    if (xmap_.size() < dw2 || xmap_rw_ != rw) {
+                        xmap_.resize(dw2);
+                        for (uint32_t x = 0; x < dw2; ++x) {
+                            xmap_[x] = std::min<uint32_t>(rw - 1, (x * rw) / dw2) * 3;
+                        }
+                        xmap_rw_ = rw;
+                    }
+                    for (uint32_t y = 0; y < dh2; ++y) {
+                        const uint32_t sy = ry + std::min<uint32_t>(rh - 1, (y * rh) / dh2);
+                        const uint8_t* srow = base + static_cast<size_t>(sy) * sstride
+                                            + static_cast<size_t>(rx) * 3;
+                        uint8_t* drow = dst + static_cast<size_t>(y) * dw2 * 3;
+                        for (uint32_t x = 0; x < dw2; ++x) {
+                            std::memcpy(drow + static_cast<size_t>(x) * 3, srow + xmap_[x], 3);
+                        }
                     }
                 }
                 direct_src = dst;

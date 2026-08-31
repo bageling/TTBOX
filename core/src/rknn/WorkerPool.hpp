@@ -109,6 +109,8 @@ private:
     std::unique_ptr<Decoder> decoder_;       // 本 worker 独立解码器（A-7 Decoder 抽象；委托 DecodeNMS）
     std::vector<uint16_t> fp16_buf_;
     std::vector<uint8_t> direct_buf_;   // CPU 直拷输入缓冲（ROI 行拷贝，对齐 YU cpu_direct）
+    std::vector<uint32_t> xmap_;        // 采样 X 偏移表（ROI 尺寸变化时重算，避免每像素除法）
+    uint32_t xmap_rw_ = 0;
     uint16_t u8_to_half_lut_[256];
     std::vector<std::vector<uint8_t>> raw_outputs_;  // 原生输出 buffer（want_float=0）
     std::vector<void*> raw_buf_ptrs_;
