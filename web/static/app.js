@@ -490,7 +490,7 @@ function integrateXhFanSettings() {
 function normalizeUiBrand(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (normalized === UI_BRAND_TTBOX || normalized === UI_BRAND_XH || normalized === UI_BRAND_XCSH) return normalized;
-  return UI_BRAND_TTBOX;
+  return UI_BRAND_YU;
 }
 
 function brandFromPayload(payload) {
@@ -546,12 +546,12 @@ function brandConfig(brand) {
   }
   return {
     uiBrand: UI_BRAND_YU,
-    title: "YU 控制台",
-    eyebrow: "AIASSISTANCE",
-    mark: "AI",
+    title: "TTBOX 控制台",
+    eyebrow: "TTBOX SYSTEM",
+    mark: "TT",
     allowThemeSwitch: true,
-    defaultLocalName: "aiassistance",
-    defaultHotspotSsid: "YUAI",
+    defaultLocalName: "ttbox",
+    defaultHotspotSsid: "TTBOX",
     fallbackResetText: "重置默认 Wi-Fi",
   };
 }
