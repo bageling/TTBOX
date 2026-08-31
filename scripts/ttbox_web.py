@@ -25,6 +25,11 @@ from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request, send_file, url_for
 
+try:
+    import wifi_manager
+except ImportError:
+    wifi_manager = None
+
 # ====================================================================
 # 配置
 # ====================================================================
@@ -808,14 +813,34 @@ def get_config_yu():
     return jsonify({'ok': True, 'data': profile_to_yu(prof)})
 
 
+def _auto_start_enabled() -> bool:
+    try:
+        out = subprocess.check_output(['systemctl', 'is-enabled', 'ttbox-core'],
+                                      text=True, timeout=3).strip()
+        return out == 'enabled'
+    except Exception:
+        return False
+
+
 @app.get('/api/settings/auto-start')
 def get_auto_start_setting():
-    return jsonify({'ok': True, 'data': {'enabled': False, 'initial_delay': 20}})
+    return jsonify({'ok': True, 'data': {'enabled': _auto_start_enabled(),
+                                         'initial_delay': 0,
+                                         'message': '开机自动启动采集和推理'}})
 
 
 @app.put('/api/settings/auto-start')
 def update_auto_start_setting():
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    body = request.get_json(silent=True) or {}
+    enabled = bool(body.get('enabled'))
+    action = 'enable' if enabled else 'disable'
+    try:
+        subprocess.run(['systemctl', action, 'ttbox-core'], check=True, timeout=5)
+        subprocess.run(['systemctl', action, 'ttbox-web'], check=True, timeout=5)
+        return jsonify({'ok': True, 'data': {'enabled': enabled,
+                                             'message': '下次开机将自动启动' if enabled else '开机后保持停止'}})
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': f'设置失败: {exc}'})
 
 
 # -- 模型 --
@@ -1025,32 +1050,63 @@ def update_display_hardware():
 # -- 网络/WiFi --
 @app.get('/api/network/wifi')
 def get_wifi_status():
-    return jsonify({'ok': True, 'data': {'connected': False, 'ssid': '', 'signal': 0}})
+    if wifi_manager is None:
+        return jsonify({'ok': True, 'data': {'available': False, 'error': 'wifi_manager 未部署'}})
+    return jsonify({'ok': True, 'data': wifi_manager.wifi_status(force_scan=False)})
 
 
 @app.post('/api/network/wifi/scan')
 def scan_wifi_networks():
-    return jsonify({'ok': True, 'data': {'networks': []}})
+    if wifi_manager is None:
+        return jsonify({'ok': True, 'data': {'available': False, 'networks': [], 'error': 'wifi_manager 未部署'}})
+    return jsonify({'ok': True, 'data': wifi_manager.wifi_status(force_scan=True)})
 
 
 @app.post('/api/network/wifi/connect')
 def connect_wifi_network():
-    return jsonify({'ok': True, 'data': {'message': '连接中'}})
+    body = request.get_json(silent=True) or {}
+    ssid = body.get('ssid', '')
+    password = body.get('password', '')
+    if not ssid:
+        return jsonify({'ok': False, 'error': '缺少 SSID'})
+    if wifi_manager is None:
+        return jsonify({'ok': False, 'error': 'wifi_manager 未部署'})
+    try:
+        return jsonify({'ok': True, 'data': wifi_manager.connect_wifi(ssid, password)})
+    except wifi_manager.WifiError as exc:
+        return jsonify({'ok': False, 'error': str(exc)})
 
 
 @app.post('/api/network/wifi/fallback')
 def fallback_wifi_network():
-    return jsonify({'ok': True, 'data': {'message': '已回退'}})
+    if wifi_manager is None:
+        return jsonify({'ok': False, 'error': 'wifi_manager 未部署'})
+    try:
+        return jsonify({'ok': True, 'data': wifi_manager.reset_to_default_wifi()})
+    except wifi_manager.WifiError as exc:
+        return jsonify({'ok': False, 'error': str(exc)})
 
 
 @app.post('/api/network/wifi/ap/apply')
 def apply_wifi_ap_hotspot():
-    return jsonify({'ok': True, 'data': {'message': '热点已启动'}})
+    body = request.get_json(silent=True) or {}
+    if wifi_manager is None:
+        return jsonify({'ok': False, 'error': 'wifi_manager 未部署'})
+    try:
+        return jsonify({'ok': True, 'data': wifi_manager.apply_ap_hotspot(
+            ssid=body.get('ssid'), password=body.get('password'))})
+    except wifi_manager.WifiError as exc:
+        return jsonify({'ok': False, 'error': str(exc)})
 
 
 @app.post('/api/network/wifi/client/activate')
 def activate_wifi_client_mode():
-    return jsonify({'ok': True, 'data': {'message': '客户端模式已激活'}})
+    if wifi_manager is None:
+        return jsonify({'ok': False, 'error': 'wifi_manager 未部署'})
+    try:
+        return jsonify({'ok': True, 'data': wifi_manager.activate_client_wifi()})
+    except wifi_manager.WifiError as exc:
+        return jsonify({'ok': False, 'error': str(exc)})
 
 
 # -- 激活/授权 --
