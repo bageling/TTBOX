@@ -29,6 +29,7 @@ public:
         uint64_t stale = 0;
         uint64_t target_frames = 0;
         uint64_t no_target_frames = 0;
+        uint32_t tracks = 0;           // 当前跟踪中的目标数（YU detections/tracks 显示）
         float predicted_x = 0.0f;
         float predicted_y = 0.0f;
         float control_x = 0.0f;

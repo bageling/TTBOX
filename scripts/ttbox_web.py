@@ -596,6 +596,7 @@ def collect_yu_state() -> dict:
                 },
                 'detection': {
                     'detections': m.get('detect_count', 0),
+                    'tracks': m.get('tracks', 0),
                     'inference_fps': m.get('fps', 0),
                     'inference_ms': m.get('infer_ms', 0),
                     'model_loaded': bool(prof.get('model_id')),

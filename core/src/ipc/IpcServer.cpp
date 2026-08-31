@@ -729,6 +729,7 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("decode_p95_ms", JsonValue::number(status.metrics.decode_p95_ms));
     m.set("decode_p99_ms", JsonValue::number(status.metrics.decode_p99_ms));
     m.set("detect_count", JsonValue::number(static_cast<double>(status.metrics.detect_count)));
+    m.set("tracks", JsonValue::number(static_cast<double>(status.metrics.tracks)));
     m.set("dropped_frames", JsonValue::number(static_cast<double>(status.metrics.dropped_frames)));
     m.set("frames_total", JsonValue::number(static_cast<double>(status.metrics.frames_total)));
     data.set("metrics", std::move(m));

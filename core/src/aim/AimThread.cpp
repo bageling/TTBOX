@@ -175,6 +175,11 @@ void AimThread::loop() {
             status_.has_task = true;
             status_.has_target = selected.valid;
             if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
+            uint32_t active_tracks = 0;
+            for (const auto& te : selector_.tracks()) {
+                if (te.active) ++active_tracks;
+            }
+            status_.tracks = active_tracks;
             status_.predicted_x = selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f;
             status_.predicted_y = selected.valid ? (selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f) : 0.0f;
             status_.error_x = ex;
