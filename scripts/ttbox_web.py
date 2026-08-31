@@ -1267,13 +1267,73 @@ def get_display_hardware():
                 advertised.append(lm)
     except Exception:
         pass
+    # available_modes（YU 结构：token/label/width/height/refresh/pixel_clock_khz）
+    available_modes = []
+    try:
+        out2 = subprocess.check_output(
+            ['/opt/aiassistance/bin/hdmirx_edid', '--list'],
+            text=True, timeout=5)
+        in_modes = False
+        for lm in out2.splitlines():
+            lm = lm.strip()
+            if lm.startswith('Modes:'):
+                in_modes = True
+                continue
+            if in_modes:
+                if not lm:
+                    in_modes = False
+                    continue
+                parts = lm.split()
+                if not parts:
+                    continue
+                token = parts[0]
+                dims = re.search(r'(\d+)x(\d+)@(\d+)', lm)
+                pc = re.search(r'pixel_clock=(\d+)', lm)
+                available_modes.append({
+                    'token': token,
+                    'label': f'{dims.group(1)}x{dims.group(2)}@{dims.group(3)}' if dims else token,
+                    'width': int(dims.group(1)) if dims else 0,
+                    'height': int(dims.group(2)) if dims else 0,
+                    'refresh': int(dims.group(3)) if dims else 0,
+                    'pixel_clock_khz': int(pc.group(1)) if pc else 0,
+                })
+    except Exception:
+        pass
     data = dict(hdmi)
     data['available'] = hdmi.get('connected', False)
     data['config'] = cfg_disp
+    # 真实显示器身份：从当前生效 EDID 读取（hdmirx_edid --status）
+    edid_name, edid_vendor, edid_pid, edid_serial = '', '', '', ''
+    edid_valid = False
+    try:
+        out = subprocess.check_output(
+            ['/opt/aiassistance/bin/hdmirx_edid', '--status'],
+            text=True, timeout=5)
+        nm = re.search(r'name=(\S+)', out)
+        vd = re.search(r'vendor=(\S+)', out)
+        pid = re.search(r'product=(0x[0-9a-fA-F]+)', out)
+        ser = re.search(r'serial=(0x[0-9a-fA-F]+)', out)
+        if nm:
+            edid_name = nm.group(1)
+            edid_vendor = vd.group(1) if vd else ''
+            edid_pid = pid.group(1) if pid else ''
+            edid_serial = ser.group(1) if ser else ''
+            edid_valid = True
+    except Exception:
+        pass
     data['display_mode'] = {
-        'real_monitor': {'width': hdmi.get('width', 0), 'height': hdmi.get('height', 0),
-                          'refresh': hdmi.get('refresh', 0)},
+        'real_monitor': {
+            'connected': hdmi.get('connected', False),
+            'width': hdmi.get('width', 0), 'height': hdmi.get('height', 0),
+            'refresh': hdmi.get('refresh', 0),
+            'name': edid_name or cfg_disp.get('name', ''),
+            'vendor': edid_vendor or cfg_disp.get('vendor', ''),
+            'product_id': edid_pid or cfg_disp.get('product_id', ''),
+            'serial': edid_serial or cfg_disp.get('serial', ''),
+            'edid_valid': edid_valid,
+        },
         'advertised_modes': advertised[:16],
+        'available_modes': available_modes,
     }
     return jsonify({'ok': True, 'data': data})
 
