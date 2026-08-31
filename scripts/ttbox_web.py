@@ -408,7 +408,9 @@ def collect_yu_state() -> dict:
                 'latency': {'capture_to_mouse_send_ms': m.get('e2e_ms', 0)},
                 'license': DEFAULT_LICENSE,
                 'mouse_output': {},
-                'preview_path': '/api/preview.jpg',
+                # MJPEG 流（动态预览）：img 标签原生支持 multipart/x-mixed-replace，
+                # 前端 previewImage 直接消费；不能用 /api/preview.jpg（静态单帧，加载一次就冻结）
+                'preview_path': '/api/preview.mjpg',
                 'running': running,
                 'selected_model_id': prof.get('model_id', ''),
                 'status': 'running' if running else 'stopped',
@@ -1137,6 +1139,8 @@ def preview():
 
 @app.get('/api/preview.mjpg')
 def preview_stream():
+    # MJPEG 流：读 Core PreviewModule 缓存（Core 端 10~15fps 生成），
+    # 无帧时短暂等待而非密集空转；Core 是唯一生产节拍，本端只做搬运。
     def generate():
         while True:
             r = ipc_request('GET_PREVIEW', timeout=2)
@@ -1148,7 +1152,7 @@ def preview_stream():
                     yield f'Content-Length: {len(px)}\r\n\r\n'.encode()
                     yield px
                     yield b'\r\n'
-            time.sleep(0.08)
+            time.sleep(0.067)  # ≈15fps 上限，与 Core PreviewModule fps 对齐
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=ttboxframe')
 
 
