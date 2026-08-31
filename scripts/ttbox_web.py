@@ -1255,16 +1255,35 @@ def get_display_hardware():
             cfg_disp = json.load(open(cpath))
     except Exception:
         pass
-    # 可用模式列表（从 hdmirx_edid --list 解析当前 EDID 广播的模式）
+    # 广播模式（当前 EDID 生效的模式，同 available_modes 结构）
     advertised = []
     try:
         out = subprocess.check_output(
             ['/opt/aiassistance/bin/hdmirx_edid', '--list'],
             text=True, timeout=5)
+        in_modes = False
         for lm in out.splitlines():
             lm = lm.strip()
-            if lm and not lm.startswith(('Profiles', 'Modes', '---')) and '[' in lm:
-                advertised.append(lm)
+            if lm.startswith('Modes:'):
+                in_modes = True
+                continue
+            if in_modes:
+                if not lm:
+                    break
+                parts = lm.split()
+                if not parts:
+                    continue
+                token = parts[0]
+                dims = re.search(r'(\d+)x(\d+)@(\d+)', lm)
+                pc = re.search(r'pixel_clock=(\d+)', lm)
+                advertised.append({
+                    'token': token,
+                    'label': f'{dims.group(1)}x{dims.group(2)}@{dims.group(3)}' if dims else token,
+                    'width': int(dims.group(1)) if dims else 0,
+                    'height': int(dims.group(2)) if dims else 0,
+                    'refresh': int(dims.group(3)) if dims else 0,
+                    'pixel_clock_khz': int(pc.group(1)) if pc else 0,
+                })
     except Exception:
         pass
     # available_modes（YU 结构：token/label/width/height/refresh/pixel_clock_khz）
