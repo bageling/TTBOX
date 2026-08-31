@@ -545,7 +545,20 @@ def collect_yu_state() -> dict:
     st = _get_status()
     prof = _get_runtime_profile()
     ml = ipc_request('MODEL_LIST')
-    models = (ml.get('data', {}) or {}).get('models', []) if ml.get('status') == 0 else []
+    ml_data = (ml.get('data', {}) or {}) if ml.get('status') == 0 else {}
+    # 与 /api/models 同款映射（前端模型卡片消费 model.id）
+    models = []
+    for mm in ml_data.get('models', []):
+        models.append({
+            'id': mm.get('model_id'),
+            'model_id': mm.get('model_id'),
+            'name': mm.get('label') or mm.get('model_id'),
+            'label': mm.get('label'),
+            'version': mm.get('version'),
+            'status': mm.get('status_name') or ('installed' if mm.get('status') == 2 else 'staging'),
+            'origin': mm.get('origin'),
+        })
+    active_model = ml_data.get('active', '')
 
     m = st.get('metrics', {})
     # config 回读直接复用 profile_to_yu（单一真源，避免两处翻译漂移）
@@ -558,7 +571,7 @@ def collect_yu_state() -> dict:
             'app_version': 'ttbox-' + str(st.get('version', '')),
             'version': str(st.get('version', '')),
             'config': config_yu,
-            'models': {'models': models},
+            'models': {'models': models, 'active': active_model},
             'presets': {'presets': []},
             'state': {
                 'aim': {'active': m.get('aim_active', False), 'last_error': ''},
@@ -883,13 +896,15 @@ def import_model():
     fname = f.filename
     if not fname.lower().endswith('.rknn'):
         return jsonify({'ok': False, 'error': '仅支持 .rknn 模型文件'})
-    model_id = re.sub(r'\.rknn$', '', fname, flags=re.I)
-    model_id = re.sub(r'[^A-Za-z0-9_\-]', '_', model_id)[:64] or 'model'
+    stem = re.sub(r'\.rknn$', '', fname, flags=re.I)
+    model_id = re.sub(r'[^A-Za-z0-9_\-]', '_', stem)[:64].strip('_') or 'model'
+    # label 保留原始文件名主干（含中文），供前端显示；model_id 是净化后的内部标识
+    label = stem.strip() or model_id
     incoming = Path('/opt/ttbox/models/_incoming')
     incoming.mkdir(parents=True, exist_ok=True)
     dst = incoming / f'{model_id}.rknn'
     f.save(str(dst))
-    r1 = ipc_request('MODEL_IMPORT', {'src_path': str(dst), 'model_id': model_id, 'label': model_id})
+    r1 = ipc_request('MODEL_IMPORT', {'src_path': str(dst), 'model_id': model_id, 'label': label})
     if r1.get('status') != 0:
         dst.unlink(missing_ok=True)
         return jsonify({'ok': False, 'error': r1.get('error', '导入失败')})
