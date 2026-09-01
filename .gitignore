@@ -15,3 +15,6 @@ __pycache__/
 # Local runtime artifacts
 *.log
 /run/
+# Signing private keys must stay outside the repository
+keys/*private*.pem
+**/*private*.pem

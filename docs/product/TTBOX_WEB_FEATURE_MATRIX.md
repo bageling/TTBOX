@@ -19,23 +19,23 @@
 
 | 功能 | UI 控件 | API | Gateway | Core/OS | 真机 | 状态 |
 |------|---------|-----|---------|---------|------|------|
-| 设备激活 | licenseKeyInput / activateLicenseButton | GET /api/license / POST /api/license/activate | ✅ | 授权状态文件 | ✅ | REAL |
-| 刷新激活状态 | refreshLicenseButton | GET /api/license | ✅ | ✅ | ✅ | REAL |
-| 实时预览 | previewImage | GET /api/preview.mjpg | ✅ | IPC GET_PREVIEW | ✅（前阶段） | REAL |
-| 链路延迟 | mobileLatency | GET /api/state → latency | ✅ | IPC metrics | ✅ | REAL |
-| 采集帧率 | mobileCaptureFps | GET /api/state → capture | ✅ | IPC metrics | ✅ | REAL |
-| 检测帧率 | mobileFps | GET /api/state → detection | ✅ | IPC metrics | ✅ | REAL |
-| 目标状态 | mobileVideoStatus | GET /api/state | ✅ | ✅ | ✅ | REAL |
-| 运行摘要（模型/推理/排队/预处理/错误） | runtimeSummary | GET /api/state | ✅ | IPC metrics | ✅ | REAL |
-| 启动/停止 | startButton | POST /api/control/start / stop | ✅ | IPC RUNTIME_CONTROL | ✅ | REAL |
-| 开机自启动 | data-auto-start-toggle | GET/PUT /api/settings/auto-start | ✅ | systemd | ✅ | REAL |
-| 截取尺寸 | capture_crop_size | GET/PUT /api/config | ✅ | RuntimeProfile | ✅ | REAL |
-| FOV 半径 | range_factor | GET/PUT /api/config | ✅ | ✅ | ✅ | REAL |
-| 截取位置偏移 X/Y | capture_crop_offset_x/y | GET/PUT /api/config | ✅ | ✅ | ✅ | REAL |
-| 检测置信度/IOU | video_detection_confidence/iou | GET/PUT /api/config | ✅ | ✅ | ✅ | REAL |
-| 重置默认 | resetOverviewDefaultsButton | PUT /api/config | ✅ | ✅ | ✅ | REAL |
-| 重启系统 | rebootSystemButton | POST /api/system/reboot | ✅ | systemctl | ✅ | REAL |
-| 关机 | poweroffSystemButton | POST /api/system/poweroff | ✅ | systemctl | ✅ | REAL |
+| 设备激活 | licenseKeyInput / activateLicenseButton | GET /api/license / POST /api/license/activate | ✅ | 授权状态文件 | API已核验；浏览器未操作 | VERIFY |
+| 刷新激活状态 | refreshLicenseButton | GET /api/license | ✅ | ✅ | API已核验；浏览器未操作 | VERIFY |
+| 实时预览 | previewImage | GET /api/preview.mjpg | ✅ | IPC GET_PREVIEW | 页面已显示；画面内容待单独确认 | VERIFY |
+| 链路延迟 | mobileLatency | GET /api/state → latency | ✅ | IPC metrics | 浏览器显示 11.24ms | REAL |
+| 采集帧率 | mobileCaptureFps | GET /api/state → capture | ✅ | IPC metrics | 浏览器显示 239.87帧/秒 | REAL |
+| 检测帧率 | mobileFps | GET /api/state → detection | ✅ | IPC metrics | 浏览器显示 109.94帧/秒 | REAL |
+| 目标状态 | mobileVideoStatus | GET /api/state | ✅ | ✅ | 浏览器显示 0检出/0跟踪 | REAL |
+| 运行摘要（模型/推理/排队/预处理/错误） | runtimeSummary | GET /api/state | ✅ | IPC metrics | 浏览器显示真实摘要 | REAL |
+| 启动/停止 | startButton | POST /api/control/start / stop | ✅ | IPC RUNTIME_CONTROL | 当前显示停止；点击闭环待执行 | VERIFY |
+| 开机自启动 | data-auto-start-toggle | GET/PUT /api/settings/auto-start | ✅ | systemd | 当前显示关闭；读改写待执行 | VERIFY |
+| 截取尺寸 | capture_crop_size | GET/PUT /api/config | ✅ | RuntimeProfile | 浏览器显示 320；读改写待执行 | VERIFY |
+| FOV 半径 | range_factor | GET/PUT /api/config | ✅ | ✅ | 浏览器改 0.62、回读、恢复 1.0 | REAL |
+| 截取位置偏移 X/Y | capture_crop_offset_x/y | GET/PUT /api/config | ✅ | ✅ | 浏览器显示 0；读改写待执行 | VERIFY |
+| 检测置信度/IOU | video_detection_confidence/iou | GET/PUT /api/config | ✅ | ✅ | 浏览器显示 0.55/0.45；读改写待执行 | VERIFY |
+| 重置默认 | resetOverviewDefaultsButton | PUT /api/config | ✅ | ✅ | 浏览器可见；点击闭环待执行 | VERIFY |
+| 重启系统 | rebootSystemButton | POST /api/system/reboot | ✅ | systemctl | 浏览器可见；未点击 | VERIFY |
+| 关机 | poweroffSystemButton | POST /api/system/poweroff | ✅ | systemctl | 浏览器可见；未点击 | VERIFY |
 
 ---
 
