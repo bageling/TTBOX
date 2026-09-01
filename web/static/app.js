@@ -5910,7 +5910,13 @@ function renderRuntime(payload) {
   renderKmboxbStatus(mouseOutput);
   renderPhysicalMotionBlockStatus(mouseOutput);
   renderFanControlStatus(runtime.fan_control || {});
-  setText("hotkeyGuardRuntimeStatus", aim.hotkeys_suspended ? "已禁用" : "未禁用");
+  const hotkeyGuardStatus = $("hotkeyGuardRuntimeStatus");
+  if (hotkeyGuardStatus) {
+    const hotkeyGuardPanel = hotkeyGuardStatus.closest("[data-feature-status]");
+    hotkeyGuardStatus.textContent = hotkeyGuardPanel?.dataset.featureStatus === "planned"
+      ? "计划中"
+      : (aim.hotkeys_suspended ? "已禁用" : "未禁用");
+  }
   updateAimProfileOffsetSwitchStatus(aim);
   const badge = $("statusBadge");
   const isRunning = !!runtime.running;

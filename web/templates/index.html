@@ -264,18 +264,18 @@
               <button id="addAimProfileButton" class="ghost-button" type="button">新增热键</button>
             </div>
           </div>
-          <section class="hotkey-guard-panel" aria-label="全局热键禁用">
+          <section class="hotkey-guard-panel" aria-label="全局热键禁用" data-feature-status="planned">
             <label class="toggle-row">
               <span>一键禁用所有热键</span>
-              <input id="hotkey_guard_enabled" type="checkbox" data-config>
+              <input id="hotkey_guard_enabled" type="checkbox" data-config disabled>
             </label>
             <label class="field">切换按键
-              <select id="hotkey_guard_toggle_hotkey" data-config></select>
-              <span class="field-hint">按一下禁用所有热键，再按一下恢复。</span>
+              <select id="hotkey_guard_toggle_hotkey" data-config disabled></select>
+              <span class="field-hint">计划中：当前运行核心尚未提供全局热键禁用能力。</span>
             </label>
             <div class="hotkey-guard-status">
-              <span>当前状态</span>
-              <strong id="hotkeyGuardRuntimeStatus">未禁用</strong>
+              <span>功能状态</span>
+              <strong id="hotkeyGuardRuntimeStatus">计划中</strong>
             </div>
           </section>
           <div id="aimProfilesEditor" class="aim-profile-list"></div>

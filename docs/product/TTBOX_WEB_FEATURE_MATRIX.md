@@ -43,10 +43,10 @@
 
 | 功能 | UI 控件 | API | Gateway | Core/OS | 真机 | 状态 |
 |------|---------|-----|---------|---------|------|------|
-| 热键守护开关 | hotkey_guard_enabled | GET/PUT /api/config | ✅ | RuntimeProfile | ✅ | REAL |
-| 热键守护切换键 | hotkey_guard_toggle_hotkey | GET/PUT /api/config | ✅ | ✅ | ✅ | REAL |
-| 热键与类别编辑 | aimProfilesEditor / addAimProfileButton | GET/PUT /api/config | ✅ | RuntimeProfile.aim_profiles | ✅ | REAL |
-| 物理按键屏蔽 | physicalButtonBlockButton | GET/PUT /api/config | ✅ | ✅ | ✅ | VERIFY |
+| 热键守护开关 | hotkey_guard_enabled | 无真实 API（Core未提供全局禁用） | 不接入 | 不存在 | 计划中，控件禁用 | PLANNED |
+| 热键守护切换键 | hotkey_guard_toggle_hotkey | 无真实 API（Core未提供全局禁用） | 不接入 | 不存在 | 计划中，控件禁用 | PLANNED |
+| 热键与类别编辑 | aimProfilesEditor / addAimProfileButton | GET/PUT /api/config | ✅ | RuntimeProfile.mouse.aim_hotkey/aim_hotkey2 | 浏览器 left/right/any 读取、修改 right、刷新保持、恢复 left | REAL |
+| 物理按键屏蔽 | physicalButtonBlockButton | GET/PUT /api/config | ✅ | ✅ | 本页未执行实际 HID 输出验证 | VERIFY |
 
 ---
 
