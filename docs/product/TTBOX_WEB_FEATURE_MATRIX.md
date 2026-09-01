@@ -45,7 +45,12 @@
 |------|---------|-----|---------|---------|------|------|
 | 热键守护开关 | hotkey_guard_enabled | 无真实 API（Core未提供全局禁用） | 不接入 | 不存在 | 计划中，控件禁用 | PLANNED |
 | 热键守护切换键 | hotkey_guard_toggle_hotkey | 无真实 API（Core未提供全局禁用） | 不接入 | 不存在 | 计划中，控件禁用 | PLANNED |
-| 热键与类别编辑 | aimProfilesEditor / addAimProfileButton | GET/PUT /api/config | ✅ | RuntimeProfile.mouse.aim_hotkey/aim_hotkey2 | 浏览器 left/right/any 读取、修改 right、刷新保持、恢复 left | REAL |
+| 热键与类别编辑 | aimProfilesEditor / addAimProfileButton | GET/PUT /api/config | ✅ | RuntimeProfile.mouse.aim_hotkey/aim_hotkey2/aim_hotkey_mode | 浏览器主/副热键、any/all 读取、修改、刷新保持、恢复 | REAL |
+| 目标类别 | .aim-profile-class | GET/PUT /api/config | ✅ | RuntimeProfile.inference.class_filter | 浏览器全选→仅第0类→刷新保持→恢复全选 | REAL |
+| 移动倍率 | .aim-profile-sensitivity | GET/PUT /api/config | ✅ | RuntimeProfile.mouse.sensitivity | 浏览器 1.70→1.23→刷新保持→恢复 1.70 | REAL |
+| X/Y 偏移 | .aim-profile-offset-x/y | GET/PUT /api/config | ✅ | RuntimeProfile.mouse.aim_point.offset_x/offset_y | 浏览器 X 0.48→0.41、Y 0.35→0.63、刷新保持、恢复 | REAL |
+| 热键 FOV 缩放 | .aim-profile-fov-scale | 无 Core 字段/消费 | 不接入 | 不存在 | 页面控件保留，待 Core 能力 | PLANNED |
+| 偏移切换（备用 X/Y） | .aim-profile-offset-switch-* / alternate-offset-* | 无 Core 字段/消费 | 不接入 | 不存在 | 页面控件保留，待 Core 能力 | PLANNED |
 | 物理按键屏蔽 | physicalButtonBlockButton | GET/PUT /api/config | ✅ | ✅ | 本页未执行实际 HID 输出验证 | VERIFY |
 
 ---

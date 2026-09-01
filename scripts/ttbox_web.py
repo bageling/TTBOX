@@ -367,6 +367,7 @@ def yu_body_to_profile(body: dict) -> dict:
     # 4) aim_profiles[0]：热键 / 瞄准点 / profile 灵敏度
     profiles = body.get('aim_profiles') or []
     p0 = profiles[0] if profiles else {}
+    class_filter_mask = int(p0.get('class_filter_mask', 0) or 0)
     if p0.get('hotkey') is not None:
         mouse['aim_hotkey'] = _hotkey_to_bits(p0['hotkey'], 2) or 2
     if p0.get('hotkey2') is not None:
@@ -383,8 +384,12 @@ def yu_body_to_profile(body: dict) -> dict:
     #    sens → sensitivity（输出全局缩放）；pos → aim_point.offset_y（瞄准高度）
     if body.get('sens') is not None:
         mouse['sensitivity'] = body['sens']
-    if body.get('pos') is not None:
+    if p0.get('sensitivity') is not None:
+        mouse['sensitivity'] = p0['sensitivity']
+    if p0.get('offset_y') is None and body.get('pos') is not None:
         aim_point_vals['offset_y'] = body['pos']
+    if p0.get('class_offsets'):
+        mouse['class_offsets'] = p0['class_offsets']
     # RuntimeProfile::from_json 读平铺的 offset_x/offset_y（mouse.aim_point 是内部结构，
     # JSON 层平铺为 mouse.offset_x/mouse.offset_y），此处按 Core 契约平铺写入。
     for k, v in aim_point_vals.items():
@@ -396,8 +401,8 @@ def yu_body_to_profile(body: dict) -> dict:
         inference['confidence'] = body['video_detection_confidence']
     if body.get('video_detection_iou') is not None:
         inference['iou'] = body['video_detection_iou']
-    if inference:
-        pass  # confidence/iou 语义：0 = 用模型默认（Core 已处理）
+    if class_filter_mask >= 0:
+        inference['class_filter'] = [i for i in range(32) if class_filter_mask & (1 << i)]
 
     # 7) 采集
     capture: dict = {}
@@ -530,9 +535,9 @@ def profile_to_yu(prof: dict) -> dict:
             'sensitivity': mouse.get('sensitivity', 1.0),
             'offset_x': ap.get('offset_x', 0.5),
             'offset_y': ap.get('offset_y', 0.5),
-            'alternate_offset_x': 0.5, 'alternate_offset_y': 0.5,
-            'class_filter_mask': 0, 'fov_scale': 1.0,
-            'class_offsets': [],
+            'alternate_offset_x': ap.get('alternate_offset_x', ap.get('offset_x', 0.5)), 'alternate_offset_y': ap.get('alternate_offset_y', ap.get('offset_y', 0.5)),
+            'class_filter_mask': sum(1 << int(i) for i in inf.get('class_filter', []) if int(i) >= 0), 'fov_scale': 1.0,
+            'class_offsets': mouse.get('class_offsets', []),
             'offset_switch_enabled': False, 'offset_switch_hotkey': '',
         }],
         'recoil': {}, 'rapid_fire': {}, 'auto_back_flick': {}, 'crosshair': {},
