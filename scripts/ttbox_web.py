@@ -589,6 +589,11 @@ def collect_yu_state() -> dict:
             'app_version': 'ttbox-' + str(st.get('version', '')),
             'version': str(st.get('version', '')),
             'config': config_yu,
+            'auto_start': {
+                'enabled': _auto_start_enabled(),
+                'initial_delay': 0,
+                'message': '开机自动启动采集和推理',
+            },
             'models': models,  # YU 同构：数组
             'selected_model_id': registry_active or active_model,
             'presets': sorted(Path(PRESETS_DIR).glob('*.json')) and
