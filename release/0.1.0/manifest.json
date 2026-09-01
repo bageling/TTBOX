@@ -1,0 +1,46 @@
+{
+  "product": "TTBOX",
+  "version": "0.1.0",
+  "build": "20260901-001",
+  "channel": "stable",
+  "min_version": "0.0.0",
+  "target_hardware": [
+    "rk3588"
+  ],
+  "release_date": "2026-09-01T00:00:00Z",
+  "release_notes": "### 0.1.0\n\n- TTBOX \u521d\u59cb\u751f\u4ea7\u7248\u672c\n- Core \u57fa\u7840\u529f\u80fd\n- Web \u63a7\u5236\u9762\u677f\n- Gateway API",
+  "components": [
+    {
+      "name": "core",
+      "version": "0.1.0",
+      "type": "firmware"
+    },
+    {
+      "name": "web",
+      "version": "0.1.0",
+      "type": "firmware"
+    },
+    {
+      "name": "gateway",
+      "version": "0.1.0",
+      "type": "firmware"
+    }
+  ],
+  "packages": [
+    {
+      "package_id": "TTBOX-core-0.1.0-rk3588.tar.gz",
+      "component": "core",
+      "version": "0.1.0",
+      "target": "system",
+      "hardware": [
+        "rk3588"
+      ],
+      "size": 1020,
+      "sha256": "0c5a450f7c96f2b56f5a8e8cfa60f90a30c4ceadf50a8e9d2fa049a372f6f9ba",
+      "url": "/api/update/package/TTBOX-core-0.1.0-rk3588.tar.gz",
+      "required": true
+    }
+  ],
+  "signature": "f59zyHxoUH+dg1T/cliUwrE9X7ABh6dsGUiEjk27WTfHnlUrxgHiPOR5dHXeeCStj+bQ80RLqsTGFalIYkzwBQ==",
+  "signing_key_id": "key-20260901"
+}
