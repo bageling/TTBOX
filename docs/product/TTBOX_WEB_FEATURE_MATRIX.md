@@ -28,7 +28,7 @@
 | 目标状态 | mobileVideoStatus | GET /api/state | ✅ | ✅ | 浏览器显示真实值 | REAL |
 | 运行摘要（模型/推理/排队/预处理/错误） | runtimeSummary | GET /api/state | ✅ | IPC metrics | 浏览器显示真实摘要 | REAL |
 | 启动/停止 | startButton | POST /api/control/start / stop | ✅ | IPC RUNTIME_CONTROL | 浏览器停止→启动，状态恢复 running | REAL |
-| 开机自启动 | data-auto-start-toggle | GET/PUT /api/settings/auto-start | ✅ | systemd | 浏览器读改写成功并恢复；无需重启 | REAL |
+| 开机自启动 | data-auto-start-toggle | GET/PUT /api/settings/auto-start | ✅ | systemd | 浏览器读改写成功并恢复；未执行重启 | VERIFY |
 | 截取尺寸 | capture_crop_size | GET/PUT /api/config | ✅ | RuntimeProfile | 浏览器 320→416→320 | REAL |
 | FOV 半径 | range_factor | GET/PUT /api/config | ✅ | ✅ | 浏览器 0.62→1.0 | REAL |
 | 截取位置偏移 X/Y | capture_crop_offset_x/y | GET/PUT /api/config | ✅ | ✅ | 浏览器显示 0；未改写 | VERIFY |
