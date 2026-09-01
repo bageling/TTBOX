@@ -100,6 +100,7 @@ TTBOX Update Engine (C++/Python)
 | 方法 | 路径 | 描述 | 状态 |
 |------|------|------|------|
 | GET | `/api/system` | 获取系统状态 | 🟢 |
+| GET | `/api/system/version` | 获取版本信息 | 🟢 |
 | GET | `/api/system/storage` | 获取存储信息 | 🟢 |
 | PUT | `/api/system/hostname` | 修改主机名 | 🟢 |
 | POST | `/api/system/reboot` | 重启系统 | 🟢 |
@@ -108,17 +109,17 @@ TTBOX Update Engine (C++/Python)
 | GET | `/api/settings/auto-start` | 获取自启设置 | 🟢 |
 | PUT | `/api/settings/auto-start` | 更新自启设置 | 🟢 |
 
-### Update（更新） — 新增
+### Update（更新）
 
 | 方法 | 路径 | 描述 | 状态 |
 |------|------|------|------|
-| GET | `/api/update/status` | 获取更新状态 | 🔵 PLANNED |
-| POST | `/api/update/check` | 检查 OTA 更新 | 🔵 PLANNED |
-| POST | `/api/update/scan-otg` | 扫描 USB 更新 | 🔵 PLANNED |
-| POST | `/api/update/start` | 开始更新指定版本 | 🔵 PLANNED |
-| POST | `/api/update/rollback` | 回滚到上一版本 | 🔵 PLANNED |
-| POST | `/api/update/cancel` | 取消更新 | 🔵 PLANNED |
-| GET | `/api/update/log` | 获取更新日志 | 🔵 PLANNED |
+| GET | `/api/update/status` | 获取更新状态 | 🟢 |
+| POST | `/api/update/check` | 检查 OTA 更新 | 🟢 |
+| POST | `/api/update/scan-otg` | 扫描 USB 更新 | 🟢 |
+| POST | `/api/update/start` | 开始更新指定版本 | 🟢 |
+| POST | `/api/update/rollback` | 回滚到上一版本 | 🟢 |
+| POST | `/api/update/cancel` | 取消更新 | 🟢 |
+| GET | `/api/update/log` | 获取更新日志 | 🟢 |
 
 ### Diagnostics（诊断）
 

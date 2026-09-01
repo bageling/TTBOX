@@ -742,6 +742,19 @@ def get_system_status():
     return jsonify({'ok': True, 'data': collect_system_stats()})
 
 
+
+@app.get('/api/system/version')
+def get_system_version():
+    return jsonify({
+        'ok': True,
+        'data': {
+            'product': 'TTBOX',
+            'version': '0.1.0',
+            'build': '2026.09.01.2',
+            'hardware': 'RK3588',
+            'channel': 'stable'
+        }
+    })
 @app.get('/api/system/storage')
 def get_storage_status():
     s = _storage()
@@ -1657,16 +1670,16 @@ def _update_engine_action(action, version=None):
 def check_update():
     return _update_engine_action('check')
 
-@app.post('/api/update/usb/scan')
-def scan_usb_update():
+@app.post('/api/update/scan-otg')
+def scan_otg_update():
     return _update_engine_action('scan-otg')
 
 @app.get('/api/update/status')
 def get_update_status():
     return _update_engine_action('status')
 
-@app.post('/api/update/install')
-def install_update():
+@app.post('/api/update/start')
+def start_update():
     body = request.get_json(silent=True) or {}
     return _update_engine_action('start', body.get('version'))
 
@@ -1676,7 +1689,11 @@ def rollback_update():
 
 @app.post('/api/update/cancel')
 def cancel_update():
-    return jsonify({'ok': False, 'error': '取消功能尚未接入'}), 501
+    return _update_engine_action('cancel')
+
+@app.get('/api/update/log')
+def get_update_log():
+    return _update_engine_action('log')
 
 
 @app.get('/api/hailo/status')
