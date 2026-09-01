@@ -1,3 +1,161 @@
-/**\n * TTBOX API Client — 统一 API 请求层\n *\n * 所有页面禁止直接 fetch/axios/XMLHttpRequest。\n * 统一经过此模块。\n *\n * API 路径：/api/v1/{domain}/{action}\n * 响应格式：{ ok: bool, data: object, error?: string }\n */\n\n(function () {\n  'use strict';\n\n  const API_BASE = '/api/v1';\n\n  /**\n   * 核心请求函数\n   */\n  async function request(method, path, body, opts = {}) {\n    const url = path.startsWith('http') ? path : `${API_BASE}${path}`;\n    const init = {\n      method,\n      headers: { 'Content-Type': 'application/json', ...opts.headers },\n      signal: opts.signal || null,\n    };\n    if (body && method !== 'GET') {\n      init.body = JSON.stringify(body);\n    }\n\n    try {\n      const resp = await fetch(url, init);\n      const text = await resp.text();\n      let json;\n      try { json = JSON.parse(text); } catch (e) { json = { ok: false, error: '响应格式错误' }; }\n\n      if (!resp.ok) {\n        return { ok: false, status: resp.status, error: json.error || `请求失败 (${resp.status})`, data: null };\n      }\n\n      return { ok: true, status: resp.status, data: json.data || json, error: null };\n    } catch (err) {\n      if (err.name === 'AbortError') {\n        return { ok: false, status: 0, error: '请求超时', data: null };\n      }\n      return { ok: false, status: 0, error: '网络错误: ' + err.message, data: null };\n    }\n  }\n\n  /**\n   * 对外接口\n   */\n  const apiClient = {\n    get: (path, opts) => request('GET', path, null, opts),\n    post: (path, body, opts) => request('POST', path, body, opts),\n    put: (path, body, opts) => request('PUT', path, body, opts),\n    del: (path, opts) => request('DELETE', path, null, opts),\n\n    // ---- 系统 ----
-    system: {\n      version: () => request('GET', '/system/version'),\n      status: () => request('GET', '/system'),\n      storage: () => request('GET', '/system/storage'),\n      reboot: () => request('POST', '/system/reboot'),\n      poweroff: () => request('POST', '/system/poweroff'),\n      hostname: (name) => request('PUT', '/system/hostname', { hostname: name }),\n    },\n\n    // ---- 运行时 ----
-    runtime: {\n      state: () => request('GET', '/state'),\n      start: () => request('POST', '/runtime/start'),\n      stop: () => request('POST', '/runtime/stop'),\n      config: () => request('GET', '/config'),\n      setConfig: (profile) => request('PUT', '/config', { profile }),\n    },\n\n    // ---- 模型 ----\n    models: {\n      list: () => request('GET', '/models'),\n      import: () => { /* TODO: 文件上传 */ return Promise.resolve({ ok: false, error: '即将支持' }); },\n      delete: (id) => request('POST', '/models/delete', { model_id: id }),\n      select: (id) => request('POST', '/models/select', { model_id: id }),\n      activate: (id) => request('POST', '/models/activate', { model_id: id }),\n      classNames: (names) => request('POST', '/models/class-names', { class_names: names }),\n      concurrency: (n) => request('POST', '/models/rknn-concurrency', { count: n }),\n    },\n\n    // ---- 预设 ----\n    presets: {\n      list: () => request('GET', '/presets'),\n      save: (name, profile) => request('POST', '/presets', { name, profile }),\n      load: (name) => request('POST', '/presets/load', { name }),\n      delete: (name) => request('POST', '/presets/delete', { name }),\n    },\n\n    // ---- 预览 ----\n    preview: {\n      image: () => '/api/v1/preview.jpg',\n      stream: () => '/api/v1/preview.mjpg',\n    },\n\n    // ---- 硬件 ----\n    hardware: {\n      display: () => request('GET', '/hardware/display'),\n      setDisplay: (cfg) => request('PUT', '/hardware/display', cfg),\n      mouse: () => request('GET', '/hardware/mouse'),\n      setMouse: (cfg) => request('PUT', '/hardware/mouse', cfg),\n    },\n\n    // ---- 网络 ----\n    network: {\n      wifi: () => request('GET', '/network/wifi'),\n      scan: () => request('POST', '/network/wifi/scan'),\n      connect: (ssid, psk) => request('POST', '/network/wifi/connect', { ssid, psk }),\n      ap: () => request('POST', '/network/wifi/ap/apply'),\n      client: () => request('POST', '/network/wifi/client/activate'),\n    },\n\n    // ---- 更新 ----\n    update: {\n      status: () => request('GET', '/update/status'),\n      check: () => request('POST', '/update/check'),\n      start: (version) => request('POST', '/update/start', { version }),\n      rollback: () => request('POST', '/update/rollback'),\n      cancel: () => request('POST', '/update/cancel'),\n      log: () => request('GET', '/update/log'),\n    },\n\n    // ---- 授权 ----\n    license: {\n      info: () => request('GET', '/license'),\n    },\n\n    // ---- 诊断 ----\n    diagnostics: {\n      aimTrace: () => request('POST', '/diagnostics/aim-trace'),\n    },\n\n    // ---- 设备枚举 ----\n    devices: {\n      makcu: () => request('GET', '/makcu/devices'),\n      ferrum: () => request('GET', '/ferrum/devices'),\n      kmbox: () => request('GET', '/kmboxb/devices'),\n    },\n  };\n\n  // 暴露到全局\n  window.ttbox = window.ttbox || {};\n  window.ttbox.api = apiClient;\n\n  console.log('[TTBOX API Client] 已加载 (v1.0.0)');\n})();\n
+/**
+ * TTBOX API Client — 统一 API 请求层
+ *
+ * 所有页面禁止直接 fetch/axios/XMLHttpRequest。
+ * 统一经过此模块。
+ *
+ * API 路径：/api/v1/{domain}/{action}
+ * 响应格式：{ ok: bool, data: object, error?: string }
+ */
+
+(function () {
+  'use strict';
+
+  const API_BASE = '/api';
+
+  /**
+   * 核心请求函数
+   */
+  async function request(method, path, body, opts = {}) {
+    const url = path.startsWith('http')
+      ? path
+      : (path.startsWith('/api/') ? path : `${API_BASE}${path}`);
+    const init = {
+      method,
+      headers: { 'Content-Type': 'application/json', ...opts.headers },
+      signal: opts.signal || null,
+    };
+    if (body && method !== 'GET') {
+      init.body = JSON.stringify(body);
+    }
+
+    try {
+      const resp = await fetch(url, init);
+      const text = await resp.text();
+      let json;
+      try { json = JSON.parse(text); } catch (e) { json = { ok: false, error: '响应格式错误' }; }
+
+      if (!resp.ok) {
+        return { ok: false, status: resp.status, error: json.error || `请求失败 (${resp.status})`, data: null };
+      }
+
+      return { ok: true, status: resp.status, data: json.data || json, error: null };
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        return { ok: false, status: 0, error: '请求超时', data: null };
+      }
+      return { ok: false, status: 0, error: '网络错误: ' + err.message, data: null };
+    }
+  }
+
+  /**
+   * 对外接口
+   */
+  const apiClient = {
+    request: (method, path, body, opts) => request(method, path, body, opts),
+    get: (path, opts) => request('GET', path, null, opts),
+    post: (path, body, opts) => request('POST', path, body, opts),
+    put: (path, body, opts) => request('PUT', path, body, opts),
+    del: (path, opts) => request('DELETE', path, null, opts),
+    rawDownload: async (path, opts = {}) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), opts.timeout || 30000);
+      try { return await fetch(path, { ...opts, signal: controller.signal }); } finally { clearTimeout(timer); }
+    },
+
+    // ---- 系统 ----
+    system: {
+      version: () => request('GET', '/system/version'),
+      status: () => request('GET', '/system'),
+      storage: () => request('GET', '/system/storage'),
+      reboot: () => request('POST', '/system/reboot'),
+      poweroff: () => request('POST', '/system/poweroff'),
+      hostname: (name) => request('PUT', '/system/hostname', { hostname: name }),
+    },
+
+    // ---- 运行时 ----
+    runtime: {
+      state: () => request('GET', '/state'),
+      start: () => request('POST', '/runtime/start'),
+      stop: () => request('POST', '/runtime/stop'),
+      config: () => request('GET', '/config'),
+      setConfig: (profile) => request('PUT', '/config', { profile }),
+    },
+
+    // ---- 模型 ----
+    models: {
+      list: () => request('GET', '/models'),
+      import: () => { /* TODO: 文件上传 */ return Promise.resolve({ ok: false, error: '即将支持' }); },
+      delete: (id) => request('POST', '/models/delete', { model_id: id }),
+      select: (id) => request('POST', '/models/select', { model_id: id }),
+      activate: (id) => request('POST', '/models/activate', { model_id: id }),
+      classNames: (names) => request('POST', '/models/class-names', { class_names: names }),
+      concurrency: (n) => request('POST', '/models/rknn-concurrency', { count: n }),
+    },
+
+    // ---- 预设 ----
+    presets: {
+      list: () => request('GET', '/presets'),
+      save: (name, profile) => request('POST', '/presets', { name, profile }),
+      load: (name) => request('POST', '/presets/load', { name }),
+      delete: (name) => request('POST', '/presets/delete', { name }),
+    },
+
+    // ---- 预览 ----
+    preview: {
+      image: () => '/api/v1/preview.jpg',
+      stream: () => '/api/v1/preview.mjpg',
+    },
+
+    // ---- 硬件 ----
+    hardware: {
+      display: () => request('GET', '/hardware/display'),
+      setDisplay: (cfg) => request('PUT', '/hardware/display', cfg),
+      mouse: () => request('GET', '/hardware/mouse'),
+      setMouse: (cfg) => request('PUT', '/hardware/mouse', cfg),
+    },
+
+    // ---- 网络 ----
+    network: {
+      wifi: () => request('GET', '/network/wifi'),
+      scan: () => request('POST', '/network/wifi/scan'),
+      connect: (ssid, psk) => request('POST', '/network/wifi/connect', { ssid, psk }),
+      ap: () => request('POST', '/network/wifi/ap/apply'),
+      client: () => request('POST', '/network/wifi/client/activate'),
+    },
+
+    // ---- 更新 ----
+    update: {
+      status: () => request('GET', '/update/status'),
+      check: () => request('POST', '/update/check'),
+      usbScan: () => request('POST', '/update/usb/scan'),
+      start: (version) => request('POST', '/update/start', { version }),
+      rollback: () => request('POST', '/update/rollback'),
+      cancel: () => request('POST', '/update/cancel'),
+      log: () => request('GET', '/update/log'),
+    },
+
+    // ---- 授权 ----
+    license: {
+      info: () => request('GET', '/license'),
+    },
+
+    // ---- 诊断 ----
+    diagnostics: {
+      aimTrace: () => request('POST', '/diagnostics/aim-trace'),
+    },
+
+    // ---- 设备枚举 ----
+    devices: {
+      makcu: () => request('GET', '/makcu/devices'),
+      ferrum: () => request('GET', '/ferrum/devices'),
+      kmbox: () => request('GET', '/kmboxb/devices'),
+    },
+  };
+
+  // 暴露到全局
+  window.ttbox = window.ttbox || {};
+  window.ttbox.api = apiClient;
+
+  console.log('[TTBOX API Client] 已加载 (v1.0.0)');
+})();

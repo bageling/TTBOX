@@ -185,7 +185,7 @@
     setProgress('CHECKING', '扫描 USB 更新...');
     BTN.scanOtg.disabled = true;
     try {
-      const res = await ttbox.api.update.check();
+      const res = await ttbox.api.update.usbScan();
       if (res.ok && res.data) {
         if (res.data.update_available) {
           EL.latestPill.textContent = 'USB: v' + res.data.latest_version;

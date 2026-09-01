@@ -312,12 +312,9 @@ const DISPLAY_DYNAMIC_MODE_MIN_PIXEL_CLOCK_KHZ = 25000;
 const DISPLAY_DYNAMIC_MODE_MAX_PIXEL_CLOCK_KHZ = 600000;
 const DISPLAY_DYNAMIC_MODE_H_BLANK = 48 + 32 + 80;
 const DISPLAY_DYNAMIC_MODE_V_BLANK = 3 + 5 + 77;
-const DISCLAIMER_STORAGE_KEY = "aiassistance_disclaimer_ack_v1";
-const THEME_STORAGE_KEY = "aiassistance_theme";
+const DISCLAIMER_STORAGE_KEY = "ttbox_disclaimer_ack_v1";
+const THEME_STORAGE_KEY = "ttbox_theme";
 const UI_BRAND_TTBOX = "ttbox";
-const UI_BRAND_YU = "yu";
-const UI_BRAND_XH = "xh";
-const UI_BRAND_XCSH = "xcsh";
 const MOUSE_MODE_SWITCH_SUPPRESS_MS = 180000;
 
 const state = {
@@ -389,7 +386,7 @@ const state = {
   navigationLockedToLicense: false,
   licenseStatusLoaded: false,
   mouseModeSwitchSuppressUntil: 0,
-  uiBrand: UI_BRAND_YU,
+  uiBrand: UI_BRAND_TTBOX,
   theme: "dark",
   livePollTimer: null,
   livePollInFlight: false,
@@ -473,8 +470,8 @@ function bindAutoStartControls() {
   });
 }
 
-function integrateXhFanSettings() {
-  if (state.uiBrand !== UI_BRAND_XH) return;
+function integrateFanSettings() {
+  // Universal - always apply
   const fanPage = $("fan-page");
   const assistStack = document.querySelector("#assist-page .assist-section-stack");
   if (!fanPage || !assistStack || fanPage.parentElement === assistStack) return;
@@ -488,64 +485,16 @@ function integrateXhFanSettings() {
 }
 
 function normalizeUiBrand(value) {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === UI_BRAND_TTBOX || normalized === UI_BRAND_XH || normalized === UI_BRAND_XCSH) return normalized;
-  return UI_BRAND_YU;
+  return UI_BRAND_TTBOX;
 }
 
 function brandFromPayload(payload) {
-  if (!payload || typeof payload !== "object") {
-    return normalizeUiBrand(document.documentElement.dataset.uiBrand);
-  }
-  if (payload.ui_brand) return normalizeUiBrand(payload.ui_brand);
-  if (payload.ui && payload.ui.ui_brand) return normalizeUiBrand(payload.ui.ui_brand);
-  if (payload.license && payload.license.ui_brand) return normalizeUiBrand(payload.license.ui_brand);
-  if (payload.state && payload.state.license && payload.state.license.ui_brand) {
-    return normalizeUiBrand(payload.state.license.ui_brand);
-  }
-  return normalizeUiBrand(document.documentElement.dataset.uiBrand);
+  return UI_BRAND_TTBOX;
 }
 
 function brandConfig(brand) {
-  const uiBrand = normalizeUiBrand(brand);
-  if (uiBrand === UI_BRAND_TTBOX) {
-    return {
-      uiBrand: UI_BRAND_TTBOX,
-      title: "TTBOX 控制台",
-      eyebrow: "TTBOX SYSTEM",
-      mark: "TT",
-      allowThemeSwitch: true,
-      defaultLocalName: "ttbox",
-      defaultHotspotSsid: "TTBOX",
-      fallbackResetText: "重置默认 Wi-Fi",
-    };
-  }
-  if (uiBrand === UI_BRAND_XCSH) {
-    return {
-      uiBrand: UI_BRAND_XCSH,
-      title: "XCSH 系统",
-      eyebrow: "XCSH SYSTEM",
-      mark: "XC",
-      allowThemeSwitch: false,
-      defaultLocalName: "xcsh",
-      defaultHotspotSsid: "XCSH",
-      fallbackResetText: "重置默认 Wi-Fi",
-    };
-  }
-  if (uiBrand === UI_BRAND_XH) {
-    return {
-      uiBrand: UI_BRAND_XH,
-      title: "XH 系统",
-      eyebrow: "XH SYSTEM",
-      mark: "XH",
-      allowThemeSwitch: false,
-      defaultLocalName: "xh",
-      defaultHotspotSsid: "XH",
-      fallbackResetText: "重置默认 Wi-Fi",
-    };
-  }
   return {
-    uiBrand: UI_BRAND_YU,
+    uiBrand: UI_BRAND_TTBOX,
     title: "TTBOX 控制台",
     eyebrow: "TTBOX SYSTEM",
     mark: "TT",
@@ -585,14 +534,14 @@ function updateThemeToggleLabel() {
   button.setAttribute("data-symbol", isLight ? "\u263e" : "\u2600");
   button.setAttribute("aria-label", isLight ? "切换到深色主题" : "切换到浅色主题");
   const customVisualTheme = (document.documentElement.dataset.visualTheme || "default") !== "default";
-  button.hidden = customVisualTheme || state.uiBrand === UI_BRAND_XH || state.uiBrand === UI_BRAND_XCSH;
+  button.hidden = customVisualTheme;
 }
 
 function applyTheme(theme, { persist = false } = {}) {
   const nextTheme = theme === "light" ? "light" : "dark";
   state.theme = nextTheme;
   document.documentElement.dataset.theme = nextTheme;
-  if (persist && state.uiBrand === UI_BRAND_YU) {
+  if (persist) {
     saveStoredTheme(nextTheme);
   }
   updateThemeToggleLabel();
@@ -602,11 +551,9 @@ function applyBrand(payload) {
   const config = brandConfig(brandFromPayload(payload));
   state.uiBrand = config.uiBrand;
   document.documentElement.dataset.uiBrand = config.uiBrand;
-  document.body.classList.toggle("ui-brand-ttbox", config.uiBrand === UI_BRAND_TTBOX);
-  document.body.classList.toggle("ui-brand-yu", config.uiBrand === UI_BRAND_YU);
-  document.body.classList.toggle("ui-brand-xh", config.uiBrand === UI_BRAND_XH);
-  document.body.classList.toggle("ui-brand-xcsh", config.uiBrand === UI_BRAND_XCSH);
-  const mark = $("brandMark");
+  document.body.classList.add("ui-brand-ttbox");
+  // TTBOX brand - no special class needed
+    const mark = $("brandMark");
   const eyebrow = $("brandEyebrow");
   const title = $("brandTitle");
   if (mark) mark.textContent = config.mark;
@@ -627,22 +574,14 @@ function applyBrand(payload) {
     themeButton.hidden = !config.allowThemeSwitch || customVisualTheme;
   }
   const visualThemeColor = document.documentElement.dataset.visualThemeColor || "system";
-  applyTheme(
-    config.uiBrand === UI_BRAND_XH || config.uiBrand === UI_BRAND_XCSH
-      ? "dark"
-      : (["light", "dark"].includes(visualThemeColor) ? visualThemeColor : storedTheme())
-  );
+  applyTheme(["light", "dark"].includes(visualThemeColor) ? visualThemeColor : storedTheme());
 }
 
 function initThemeControls() {
   const button = $("themeToggleButton");
   if (!button) return;
   button.addEventListener("click", () => {
-    if (
-      state.uiBrand === UI_BRAND_XH ||
-      state.uiBrand === UI_BRAND_XCSH ||
-      (document.documentElement.dataset.visualTheme || "default") !== "default"
-    ) return;
+    if ((document.documentElement.dataset.visualTheme || "default") !== "default") return;
     applyTheme(state.theme === "light" ? "dark" : "light", { persist: true });
   });
   updateThemeToggleLabel();
@@ -723,7 +662,7 @@ function renderThemeStore(payload) {
       <div class="theme-card-preview">
         ${preview
           ? `<img src="${escapeAttr(preview.url)}" alt="${escapeAttr(`${theme.title || "主题"}预览`)}" loading="lazy">`
-          : `<div class="theme-card-preview-empty">${escapeHtml(theme.id === "default" ? "YU" : theme.title || "主题")}</div>`}
+          : `<div class="theme-card-preview-empty">${escapeHtml(theme.id === "default" ? "TTBOX" : theme.title || "主题")}</div>`}
         <span class="theme-card-badge">${escapeHtml(badge)}</span>
       </div>
       <div class="theme-card-body">
@@ -737,7 +676,7 @@ function renderThemeStore(payload) {
 }
 
 async function refreshThemeStore({ silent = false } = {}) {
-  if (!$(`themeCardList`) || state.uiBrand !== UI_BRAND_YU) return null;
+  if (!$(`themeCardList`)) return null;
   const status = $("themeStoreStatus");
   if (status && !silent) {
     status.classList.remove("is-error");
@@ -1266,18 +1205,20 @@ function redirectToActivationPage() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.ok === false) {
-    const error = new Error(data.error || `HTTP ${response.status}`);
-    error.payload = data.data;
-    error.status = response.status;
-    if (isAuthorizationFailure(error)) {
-      redirectToActivationPage();
-    }
+  const client = window.ttbox && window.ttbox.api;
+  if (!client || typeof client.request !== "function") throw new Error("TTBOX API Client 未加载");
+  let body = options.body;
+  if (typeof body === "string") {
+    try { body = JSON.parse(body); } catch { body = undefined; }
+  }
+  const result = await client.request((options.method || "GET").toUpperCase(), path, body, { ...options, body: undefined });
+  if (!result.ok) {
+    const error = new Error(result.error || "请求失败");
+    error.status = result.status;
+    error.payload = result.data;
     throw error;
   }
-  return data.data;
+  return result.data;
 }
 
 function setApplyStatus(mode, text) {
@@ -1324,7 +1265,7 @@ async function downloadUsbDiagnostics() {
       button.disabled = true;
     }
     setUsbDiagnosticsStatus("生成中...");
-    const response = await fetch("/api/diagnostics/usb-proxy.zip");
+    const response = await ttbox.api.rawDownload("/api/diagnostics/usb-proxy.zip");
     if (!response.ok) {
       const text = await response.text().catch(() => "");
       throw new Error(text.slice(0, 200) || `HTTP ${response.status}`);
@@ -2656,7 +2597,7 @@ function modelBackendFilterValue(model) {
 }
 
 function shouldShowCloudEncryptedModelsInLibrary() {
-  return state.uiBrand === UI_BRAND_XCSH || state.uiBrand === UI_BRAND_TTBOX;
+  return state.uiBrand === UI_BRAND_TTBOX;
 }
 
 function modelVisibleInLibrary(model) {
@@ -5606,7 +5547,7 @@ function resetCurrentMovementSectionDefaults() {
   resetFieldDefaults(movementDefaultsForSection(sectionId));
   state.isPopulating = false;
   requestConfigApply(0);
-  showToast(`${state.uiBrand === UI_BRAND_XH ? "当前PID设置" : "当前移动控制"}子页面已恢复默认值`);
+  showToast("当前移动控制子页面已恢复默认值");
 }
 
 function assistDefaultsForSection(sectionId) {
@@ -6283,7 +6224,7 @@ function defaultMdnsHost() {
 
 function displayDefaultHotspotSsid(value = "") {
   const text = String(value || "").trim();
-  if ((state.uiBrand === UI_BRAND_XH || state.uiBrand === UI_BRAND_XCSH) && (!text || text === "YUAI")) {
+  if (!text || text === "TTBOX") {
     return currentBrandConfig().defaultHotspotSsid;
   }
   return text || currentBrandConfig().defaultHotspotSsid;
@@ -6292,7 +6233,7 @@ function displayDefaultHotspotSsid(value = "") {
 function brandHotspotSsid(value = "", fallback = "") {
   const text = String(value || "").trim();
   const fallbackText = String(fallback || "").trim();
-  if (!text || text === "YUAI" || text === fallbackText) {
+  if (!text || text === "TTBOX" || text === fallbackText) {
     return displayDefaultHotspotSsid(fallbackText || text);
   }
   return text;
@@ -9365,7 +9306,7 @@ function populateDisplayHardware(payload) {
   }
   setHardwareStatus("displayHardwareStatus", payload && payload.available ? "可用" : "未安装", !!(payload && payload.available));
   renderDisplayModeSummary(payload);
-  applyDisplayLoopoutIdentityUi();
+  // door display removed
 }
 
 function collectDisplayHardware() {
@@ -9400,7 +9341,7 @@ function validateDisplayHardware() {
   const loopoutOverlayEnabled = getCheckbox("display_loopout_overlay_enabled");
   const loopoutPixelFormat = getString("display_loopout_pixel_format") || "rgb888";
   if (loopoutEnabled && state.displayRealMonitor) {
-    applyDisplayLoopoutIdentityUi();
+    // door display removed
   }
   const name = getString("display_name");
   const vendor = getString("display_vendor").toUpperCase();
@@ -9457,7 +9398,7 @@ function validateDisplayHardware() {
 
 function randomizeDisplayHardware() {
   if (getCheckbox("display_loopout_enabled")) {
-    applyDisplayLoopoutIdentityUi();
+    // door display removed
     return;
   }
   const vendor = randomLetters(3);
@@ -11527,7 +11468,7 @@ function bindEvents() {
           loopout_enabled: getCheckbox("display_loopout_enabled"),
         },
       });
-      applyDisplayLoopoutIdentityUi();
+      // door display removed
       setValidation("displayHardwareValidation", DISPLAY_IDENTITY_FIELD_IDS, []);
     });
   }
@@ -12191,8 +12132,8 @@ function initLiveStatePolling() {
 }
 
 async function main() {
-  applyBrand({ ui_brand: document.documentElement.dataset.uiBrand || UI_BRAND_YU });
-  integrateXhFanSettings();
+  applyBrand({ ui_brand: document.documentElement.dataset.uiBrand || UI_BRAND_TTBOX });
+  integrateFanSettings();
   initThemeControls();
   initThemeStore();
   fillOptions($("recoil_hotkey"), POINTER_HOTKEYS);

@@ -1636,30 +1636,47 @@ def start_activation_full_recovery():
     return jsonify({'ok': True, 'data': {'message': '恢复中'}})
 
 
-# -- 更新 --
+# -- 更新：统一委托设备 Update Engine --
+UPDATE_ENGINE = '/opt/ttbox/tools/update_engine.py'
+UPDATE_STATE = '/var/lib/ttbox/update/update_state.json'
+
+def _update_engine_action(action, version=None):
+    if not os.path.exists(UPDATE_ENGINE):
+        return jsonify({'ok': False, 'error': 'Update Engine 未安装'}), 503
+    cmd = [sys.executable, UPDATE_ENGINE, '--action', action]
+    if version:
+        cmd += ['--version', version]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        payload = json.loads(result.stdout or '{}')
+        return jsonify(payload), 200 if payload.get('ok') else 502
+    except Exception as exc:
+        return jsonify({'ok': False, 'error': str(exc)}), 502
+
 @app.post('/api/update/check')
 def check_update():
-    return jsonify({'ok': True, 'data': {'update_available': False, 'latest_version': '2026.08.31.1'}})
+    return _update_engine_action('check')
 
-
-@app.post('/api/update/versions')
-def list_update_versions():
-    return jsonify({'ok': True, 'data': {'versions': []}})
-
+@app.post('/api/update/usb/scan')
+def scan_usb_update():
+    return _update_engine_action('scan-otg')
 
 @app.get('/api/update/status')
 def get_update_status():
-    return jsonify({'ok': True, 'data': {'status': 'idle', 'progress': 0}})
-
-
-@app.post('/api/update/cleanup-stuck')
-def cleanup_stuck_update():
-    return jsonify({'ok': True, 'data': {'message': '已清理'}})
-
+    return _update_engine_action('status')
 
 @app.post('/api/update/install')
 def install_update():
-    return jsonify({'ok': True, 'data': {'message': '更新已开始'}})
+    body = request.get_json(silent=True) or {}
+    return _update_engine_action('start', body.get('version'))
+
+@app.post('/api/update/rollback')
+def rollback_update():
+    return _update_engine_action('rollback')
+
+@app.post('/api/update/cancel')
+def cancel_update():
+    return jsonify({'ok': False, 'error': '取消功能尚未接入'}), 501
 
 
 @app.get('/api/hailo/status')
