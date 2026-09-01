@@ -10,6 +10,12 @@ TTBOX Gateway (scripts/ttbox_gateway.py)
 TTBOX IPC (core/src/ipc/IpcServer.cpp)
     ↓
 TTBOX Core (C++)
+
+TTBOX Web UI
+    ↓ HTTP API
+TTBOX Update Engine (/var/run/ttbox/update.sock)
+    ↓ Unix Socket IPC
+TTBOX Update Engine (C++/Python)
 ```
 
 ## API 命名规范
@@ -102,6 +108,18 @@ TTBOX Core (C++)
 | GET | `/api/settings/auto-start` | 获取自启设置 | 🟢 |
 | PUT | `/api/settings/auto-start` | 更新自启设置 | 🟢 |
 
+### Update（更新） — 新增
+
+| 方法 | 路径 | 描述 | 状态 |
+|------|------|------|------|
+| GET | `/api/update/status` | 获取更新状态 | 🔵 PLANNED |
+| POST | `/api/update/check` | 检查 OTA 更新 | 🔵 PLANNED |
+| POST | `/api/update/scan-otg` | 扫描 USB 更新 | 🔵 PLANNED |
+| POST | `/api/update/start` | 开始更新指定版本 | 🔵 PLANNED |
+| POST | `/api/update/rollback` | 回滚到上一版本 | 🔵 PLANNED |
+| POST | `/api/update/cancel` | 取消更新 | 🔵 PLANNED |
+| GET | `/api/update/log` | 获取更新日志 | 🔵 PLANNED |
+
 ### Diagnostics（诊断）
 
 | 方法 | 路径 | 描述 | 状态 |
@@ -126,7 +144,8 @@ TTBOX Core (C++)
 
 ### 通信方式
 
-- Unix Domain Socket：`/tmp/ttbox_core.sock`
+- Unix Domain Socket：`/tmp/ttbox_core.sock`（Core）
+- Unix Domain Socket：`/var/run/ttbox/update.sock`（Update Engine）
 - 请求格式：JSON 文本行，以 `\n` 结尾
 - 响应格式：JSON 文本行，以 `\n` 结尾
 
@@ -152,6 +171,8 @@ TTBOX Core (C++)
 
 ### 命令列表
 
+#### Core IPC
+
 | 命令 | 描述 | 状态 |
 |------|------|------|
 | GET_STATUS | 获取运行状态 | 🟢 |
@@ -166,6 +187,18 @@ TTBOX Core (C++)
 | MODEL_ACTIVATE | 激活模型 | 🟢 |
 | MODEL_REMOVE | 删除模型 | 🟢 |
 | PING | 心跳检测 | 🟢 |
+
+#### Update Engine IPC — 新增
+
+| 命令 | 描述 | 状态 |
+|------|------|------|
+| GET_STATUS | 获取更新状态 | 🔵 PLANNED |
+| CHECK_UPDATE | 检查 OTA 更新 | 🔵 PLANNED |
+| SCAN_OTG | 扫描 USB 更新 | 🔵 PLANNED |
+| START_UPDATE | 开始更新 | 🔵 PLANNED |
+| CANCEL_UPDATE | 取消更新 | 🔵 PLANNED |
+| ROLLBACK | 回滚 | 🔵 PLANNED |
+| GET_LOG | 获取更新日志 | 🔵 PLANNED |
 
 ## 响应格式规范
 
@@ -195,6 +228,8 @@ TTBOX Core (C++)
 | 1 | 参数错误 |
 | 2 | 资源不存在 |
 | 3 | 内部错误 |
+| 4 | 更新进行中 |
+| 5 | 更新不可用 |
 
 ## 版本控制
 

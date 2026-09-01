@@ -48,7 +48,7 @@
 | T032 | Motion Training | Future | 🔵 | — | — | — | — | motion-training | 运动轨迹学习与训练 |
 | T033 | Auto Calibration | Future | 🔵 | — | — | — | — | calibration | 自动标定 |
 | T034 | Remote Sync | Future | 🔵 | — | — | — | — | remote-sync | 远程模型同步 |
-| T035 | Update Manager | Future | 🔵 | — | — | — | — | update | 系统更新 |
+| T035 | Update Manager | System | 🔵 | — | — | — | — | update | 系统更新管理 |
 | T036 | Theme System | Future | ⚪ | — | — | — | — | — | 主题更换 |
 | T037 | Announcement | Future | ⚪ | — | — | — | — | — | 系统公告 |
 | T038 | Hailo Acceleration | Future | ⚪ | — | — | — | — | — | Hailo-8 加速（RK3588 无此硬件） |
@@ -75,6 +75,6 @@
 | Profiles | 1 | 1 🟢 |
 | Hardware | 3 | 3 🟢 |
 | Network | 2 | 2 🟢 |
-| System | 5 | 5 🟢 |
+| System | 6 | 5 🟢 + 1 🔵 |
 | Diagnostics | 1 | 1 🟡 |
-| Future | 8 | 0 🔵/⚪ |
+| Future | 7 | 0 🔵/⚪ |
