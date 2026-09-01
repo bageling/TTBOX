@@ -43,11 +43,8 @@
       {% endif %}
 
       {% set module_labels = [
-        "首页", "热键", "PID设置", "自定义设置", "模型", "采集与透传",
-        "Hailo-8加速", "外接盒子", "网络", "预设", "系统升级"
-      ] if ui_brand == "xh" else [
-        "总览", "热键控制", "移动控制", "辅助功能", "模型库", "显示与鼠标",
-        "Hailo-8加速", "键鼠盒子", "网络配置", "预设参数", "主题商店", "系统状态"
+        "总览", "热键", "移动控制", "辅助功能", "模型库",
+        "显示与鼠标", "网络配置", "预设参数", "系统设置", "系统更新"
       ] %}
       <nav class="module-tabs" aria-label="功能模块">
         <button class="module-tab is-active" type="button" data-page-target="home-page">
@@ -69,24 +66,25 @@
           <span>06</span>{{ module_labels[5] }}
         </button>
         <button style="display:none" class="module-tab" type="button" data-page-target="hailo-page">
-          <span>07</span>{{ module_labels[6] }}
+          <span>07</span>Hailo-8
         </button>
         <button style="display:none" class="module-tab" type="button" data-page-target="kmbox-page">
-          <span>08</span>{{ module_labels[7] }}
+          <span>08</span>键鼠盒子
         </button>
         <button class="module-tab" type="button" data-page-target="wifi-page">
-          <span>09</span>{{ module_labels[8] }}
+          <span>09</span>{{ module_labels[6] }}
         </button>
         <button class="module-tab" type="button" data-page-target="preset-page">
-          <span>10</span>{{ module_labels[9] }}
+          <span>10</span>{{ module_labels[7] }}
         </button>
-        {% if ui_brand == "yu" %}
         <button style="display:none" class="module-tab" type="button" data-page-target="theme-store-page">
-          <span>11</span>{{ module_labels[10] }}
+          <span>11</span>主题商店
         </button>
-        {% endif %}
         <button class="module-tab" type="button" data-page-target="license-page">
-          <span>{{ "11" if ui_brand == "xh" else "12" }}</span>{{ module_labels[10] if ui_brand == "xh" else module_labels[11] }}
+          <span>11</span>{{ module_labels[8] }}
+        </button>
+        <button class="module-tab" type="button" data-page-target="update-page">
+          <span>12</span>{{ module_labels[9] }}
         </button>
       </nav>
     </aside>
@@ -1300,8 +1298,8 @@
         <section id="license-page" class="page-card" data-page>
           <div class="page-head mobile-action-head">
             <div>
-              <p>{{ "系统升级" if ui_brand == "xh" else "系统状态" }}</p>
-              <h2>{{ "系统升级" if ui_brand == "xh" else "授权、更新与存储" }}</h2>
+              <p>系统设置</p>
+              <h2>系统设置</h2>
             </div>
             <span id="licenseStatusPill" class="pill">未读取</span>
           </div>
@@ -1320,50 +1318,6 @@
 
             <article class="module-tile">
               <div class="module-title">
-                <h3>系统更新</h3>
-                <span id="updateStatusPill" class="pill">待检查</span>
-              </div>
-              <div id="updateSummary" class="license-summary"></div>
-              <div class="hardware-actions">
-                <button id="checkUpdateButton" class="ghost-button" type="button">检查更新</button>
-                <button id="switchUpdateVersionButton" class="ghost-button" type="button">切换版本</button>
-                <button id="cleanupUpdateStatusButton" class="ghost-button" type="button">清理卡住状态</button>
-                <button id="installUpdateButton" class="danger-button" type="button" disabled>安装更新</button>
-              </div>
-              <div id="updateProgressPanel" class="update-progress-panel" hidden>
-                <div class="update-progress-head">
-                  <span id="updateProgressLabel">等待更新</span>
-                  <strong id="updateProgressPercent">0%</strong>
-                </div>
-                <div class="setup-progress-track update-progress-track" aria-hidden="true">
-                  <span id="updateProgressBar" style="width: 0%"></span>
-                </div>
-                <p id="updateProgressMessage" class="setup-message">暂无更新任务。</p>
-              </div>
-              <pre id="updateReleaseNotes" class="hardware-log">暂无更新信息</pre>
-            </article>
-
-            <div id="updateVersionDialog" class="modal-backdrop" hidden>
-              <div class="modal-card update-version-card" role="dialog" aria-modal="true" aria-labelledby="updateVersionTitle">
-                <div class="modal-head">
-                  <div>
-                    <h3 id="updateVersionTitle">切换版本</h3>
-                    <small id="updateVersionCurrent">当前版本 --</small>
-                  </div>
-                </div>
-                <label class="field update-version-field">目标版本
-                  <select id="updateVersionSelect"></select>
-                  <span id="updateVersionHint" class="field-hint"></span>
-                </label>
-                <div class="modal-actions">
-                  <button id="cancelUpdateVersionButton" class="ghost-button" type="button">取消</button>
-                  <button id="confirmUpdateVersionButton" class="danger-button" type="button" disabled>切换</button>
-                </div>
-              </div>
-            </div>
-
-            <article class="module-tile">
-              <div class="module-title">
                 <h3>存储容量</h3>
                 <span id="storageExpandPill" class="pill">未读取</span>
               </div>
@@ -1373,6 +1327,32 @@
                 <button id="refreshStorageButton" class="ghost-button" type="button">刷新容量</button>
               </div>
               <pre id="storageExpandLog" class="hardware-log">暂无扩容信息</pre>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>系统信息</h3>
+                <span id="systemInfoPill" class="pill">已加载</span>
+              </div>
+              <div class="license-summary" id="systemInfoSummary">
+                <div class="hailo-status-grid">
+                  <div><span>产品</span><strong id="sysProduct">TTBOX</strong></div>
+                  <div><span>版本</span><strong id="sysVersion">--</strong></div>
+                  <div><span>构建</span><strong id="sysBuild">--</strong></div>
+                  <div><span>硬件</span><strong id="sysHardware">--</strong></div>
+                  <div><span>通道</span><strong id="sysChannel">--</strong></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>重启与关机</h3>
+              </div>
+              <div class="hardware-actions">
+                <button id="rebootSystemButton2" class="ghost-button" type="button">重启设备</button>
+                <button id="poweroffSystemButton2" class="danger-button" type="button">关机</button>
+              </div>
             </article>
 
             {% if ui_brand == "yu" %}
@@ -1398,42 +1378,91 @@
                     </select>
                   </label>
                 </section>
-
                 <section class="fan-system-runtime" aria-label="风扇运行状态">
                   <div class="fan-system-section-head">
                     <strong>运行状态</strong>
                     <span id="fanRuntimeMode" class="pill">待机</span>
                   </div>
                   <div class="hailo-status-grid fan-status-grid">
-                    <div>
-                      <span>PWM 控制接口</span>
-                      <strong id="fanControlAvailableValue">--</strong>
-                    </div>
-                    <div>
-                      <span>温度来源</span>
-                      <strong id="fanTemperatureSourceValue">--</strong>
-                    </div>
-                    <div>
-                      <span>当前温度</span>
-                      <strong id="fanTemperatureValue">--</strong>
-                    </div>
-                    <div>
-                      <span>当前风量</span>
-                      <strong id="fanPwmValue">--</strong>
-                    </div>
-                    <div>
-                      <span>转速反馈</span>
-                      <strong id="fanRpmValue">--</strong>
-                    </div>
-                    <div>
-                      <span>状态</span>
-                      <strong id="fanErrorValue">--</strong>
-                    </div>
+                    <div><span>PWM 控制接口</span><strong id="fanControlAvailableValue">--</strong></div>
+                    <div><span>温度来源</span><strong id="fanTemperatureSourceValue">--</strong></div>
+                    <div><span>当前温度</span><strong id="fanTemperatureValue">--</strong></div>
+                    <div><span>当前风量</span><strong id="fanPwmValue">--</strong></div>
+                    <div><span>转速反馈</span><strong id="fanRpmValue">--</strong></div>
+                    <div><span>状态</span><strong id="fanErrorValue">--</strong></div>
                   </div>
                 </section>
               </div>
             </article>
             {% endif %}
+          </div>
+        </section>
+
+        <section id="update-page" class="page-card" data-page>
+          <div class="page-head mobile-action-head">
+            <div>
+              <p>系统更新</p>
+              <h2>系统更新</h2>
+            </div>
+            <span id="updateStatusPill" class="pill">待检查</span>
+          </div>
+
+          <div class="license-grid">
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>当前版本</h3>
+                <span id="updateCurrentVersionPill" class="pill">--</span>
+              </div>
+              <div class="license-summary">
+                <div class="hailo-status-grid">
+                  <div><span>产品</span><strong id="updateProduct">TTBOX</strong></div>
+                  <div><span>版本</span><strong id="updateCurrentVersion">--</strong></div>
+                  <div><span>构建</span><strong id="updateBuild">--</strong></div>
+                  <div><span>通道</span><strong id="updateChannel">--</strong></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>检查更新</h3>
+                <span id="updateLatestPill" class="pill">--</span>
+              </div>
+              <div class="hardware-actions">
+                <button id="updateCheckButton" class="ghost-button" type="button">检查更新</button>
+                <button id="updateInstallButton" class="danger-button" type="button" disabled>安装更新</button>
+                <button id="updateRollbackButton" class="ghost-button" type="button" disabled>回滚</button>
+                <button id="updateScanOtgButton" class="ghost-button" type="button">扫描USB更新</button>
+              </div>
+              <div id="updateProgressPanel" class="update-progress-panel">
+                <div class="update-progress-head">
+                  <span id="updateProgressLabel">等待操作</span>
+                  <strong id="updateProgressPercent">--</strong>
+                </div>
+                <div class="setup-progress-track update-progress-track" aria-hidden="true">
+                  <span id="updateProgressBar" style="width: 0%"></span>
+                </div>
+                <p id="updateProgressMessage" class="setup-message">点击检查更新开始。</p>
+              </div>
+              <pre id="updateReleaseNotes" class="hardware-log">暂无更新信息</pre>
+              <div id="updateEngineStatus" class="license-summary">
+                <div class="hailo-status-grid">
+                  <div><span>更新状态</span><strong id="updateEngineState">--</strong></div>
+                  <div><span>错误信息</span><strong id="updateEngineError">--</strong></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>关于</h3>
+              </div>
+              <div class="license-summary">
+                <p>TTBOX 更新系统 v0.1.0</p>
+                <p>支持 OTA（网络）和 OTG（USB）两种更新方式。</p>
+                <p>更新包经过 SHA256 校验和 Ed25519 数字签名验证。</p>
+              </div>
+            </article>
           </div>
         </section>
 
@@ -1682,6 +1711,8 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
+  <script src="{{ url_for('static', filename='apiClient.js') }}?v={{ asset_version }}"></script>
+  <script src="{{ url_for('static', filename='update.js') }}?v={{ asset_version }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}-activation-redirect-v2-wifi-brand-ap-v1-auto-start-layout-v2-preset-rename-v1-usb-proxy-timing-v1-auto-calibration-v4-pid-defaults-v1-manual-values-v1-calibration-first-v1-physical-button-block-v1-motion-preset-state-v1-rapid-fire-left-v1-back-flick-class-v1"></script>
   {% if motion_training_available is not defined or motion_training_available %}
   {% if motion_training_collection_available is defined and not motion_training_collection_available %}
