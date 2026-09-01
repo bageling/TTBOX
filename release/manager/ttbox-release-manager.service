@@ -1,0 +1,26 @@
+[Unit]
+Description=TTBOX Release Management Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ttbox
+Group=ttbox
+WorkingDirectory=/opt/ttbox/update-server
+Environment=TTBOX_RELEASE_HOST=0.0.0.0
+Environment=TTBOX_RELEASE_PORT=8090
+Environment=TTBOX_RELEASE_DATA=/var/lib/ttbox/release-manager
+Environment=TTBOX_RELEASE_STORAGE=/srv/ttbox
+Environment=TTBOX_RELEASE_PUBLIC_KEY=/srv/ttbox/releases/release-public.pem
+EnvironmentFile=-/etc/ttbox/release-manager.env
+ExecStart=/usr/bin/python3 /opt/ttbox/update-server/server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/srv/ttbox /var/lib/ttbox /var/log/ttbox
+
+[Install]
+WantedBy=multi-user.target

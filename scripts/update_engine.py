@@ -124,12 +124,12 @@ class UpdateEngine:
             import urllib.request
             url = f'{self.server_url}/api/update/check'
             body = json.dumps({
-                'product': 'TTBOX',
-                'current_version': self.state['current_version'],
-                'hardware': 'rk3588',
-                'channel': 'stable',
-                'components': ['core', 'web', 'gateway']
-            }).encode()
+                            'product': 'TTBOX',
+                            'current_version': self.state['current_version'],
+                            'hardware': 'rk3588',
+                            'channel': getattr(self, 'channel', 'stable'),
+                            'components': ['core', 'web', 'gateway']
+                        }).encode()
             req = urllib.request.Request(url, data=body, method='POST')
             req.add_header('Content-Type', 'application/json')
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -175,7 +175,8 @@ class UpdateEngine:
         self._set_state('DOWNLOADING')
 
         try:
-            manifest_url = f'{self.server_url}/api/update/manifest/TTBOX/{version}/stable/manifest.json'
+            channel = self.state.get('attempted_channel', 'stable')
+            manifest_url = f'{self.server_url}/api/update/manifest/TTBOX/{version}/{channel}/manifest.json'
             manifest_data, status = self._http_get(manifest_url)
             manifest = json.loads(manifest_data.decode())
 
@@ -202,7 +203,7 @@ class UpdateEngine:
                     return {'ok': False, 'error': 'SHA256 mismatch'}
 
                 # 验证 Ed25519 签名（使用 manifest 中的 signature 字段，它是对 SHA256 的签名）
-                manifest_sig = manifest.get('signature', '')
+                manifest_sig = pkg.get('signature') or manifest.get('signature', '')
                 if manifest_sig:
                     if not self._verify_signature(pkg['sha256'], manifest_sig):
                         os.remove(pkg_path)
@@ -232,6 +233,8 @@ class UpdateEngine:
             return {'ok': False, 'error': str(e)}
 
     def stage_update(self):
+        if not self.state.get('attempted_version'):
+            return {'ok': False, 'error': 'No update version selected'}
         self._set_state('STAGING')
         try:
             version = self.state['attempted_version']
@@ -256,6 +259,8 @@ class UpdateEngine:
             return {'ok': False, 'error': str(e)}
 
     def apply_update(self):
+        if not self.state.get('attempted_version'):
+            return {'ok': False, 'error': 'No update version selected'}
         try:
             self._set_state('APPLYING')
             version = self.state['attempted_version']
@@ -320,18 +325,12 @@ class UpdateEngine:
             return {'ok': False, 'error': str(e)}
 
     def _health_check(self):
-        checks = [
-            ('ttbox-core', '/usr/local/bin/ttbox-core'),
-            ('ttbox-web', '/usr/local/bin/ttbox-web'),
-        ]
-        for name, path in checks:
-            if not os.path.exists(path):
-                log.warning(f'Health check failed: {name} not found')
+        """使用设备实际 systemd 服务进行健康检查。"""
+        for service in ('ttbox-core', 'ttbox-web'):
+            result = subprocess.run(['systemctl', 'is-active', '--quiet', service], timeout=10)
+            if result.returncode != 0:
+                log.warning(f'Health check failed: {service} is not active')
                 return False
-            if not os.access(path, os.X_OK):
-                log.warning(f'Health check failed: {name} not executable')
-                return False
-        log.info('Health check passed')
         return True
 
     def rollback(self):
@@ -452,9 +451,11 @@ if __name__ == '__main__':
     parser.add_argument('--action', choices=['check', 'download', 'stage', 'apply', 'start', 'rollback', 'status', 'scan-otg', 'cancel', 'log'],
                        default='status')
     parser.add_argument('--version')
+    parser.add_argument('--channel', default='stable')
     args = parser.parse_args()
 
     engine = UpdateEngine(server_url=args.server)
+    engine.channel = args.channel
 
     actions = {
         'status': lambda: print(json.dumps(engine.get_status(), indent=2, ensure_ascii=False)),
