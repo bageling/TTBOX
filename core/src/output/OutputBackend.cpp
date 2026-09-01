@@ -31,11 +31,14 @@ bool IOutputBackend::gate_allows() const {
     if (config_source_) {
         auto p = config_source_->snapshot();
         if (!p) return false;
-        if (!p->mouse.enabled) return false;
+        const bool calibrating = p->mouse.calibrating;
+        if (!p->mouse.enabled && !calibrating) return false;
         const uint16_t mask = static_cast<uint16_t>(
             static_cast<uint16_t>(p->mouse.aim_hotkey) |
             static_cast<uint16_t>(p->mouse.aim_hotkey2));
-        if (mask == 0) return false;  // 配置缺失 → 禁止注入
+        if (mask == 0 && !calibrating) return false;  // 配置缺失 → 禁止注入
+        // 标定模式：无视热键放行（标定线程自己注入运动帧，物理鼠标不参与）
+        if (calibrating) return true;
         if (button_source_ && (button_source_->load(std::memory_order_acquire) & mask) == 0) {
             return false;
         }

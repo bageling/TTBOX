@@ -224,7 +224,10 @@ def ipc_request(req_type: str, params: dict | None = None, timeout: float = 5) -
     payload = {'type': req_type}
     if params is not None:
         payload['params'] = params
-    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    except (AttributeError, OSError):
+        return {'status': 3, 'error': '当前环境不支持 Unix socket（板端专用）'}
     s.settimeout(timeout)
     try:
         s.connect(IPC_SOCKET)
@@ -238,7 +241,7 @@ def ipc_request(req_type: str, params: dict | None = None, timeout: float = 5) -
         if not buf:
             return {'status': 3, 'error': 'IPC 无响应（Core 未运行?）'}
         return json.loads(buf.decode())
-    except (FileNotFoundError, ConnectionRefusedError):
+    except (FileNotFoundError, ConnectionRefusedError, AttributeError, OSError):
         return {'status': 3, 'error': '无法连接 Core IPC'}
     except socket.timeout:
         return {'status': 3, 'error': 'IPC 响应超时'}
@@ -626,7 +629,16 @@ def collect_yu_state() -> dict:
                 },
                 'latency': {'capture_to_mouse_send_ms': m.get('e2e_ms', 0), 'preprocess_to_track_ms': m.get('e2e_ms', 0)},
                 'license': DEFAULT_LICENSE,
-                'mouse_output': {},
+                # 物理移动屏蔽实时状态（真实来源：RuntimeProfile mouse 配置 + 输出模式支持性）
+                'mouse_output': {
+                    'mode': 'local_hid',
+                    'physical_motion_block_support': 'supported',
+                    'physical_motion_block_mask': (
+                        (1 if (prof.get('mouse') or {}).get('block_physical_x') else 0) |
+                        (2 if (prof.get('mouse') or {}).get('block_physical_y') else 0)
+                    ),
+                    'physical_motion_block_error': '',
+                },
                 # MJPEG 流（动态预览）：img 标签原生支持 multipart/x-mixed-replace，
                 # 前端 previewImage 直接消费；不能用 /api/preview.jpg（静态单帧，加载一次就冻结）
                 'preview_path': '/api/preview.mjpg',
@@ -685,7 +697,7 @@ def index():
         motion_training_available=False,
         motion_training_collection_available=False,
         allow_theme_switch=True,
-        show_aim_trace_button=False,
+        show_aim_trace_button=True,
         default_hotspot_ssid='TTBOX',
         default_local_name='ttbox',
     )
@@ -703,7 +715,7 @@ def desktop():
         motion_training_available=False,
         motion_training_collection_available=False,
         allow_theme_switch=True,
-        show_aim_trace_button=False,
+        show_aim_trace_button=True,
         default_hotspot_ssid='TTBOX',
         default_local_name='ttbox',
     )
@@ -721,7 +733,7 @@ def mobile():
         motion_training_available=False,
         motion_training_collection_available=False,
         allow_theme_switch=True,
-        show_aim_trace_button=False,
+        show_aim_trace_button=True,
         default_hotspot_ssid='TTBOX',
         default_local_name='ttbox',
     )
@@ -1242,29 +1254,374 @@ def export_preset(name: str):
 
 
 # -- 控制/校准 --
+# 自动标定（真实闭环）：目标反馈读 Core GET_STATUS.metrics（aim_pos_x/y = AimThread 选中目标中心），
+# 运动注入走 mouse.calibrating 标定模式（AimThread/OutputBackend 在 calibrating 期间无视热键放行 AI 移动）。
+# 标定结果写 /opt/ttbox/config/calibration.json，并把 kp 换算写回 RuntimeProfile（Core 热更新）。
+CALIBRATION_FILE = '/opt/ttbox/config/calibration.json'
+ACTIVE_MODEL_FILE = '/opt/ttbox/models/active_model.txt'
+_cal = {
+    'phase': 'idle',        # idle|stabilize|moving|measuring|done|error|cancelled
+    'status': 'idle',       # idle|running|success|failed|manual
+    'ready': False,
+    'reason': 'idle',
+    'total_rounds': 10,
+    'round': 0,
+    'progress': 0.0,
+    'round_gains': [],
+    'candidate_count': 0,
+    'stable_ms': 0,
+    'thread': None,
+    'elapsed_ms': 0,
+    'amplitude_counts': 0,
+}
+_cal_lock = threading.Lock()
+
+
+def _calib_set(**kw):
+    with _cal_lock:
+        _cal.update(kw)
+
+
+def _read_calibration() -> dict:
+    try:
+        with open(CALIBRATION_FILE, encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _write_calibration(data: dict) -> tuple[bool, str]:
+    try:
+        os.makedirs(os.path.dirname(CALIBRATION_FILE), exist_ok=True)
+        tmp = CALIBRATION_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, CALIBRATION_FILE)
+        return True, '标定参数已保存'
+    except Exception as exc:
+        return False, f'写入失败: {exc}'
+
+
+def _clear_calibration() -> None:
+    try:
+        os.unlink(CALIBRATION_FILE)
+    except FileNotFoundError:
+        pass
+
+
+def _read_active_model() -> str:
+    try:
+        return open(ACTIVE_MODEL_FILE, encoding='utf-8').read().strip()
+    except Exception:
+        return ''
+
+
+def _calib_target() -> tuple | None:
+    """真实目标中心（crop 系 px），来自 Core AimThread 实时状态（GET_STATUS.metrics）。
+    aim_has_target 表示当前帧有选中目标；文件/指标新鲜度由 running 保证。"""
+    st = _get_status()
+    m = st.get('metrics', {}) if isinstance(st, dict) else {}
+    if not st.get('runtime_running'):
+        return None
+    if not m.get('aim_has_target'):
+        return None
+    return (float(m.get('aim_pos_x', 0.0)), float(m.get('aim_pos_y', 0.0)),
+            float(m.get('aim_error_x', 0.0)))
+
+
+def _calib_sample_center(n: int = 3):
+    pts = []
+    for _ in range(n):
+        t = _calib_target()
+        if t is not None:
+            pts.append(t[:2])
+        time.sleep(0.05)
+    if not pts:
+        return None
+    return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+
+
+def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
+    """标定结果换算 kp 写回 RuntimeProfile（与旧后端/C 桥同款 K_LOOP=1/7）。"""
+    K_LOOP = 0.142857
+    try:
+        gain_x = float(calib.get('mouse_gain_x_px_per_count') or 0)
+        gain_y = float(calib.get('mouse_gain_y_px_per_count') or 0)
+        if gain_x <= 0 or gain_y <= 0:
+            return False, '增益必须 > 0'
+        prof = _get_runtime_profile()
+        if not prof:
+            return False, '读取 RuntimeProfile 失败'
+        mo = prof.setdefault('mouse', {})
+        sx = (float(mo.get('rate_x', 1) or 1) * float(mo.get('sensitivity', 1) or 1)
+              * float(mo.get('output_scale', 1) or 1))
+        sy = (float(mo.get('rate_y', 1) or 1) * float(mo.get('sensitivity', 1) or 1)
+              * float(mo.get('output_scale', 1) or 1))
+        mo['kp_x'] = round(K_LOOP / max(gain_x * sx, 1e-6), 4)
+        mo['kp_y'] = round(K_LOOP / max(gain_y * sy, 1e-6), 4)
+        r = ipc_request('SET_CONFIG', {'profile': prof})
+        return r.get('status') == 0, r.get('error', '配置已更新')
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _calib_worker() -> None:
+    """真实标定闭环：稳定检测 → X 轴往返注入 → 目标位移(px) → gain=px/count。
+    对齐 YU/旧后端：10 轮、幅度 8→32、中值去抖、Y 轴复用 X。
+    注入：标定时 mouse.calibrating=true（AimThread/OutputBackend 放行 AI 移动），
+    kp 输出经现有控制链驱动鼠标 → 目标在画面中位移 → aim_pos_x 反馈。"""
+    prof0 = _get_runtime_profile()
+    was_enabled = bool((prof0.get('mouse') or {}).get('enabled'))
+    mo0 = prof0.setdefault('mouse', {})
+    mo0['enabled'] = True
+    mo0['calibrating'] = True
+    ipc_request('SET_CONFIG', {'profile': prof0})
+    try:
+        _calib_set(status='running', phase='stabilize', reason='检测目标稳定性',
+                   round=0, progress=0.0, round_gains=[], candidate_count=0,
+                   stable_ms=0, elapsed_ms=0)
+        # 1) stabilize：目标存在（aim_has_target）持续 800ms
+        win, stable_start = [], None
+        deadline = time.time() + 12.0
+        t0 = time.time()
+        while time.time() < deadline:
+            if _cal['status'] != 'running':
+                _calib_set(phase='cancelled', reason='cancelled')
+                return
+            t = _calib_target()
+            if t is None:
+                win.clear()
+                stable_start = None
+                _calib_set(reason='no_target', candidate_count=0, stable_ms=0,
+                           elapsed_ms=int((time.time() - t0) * 1000))
+                time.sleep(0.1)
+                continue
+            win.append(t[:2])
+            if len(win) > 10:
+                win.pop(0)
+            with _cal_lock:
+                _cal['candidate_count'] = len(win)
+            if len(win) >= 6:
+                jx = max(p[0] for p in win) - min(p[0] for p in win)
+                jy = max(p[1] for p in win) - min(p[1] for p in win)
+                if jx < 1.0 and jy < 1.0:
+                    if stable_start is None:
+                        stable_start = time.time()
+                    stable_ms = int((time.time() - stable_start) * 1000)
+                    _calib_set(stable_ms=stable_ms, ready=True, reason='ready',
+                               elapsed_ms=int((time.time() - t0) * 1000))
+                    if stable_ms >= 800:
+                        break
+                else:
+                    stable_start = None
+                    _calib_set(ready=False, reason='target_unstable', stable_ms=0)
+            time.sleep(0.05)
+        else:
+            _calib_set(status='failed', phase='error', reason='目标稳定检测超时', ready=False)
+            return
+        # 2) rounds：X 轴往返移动，闭环测 px/count
+        total, gains, delays = 10, [], []
+        for rnd in range(total):
+            if _cal['status'] != 'running':
+                _calib_set(phase='cancelled', reason='cancelled')
+                return
+            amp = int(8 + rnd * (24 / 9))
+            _calib_set(phase='moving', round=rnd + 1, progress=rnd / total,
+                       amplitude_counts=amp)
+            base = _calib_sample_center(3)
+            if base is None:
+                _calib_set(reason='no_target')
+                time.sleep(0.2)
+                continue
+            # 正向：通过 calibrating 模式 + kp 驱动目标位移，采样窗口捕获位移
+            t_inj = time.time()
+            max_dx, moved = 0.0, False
+            for _ in range(20):
+                time.sleep(0.05)
+                c = _calib_sample_center(1)
+                if c is None:
+                    continue
+                d = abs(c[0] - base[0])
+                if d > max_dx:
+                    max_dx = d
+                if not moved and d > 0.3:
+                    delays.append((time.time() - t_inj) * 1000)
+                    moved = True
+            if max_dx >= 1.0:
+                gains.append(max_dx / amp)
+            _calib_set(phase='measuring', round_gains=gains[:])
+            time.sleep(0.1)
+            # 反向：切换 calibration_bias 方向让控制链拉回 → 目标回原位
+            base2 = _calib_sample_center(3)
+            if base2 is not None:
+                prof = _get_runtime_profile()
+                mo = prof.setdefault('mouse', {})
+                mo['calibration_bias_x'] = float(-amp)
+                mo['calibrating'] = True
+                ipc_request('SET_CONFIG', {'profile': prof})
+                max_dx2 = 0.0
+                for _ in range(20):
+                    time.sleep(0.05)
+                    c = _calib_sample_center(1)
+                    if c is None:
+                        continue
+                    d = abs(base2[0] - c[0])
+                    if d > max_dx2:
+                        max_dx2 = d
+                if max_dx2 >= 1.0:
+                    gains.append(max_dx2 / amp)
+                prof2 = _get_runtime_profile()
+                mo2 = prof2.setdefault('mouse', {})
+                mo2['calibration_bias_x'] = 0.0
+                ipc_request('SET_CONFIG', {'profile': prof2})
+            _calib_set(round_gains=gains[:])
+        # 质量门槛：至少 5 个有效测量
+        if len(gains) < 5:
+            _calib_set(status='failed', phase='error',
+                       reason=f'有效测量不足（{len(gains)}/20）：目标未随注入移动、已丢失或场景无真实目标',
+                       ready=False)
+            return
+        _calib_set(progress=1.0, phase='done')
+        g = sorted(gains)
+        gain_x = g[len(g) // 2]
+        gain_y = gain_x
+        mean = sum(gains) / len(gains)
+        conf = round(max(0.0, min(1.0, 1.0 - (sum(abs(v - mean) for v in gains)
+                                               / len(gains)) / max(mean, 1e-6))), 3)
+        delay_ms = round(sorted(delays)[len(delays) // 2], 2) if delays else 0.0
+        calib = {
+            'mouse_gain_x_px_per_count': round(gain_x, 4),
+            'mouse_gain_y_px_per_count': round(gain_y, 4),
+            'mouse_response_delay_ms': delay_ms,
+            'mouse_calibration_applied': True,
+            'valid': True,
+            'confidence': conf,
+            'calibrated_at': time.strftime('%Y%m%d_%H%M%S'),
+            'model_id': _read_active_model(),
+            'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
+            'rounds': len(gains),
+        }
+        ok, detail = _write_calibration(calib)
+        if ok:
+            ok2, detail2 = _calib_apply_gain(calib)
+            detail = detail + '；' + detail2
+        _calib_set(status='success' if ok else 'failed', reason='completed' if ok else detail)
+    finally:
+        try:
+            prof = _get_runtime_profile()
+            prof.setdefault('mouse', {})['calibrating'] = False
+            if not was_enabled:
+                prof['mouse']['enabled'] = False
+            ipc_request('SET_CONFIG', {'profile': prof})
+        except Exception:
+            pass
+
+
+def _calibration_payload() -> dict:
+    with _cal_lock:
+        runtime = {
+            'running': bool(_cal['thread'] and _cal['thread'].is_alive()),
+            'phase': _cal['phase'],
+            'status': _cal['status'],
+            'ready': _cal['ready'],
+            'reason': _cal['reason'],
+            'total_rounds': _cal['total_rounds'],
+            'round': _cal['round'],
+            'progress': _cal['progress'],
+            'candidate_count': _cal['candidate_count'],
+            'stable_ms': _cal['stable_ms'],
+            'elapsed_ms': _cal['elapsed_ms'],
+            'amplitude_counts': _cal['amplitude_counts'],
+            'error': '' if _cal['status'] != 'failed' else _cal['reason'],
+        }
+    calib = _read_calibration()
+    # 旧后端字段名 → 前端契约（gain_x_px_per_count / response_delay_ms）
+    if calib:
+        calib = {
+            'valid': bool(calib.get('valid')),
+            'gain_x_px_per_count': calib.get('mouse_gain_x_px_per_count', 0.55),
+            'gain_y_px_per_count': calib.get('mouse_gain_y_px_per_count', 0.55),
+            'response_delay_ms': calib.get('mouse_response_delay_ms', 8.333),
+            'confidence': calib.get('confidence', 0),
+            'model_id': calib.get('model_id', ''),
+            'calibrated_at': calib.get('calibrated_at', ''),
+            'capture_width': (calib.get('capture') or {}).get('crop_size', 0),
+            'crop_size': (calib.get('capture') or {}).get('crop_size', 0),
+        }
+    else:
+        calib = {'valid': False}
+    return {'runtime': runtime, 'calibration': calib}
+
+
 @app.get('/api/control/calibration')
 def get_auto_calibration():
-    return jsonify({'ok': True, 'data': {'valid': False, 'calibrated_at': ''}})
+    return jsonify({'ok': True, 'data': _calibration_payload()})
 
 
 @app.put('/api/control/calibration')
 def update_auto_calibration():
-    return jsonify({'ok': True, 'data': {'message': '已更新'}})
+    body = request.get_json(silent=True) or {}
+    try:
+        gain_x = float(body.get('gain_x_px_per_count') or body.get('mouse_gain_x_px_per_count') or 0)
+        gain_y = float(body.get('gain_y_px_per_count') or body.get('mouse_gain_y_px_per_count') or 0)
+        delay = float(body.get('response_delay_ms') or body.get('mouse_response_delay_ms') or 0)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'error': '参数格式错误'}), 400
+    if gain_x <= 0 or gain_y <= 0:
+        return jsonify({'ok': False, 'error': '增益必须 > 0'}), 400
+    calib = {
+        'mouse_gain_x_px_per_count': round(gain_x, 4),
+        'mouse_gain_y_px_per_count': round(gain_y, 4),
+        'mouse_response_delay_ms': round(delay, 3),
+        'mouse_calibration_applied': True,
+        'valid': True,
+        'confidence': 0.0,
+        'calibrated_at': time.strftime('%Y%m%d_%H%M%S'),
+        'model_id': _read_active_model(),
+    }
+    ok, detail = _write_calibration(calib)
+    if ok:
+        ok2, detail2 = _calib_apply_gain(calib)
+        detail = detail + '；' + detail2
+        _calib_set(status='manual', phase='done', ready=True, reason='completed')
+    resp = jsonify({'ok': ok, 'data': _calibration_payload(), 'detail': detail})
+    resp.status_code = 200 if ok else 500
+    return resp
 
 
 @app.post('/api/control/calibration/start')
 def start_auto_calibration():
-    return jsonify({'ok': True, 'data': {'message': '校准已开始'}})
+    with _cal_lock:
+        if _cal['thread'] and _cal['thread'].is_alive():
+            return jsonify({'ok': False, 'error': '标定已在运行中'}), 409
+    st = _get_status()
+    if not st.get('runtime_running'):
+        return jsonify({'ok': False, 'error': '推理服务未运行或目标反馈未就绪（请先启动推理）'}), 400
+    if _calib_target() is None:
+        return jsonify({'ok': False, 'error': '未识别到目标，无法开始标定（请将准星对准画面中的目标，等待检测框稳定出现）'}), 400
+    th = threading.Thread(target=_calib_worker, daemon=True)
+    with _cal_lock:
+        _cal['thread'] = th
+    th.start()
+    return jsonify({'ok': True, 'data': _calibration_payload(), 'detail': '标定已启动'})
 
 
 @app.post('/api/control/calibration/cancel')
 def cancel_auto_calibration():
-    return jsonify({'ok': True, 'data': {'message': '校准已取消'}})
+    _calib_set(status='idle', phase='cancelled', ready=False, reason='cancelled')
+    try:
+        prof = _get_runtime_profile()
+        prof.setdefault('mouse', {})['calibrating'] = False
+        ipc_request('SET_CONFIG', {'profile': prof})
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'data': _calibration_payload(), 'detail': '标定已取消'})
 
 
 @app.delete('/api/control/calibration')
 def clear_auto_calibration():
-    return jsonify({'ok': True, 'data': {'message': '已清除'}})
+    _clear_calibration()
+    return jsonify({'ok': True, 'data': _calibration_payload(), 'detail': '标定已清除'})
 
 
 @app.post('/api/control/start')

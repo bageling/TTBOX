@@ -1,20 +1,5 @@
 // AimThread.hpp — 独立瞄准控制线程骨架。
 // 当前阶段只验证 Worker -> Mailbox -> AimThread 的数据链路，不改变现有采集/推理行为。
-/*
- * TTBOX 文件说明
- *
- * 文件：AimThread.hpp
- *
- * 作用：
- *   目标控制线程的定义。
- *
- * 小白理解：
- *   这是 AimThread.cpp 的头文件，定义了目标控制线程的接口。
- *
- * 注意：
- *   本注释仅用于说明代码，不改变程序逻辑。
- */
-
 #pragma once
 #include <atomic>
 #include <cstdint>
@@ -44,6 +29,7 @@ public:
         uint64_t stale = 0;
         uint64_t target_frames = 0;
         uint64_t no_target_frames = 0;
+        uint32_t tracks = 0;           // 当前跟踪中的目标数（YU detections/tracks 显示）
         float predicted_x = 0.0f;
         float predicted_y = 0.0f;
         float control_x = 0.0f;

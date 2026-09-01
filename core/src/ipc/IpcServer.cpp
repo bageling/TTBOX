@@ -1,24 +1,4 @@
 // IpcServer.cpp — IPC 服务端/客户端实现（Unix AF_UNIX，Windows TCP loopback）
-/*
- * TTBOX 文件说明
- *
- * 文件：IpcServer.cpp
- *
- * 作用：
- *   Web 后端和 C++ 核心之间的进程间通信服务器。
- *   通过 Unix Socket 接收来自 Web 的请求并返回结果。
- *
- * 小白理解：
- *   Web 页面和 C++ 核心是两个不同的程序。
- *   IpcServer 就像一部电话，让它们能互相通话：
- *   - Web 发指令："启动 AI"
- *   - Web 查状态："当前帧率多少？"
- *   - Web 改配置："置信度改到 0.5"
- *
- * 注意：
- *   本注释仅用于说明代码，不改变程序逻辑。
- */
-
 #include "ipc/IpcServer.hpp"
 
 #include <atomic>
@@ -419,7 +399,8 @@ IpcResponse IpcServer::handle_request(const JsonValue& request) {
             return resp;
         }
         std::vector<uint8_t> jpeg;
-        if (!preview_provider_(&jpeg) || jpeg.empty()) {
+        uint64_t pseq = 0;
+        if (!preview_provider_(&jpeg, &pseq) || jpeg.empty()) {
             resp.status = IpcError::kNotFound;
             resp.error = "暂无预览帧";
             return resp;
@@ -440,6 +421,7 @@ IpcResponse IpcServer::handle_request(const JsonValue& request) {
         JsonValue pd = JsonValue::object();
         pd.set("jpeg_base64", JsonValue::string(b64));
         pd.set("bytes", JsonValue::number(static_cast<double>(jpeg.size())));
+        pd.set("seq", JsonValue::number(static_cast<double>(pseq)));
         resp.status = IpcError::kOk;
         resp.data = std::move(pd);
         return resp;
@@ -716,6 +698,12 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("target_frames", JsonValue::number(static_cast<double>(status.metrics.target_frames)));
     m.set("no_target_frames", JsonValue::number(static_cast<double>(status.metrics.no_target_frames)));
     m.set("aim_active", JsonValue::boolean(status.metrics.aim_active));
+    m.set("aim_error_x", JsonValue::number(status.metrics.aim_error_x));
+    m.set("aim_error_y", JsonValue::number(status.metrics.aim_error_y));
+    // 目标中心（标定状态机的真实目标位移数据源）
+    m.set("aim_pos_x", JsonValue::number(status.metrics.aim_pos_x));
+    m.set("aim_pos_y", JsonValue::number(status.metrics.aim_pos_y));
+    m.set("aim_has_target", JsonValue::boolean(status.metrics.aim_has_target));
     m.set("preview_fps", JsonValue::number(status.metrics.preview_fps));
     m.set("preview_encode_ms", JsonValue::number(status.metrics.preview_encode_ms));
     m.set("preview_width", JsonValue::number(static_cast<double>(status.metrics.preview_width)));
@@ -723,9 +711,15 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("preview_bytes", JsonValue::number(static_cast<double>(status.metrics.preview_bytes)));
     m.set("preview_frames", JsonValue::number(static_cast<double>(status.metrics.preview_frames)));
     m.set("preview_dropped", JsonValue::number(static_cast<double>(status.metrics.preview_dropped)));
+    m.set("buffer_age_ms", JsonValue::number(status.metrics.buffer_age_ms));
+    m.set("last_dequeued_count", JsonValue::number(static_cast<double>(status.metrics.last_dequeued_count)));
+    m.set("buffer_count", JsonValue::number(static_cast<double>(status.metrics.buffer_count)));
     m.set("capture_ms", JsonValue::number(status.metrics.capture_ms));
     m.set("resize_ms", JsonValue::number(status.metrics.resize_ms));
     m.set("infer_ms", JsonValue::number(status.metrics.infer_ms));
+    m.set("infer_set_input_ms", JsonValue::number(status.metrics.infer_set_input_ms));
+    m.set("infer_run_ms", JsonValue::number(status.metrics.infer_run_ms));
+    m.set("infer_output_ms", JsonValue::number(status.metrics.infer_output_ms));
     m.set("decode_ms", JsonValue::number(status.metrics.decode_ms));
     m.set("aim_ms", JsonValue::number(status.metrics.aim_ms));
     m.set("e2e_ms", JsonValue::number(status.metrics.e2e_ms));
@@ -741,6 +735,7 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("decode_p95_ms", JsonValue::number(status.metrics.decode_p95_ms));
     m.set("decode_p99_ms", JsonValue::number(status.metrics.decode_p99_ms));
     m.set("detect_count", JsonValue::number(static_cast<double>(status.metrics.detect_count)));
+    m.set("tracks", JsonValue::number(static_cast<double>(status.metrics.tracks)));
     m.set("dropped_frames", JsonValue::number(static_cast<double>(status.metrics.dropped_frames)));
     m.set("frames_total", JsonValue::number(static_cast<double>(status.metrics.frames_total)));
     data.set("metrics", std::move(m));

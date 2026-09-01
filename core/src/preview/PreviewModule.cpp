@@ -1,21 +1,4 @@
 // PreviewModule.cpp — 低帧实时预览实现
-/*
- * TTBOX 文件说明
- *
- * 文件：PreviewModule.cpp
- *
- * 作用：
- *   在 Web 控制面板上显示实时预览画面的模块。
- *   独立于 AI 推理线程运行，不会影响性能。
- *
- * 小白理解：
- *   你可以在浏览器里看到 AI 正在分析的画面，就像看监控一样。
- *   它独立运行，不影响 AI 推理的速度。
- *
- * 注意：
- *   本注释仅用于说明代码，不改变程序逻辑。
- */
-
 #include "preview/PreviewModule.hpp"
 
 #if defined(_WIN32)
@@ -178,6 +161,46 @@ void PreviewModule::loop() {
             continue;
         }
 
+        // 截取区域跟随（capture ROI）：预览显示 AI 看到的画面而非全屏。
+        // ROI 变化（含热更新 offset/size）时重新 set_roi；无 ROI 时保持全画面。
+        if (params_.runtime_config != nullptr) {
+            if (auto prof = params_.runtime_config->snapshot()) {
+                const uint32_t rw = prof->capture.width, rh = prof->capture.height;
+                const uint32_t fw = frame->info.width, fh = frame->info.height;
+                if (rw > 0 && rh > 0 && fw > 0 && fh > 0 && rw <= fw && rh <= fh) {
+                    const int32_t cx = static_cast<int32_t>(fw / 2) + prof->capture.offset_x;
+                    const int32_t cy = static_cast<int32_t>(fh / 2) + prof->capture.offset_y;
+                    const int32_t rx = std::max<int32_t>(0, std::min<int32_t>(
+                        cx - static_cast<int32_t>(rw / 2), static_cast<int32_t>(fw - rw)));
+                    const int32_t ry = std::max<int32_t>(0, std::min<int32_t>(
+                        cy - static_cast<int32_t>(rh / 2), static_cast<int32_t>(fh - rh)));
+                    if (rx != applied_roi_x_ || ry != applied_roi_y_ ||
+                        rw != applied_roi_w_ || rh != applied_roi_h_) {
+                        // YU 语义：预览输出尺寸 = 截取尺寸（1:1，不拉伸）。
+                        // 尺寸变化时重建 RGA 输出 buffer（含 set_roi）；仅偏移变化只 set_roi。
+                        if (rw != applied_roi_w_ || rh != applied_roi_h_) {
+                            RgaProcessor::Params rp;
+                            rp.output_width = rw;
+                            rp.output_height = rh;
+                            rp.center_crop = false;
+                            rp.out_color = 0;
+                            rga_->destroy();
+                            std::string rerr2;
+                            if (rga_->init(rp, &rerr2)) {
+                                metrics_.width.store(rw);
+                                metrics_.height.store(rh);
+                            } else {
+                                TTBOX_LOG_WARN("预览 RGA 重建失败: " + rerr2);
+                            }
+                        }
+                        rga_->set_roi(static_cast<uint32_t>(rx), static_cast<uint32_t>(ry), rw, rh);
+                        applied_roi_x_ = rx; applied_roi_y_ = ry;
+                        applied_roi_w_ = rw; applied_roi_h_ = rh;
+                    }
+                }
+            }
+        }
+
         // 编码前一帧是否超时？若上次编码还占着（单线程不会有），此处无竞态。
         const auto te0 = clock::now();
         std::vector<uint8_t> jpeg;
@@ -211,12 +234,28 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame, std::vector<uint8_t>*
         if (error) *error = "帧尺寸无效";
         return false;
     }
+    // CPU 直拷优先（YU ultra 同款）：mmap va 行抽取 ROI → JPEG，完全避开 RGA 撕裂/花屏。
+    if (frame.info.cpu_va != nullptr && applied_roi_w_ > 0 && applied_roi_h_ > 0) {
+        const uint8_t* base = static_cast<const uint8_t*>(frame.info.cpu_va);
+        const uint32_t sstride = frame.info.stride;
+        const size_t row_bytes = static_cast<size_t>(applied_roi_w_) * 3;
+        std::vector<uint8_t> roi;
+        roi.reserve(static_cast<size_t>(applied_roi_w_) * applied_roi_h_ * 3);
+        for (uint32_t y = 0; y < applied_roi_h_; ++y) {
+            const uint8_t* src = base + static_cast<size_t>(applied_roi_y_ + y) * sstride
+                               + static_cast<size_t>(applied_roi_x_) * 3;
+            roi.insert(roi.end(), src, src + row_bytes);
+        }
+        return bgr3_to_jpeg(roi.data(), applied_roi_w_, applied_roi_h_,
+                            row_bytes, params_.jpeg_quality, jpeg_out, error);
+    }
+
     if (!rga_) {
         if (error) *error = "预览 RGA 未初始化";
         return false;
     }
 
-    // RGA 硬件缩放：DMA-BUF fd → 预览尺寸 BGR888（常驻输出 buffer，无 CPU memcpy）
+    // RGA 回退：DMA-BUF fd → 预览尺寸 BGR888（常驻输出 buffer，无 CPU memcpy）
     RgaOutput rga_out;
     std::string rerr;
     if (!rga_->process(frame, &rga_out, &rerr)) {

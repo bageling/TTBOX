@@ -1,33 +1,20 @@
 // Application.cpp — 应用生命周期实现
-/*
- * TTBOX 文件说明
- *
- * 文件：Application.cpp
- *
- * 作用：
- *   TTBOX 的核心管家，负责整个程序的生命周期管理。
- *   包括：初始化、配置加载、模块启动、退出清理。
- *
- * 小白理解：
- *   Application 是 TTBOX 的总统。程序启动时它先起床，
- *   然后叫醒所有下属模块（采集、AI、控制、输出），
- *   程序退出时它按顺序让大家下班。
- *
- * 注意：
- *   本注释仅用于说明代码，不改变程序逻辑。
- */
-
 #include "app/Application.hpp"
 
 #include <atomic>
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <sstream>
 #include <thread>
 
 #include "common/Logger.hpp"
+#include "common/CpuAffinity.hpp"
 #include "model/ModelManagement.hpp"
+#ifdef TTBOX_CORE_HAS_RKNN
+#include "rknn/RKNNEngine.hpp"
+#endif
 #include "output/AiboxHidOutput.hpp"
 #include "output/FifoHidOutput.hpp"
 #include "output/OutputBackend.hpp"
@@ -145,7 +132,7 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         static_cast<uint32_t>(config_.get_int("model_input_width", 640));
     out_params.workers.out_h =
         static_cast<uint32_t>(config_.get_int("model_input_height", 640));
-    out_params.preview.fps = static_cast<int>(config_.get_int("preview_fps", 5));
+    out_params.preview.fps = static_cast<int>(config_.get_int("preview_fps", 60));
     out_params.preview.out_width = static_cast<uint32_t>(config_.get_int("preview_width", 640));
     out_params.preview.out_height = static_cast<uint32_t>(config_.get_int("preview_height", 360));
     out_params.preview.jpeg_quality = static_cast<int>(config_.get_int("preview_quality", 60));
@@ -255,6 +242,18 @@ int Application::initialize(int argc, char** argv) {
     TTBOX_LOG_INFO("=== " + std::string(kAppName) + " v" +
                    std::string(kVersion) + " 启动 ===");
 
+    // ---- 风扇满转（YU fan_control min_pwm=100 同款）：防热节流拖慢 NPU ----
+    {
+        std::ofstream pwm("/sys/class/hwmon/hwmon8/pwm1");
+        if (pwm) {
+            pwm << 255;
+            TTBOX_LOG_INFO("风扇已设满转（防热节流）");
+        } else {
+            TTBOX_LOG_WARN("风扇控制不可用（hwmon8/pwm1）");
+        }
+    }
+
+
     if (config_path_.empty()) config_path_ = kDefaultConfigPath;
     std::string cfg_error;
     if (!config_.load(config_path_, &cfg_error)) {
@@ -263,6 +262,26 @@ int Application::initialize(int argc, char** argv) {
         return 1;
     }
     TTBOX_LOG_INFO("配置已加载: " + config_path_);
+
+    // ---- CPU 调频策略（实测：CPU 占用仅 15%，NPU 才是主力且频率独立）----
+    // governor=schedutil（动态调频：忙时自动满频，闲时降频降温）+ min 下限 50% 防深睡。
+    // 实测与 performance+锁死 性能完全一致（e2e/fps 无差异），温度更低。
+    {
+        for (const char* pol : {"policy0", "policy4", "policy6"}) {
+            std::ofstream g(std::string("/sys/devices/system/cpu/cpufreq/") + pol + "/scaling_governor");
+            if (g) {
+                g << "schedutil";
+                if (!g.good()) TTBOX_LOG_WARN(std::string("governor 切换失败: ") + pol);
+            }
+        }
+        const int pct = static_cast<int>(config_.get_int("cpu_min_freq_percent", 50));
+        auto fr = CpuAffinity::lock_min_freq_percent(pct);
+        if (fr.freq_ok) {
+            TTBOX_LOG_INFO("CPU 调频策略完成（schedutil+min" + std::to_string(pct) + "%）: " + fr.detail);
+        } else {
+            TTBOX_LOG_WARN("CPU 调频策略部分失败: " + fr.detail);
+        }
+    }
 
     // ---- 3. 授权层初始化（等价 cardVerifyThreadFunc）----
     license_client_ = std::make_unique<auth::AiboxLicenseClient>();
@@ -333,10 +352,14 @@ int Application::initialize(int argc, char** argv) {
 
     // ---- 5. 启动 IPC 服务 ----
     ipc_.set_status_provider([this] { return status_provider(); });
-    ipc_.set_preview_provider([this](std::vector<uint8_t>* out) {
-        return core_runtime_ && core_runtime_->preview() && core_runtime_->preview()->running()
+    ipc_.set_preview_provider([this](std::vector<uint8_t>* out, uint64_t* seq) {
+        const bool ok = core_runtime_ && core_runtime_->preview() && core_runtime_->preview()->running()
                    ? core_runtime_->preview()->snapshot(out)
                    : false;
+        if (ok && seq) {
+            *seq = core_runtime_->preview()->metrics().frames.load();
+        }
+        return ok;
     });
     ipc_.set_config_provider([this] { return config_provider(); });
     ipc_.set_config_update_handler(
@@ -358,7 +381,38 @@ int Application::initialize(int argc, char** argv) {
             TTBOX_LOG_WARN("ModelRegistry 初始化失败（模型管理不可用）: " + mm_error);
             model_management_.reset();
         } else {
-            model_management_->set_validator(ModelManagement::file_level_validator);
+            #ifdef TTBOX_CORE_HAS_RKNN
+    // 真 RKNN 探测校验器：试加载模型拿 input/output 真实信息（类别名不在模型文件里，用户可在 UI 配置）
+    model_management_->set_validator([](const std::string& rknn_path, JsonValue* meta_out,
+                                        std::string* error) -> bool {
+        std::error_code fec;
+        if (!std::filesystem::exists(rknn_path, fec)) {
+            if (error) *error = "模型文件不存在: " + rknn_path;
+            return false;
+        }
+        RKNNEngine probe;
+        RKNNEngine::Params pp;
+        pp.model_path = rknn_path;
+        pp.core_mask = 0;
+        std::string perr;
+        if (!probe.init(pp, &perr)) {
+            if (error) *error = "RKNN 探测加载失败: " + perr;
+            return false;
+        }
+        const auto& info = probe.info();
+        if (meta_out) {
+            JsonValue obj = JsonValue::object();
+            obj.set("input_width", JsonValue::number(static_cast<double>(info.input_width)));
+            obj.set("input_height", JsonValue::number(static_cast<double>(info.input_height)));
+            obj.set("output_count", JsonValue::number(static_cast<double>(info.n_outputs)));
+            *meta_out = std::move(obj);
+        }
+        probe.destroy();
+        return true;
+    });
+#else
+    model_management_->set_validator(ModelManagement::file_level_validator);
+#endif
             ipc_.set_model_list_handler([this] { return handle_model_list(); });
             ipc_.set_model_import_handler(
                 [this](const std::string& src, const std::string& id,
@@ -422,26 +476,48 @@ void Application::run() {
         }
     }
 
+    // ---- 自动启动 AI 流水线（参考 yu auto-start 语义）----
+    // 语义：want_runtime_running_=true 时，尽力保持 runtime 运行。
+    //   1) 首次启动：先立即尝试一次；失败则进入后台重试（HDMI 未锁定 / V4L2 CMA 碎片
+    //      是板端常见瞬时故障，几秒后即可恢复）。
+    //   2) 运行中崩溃/退出：主循环每 tick 检测到 runtime 停但 want=true 时自动重启。
+    // 用户 /api/control/stop 会把 want 置 false，此后不再自动拉起。
     std::string rt_error;
-    if (core_runtime_ && !core_runtime_->start(&rt_error)) {
-        // G4 语义：采集/推理启动失败（如 HDMI 无信号、V4L2 CMA 碎片、模型缺失）
-        // 不再杀死整个进程——IPC 保持可用，Web 面板仍可读状态/改配置，
-        // GET_STATUS 的 runtime_running=false 且 metrics=0（unavailable）。
-        // 用户可通过 RUNTIME_CONTROL start 重试。
-        TTBOX_LOG_WARN("CoreRuntime 启动失败（进程保持运行，可通过 RUNTIME_CONTROL 重试）: " + rt_error);
-        runtime_started_ = false;
+    if (want_runtime_running_.load()) {
+        if (core_runtime_ && core_runtime_->start(&rt_error)) {
+            runtime_started_ = true;
+            TTBOX_LOG_INFO("CoreRuntime 已启动 (Ctrl+C/SIGTERM 退出)");
+        } else {
+            TTBOX_LOG_WARN("CoreRuntime 首次启动失败，进入后台自动重试: " + rt_error);
+            runtime_started_ = false;
+        }
     } else {
-        runtime_started_ = true;
-        TTBOX_LOG_INFO("CoreRuntime 已启动 (Ctrl+C/SIGTERM 退出)");
+        runtime_started_ = false;
     }
 
     constexpr auto kTickMs = std::chrono::milliseconds(50);
     constexpr auto kHeartbeatSec = std::chrono::seconds(10);
     auto last_heartbeat = std::chrono::steady_clock::now();
+    // 启动失败重试间隔（与 heartbeat 解耦：重试更激进，HDMI 恢复后 ~2s 内拉起）
+    constexpr auto kRetryInterval = std::chrono::seconds(2);
+    auto last_retry = std::chrono::steady_clock::now();
     while (!shutdown_flag().load()) {
         std::this_thread::sleep_for(kTickMs);
         // 授权失效时仍保持进程存活（通过 supervisor recover() 重启恢复），不主动自杀
         const auto now = std::chrono::steady_clock::now();
+        // 自动启停核心：want=true 但 runtime 没在跑 → 每 2s 重试一次（首次失败自恢复/崩溃自拉起）
+        if (want_runtime_running_.load() && core_runtime_ && !core_runtime_->running()) {
+            if (now - last_retry >= kRetryInterval) {
+                last_retry = now;
+                std::string retry_error;
+                if (core_runtime_->start(&retry_error)) {
+                    runtime_started_ = true;
+                    TTBOX_LOG_INFO("CoreRuntime 自动重试成功，流水线已恢复");
+                } else if (!retry_error.empty()) {
+                    TTBOX_LOG_DEBUG("CoreRuntime 自动重试中: " + retry_error);
+                }
+            }
+        }
         if (now - last_heartbeat >= kHeartbeatSec) {
             last_heartbeat = now;
             const bool rt_ok = core_runtime_ ? core_runtime_->running() : false;
@@ -588,19 +664,23 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
     }
     if (action == "start") {
         if (core_runtime_->running()) return true;  // 幂等
+        want_runtime_running_.store(true);
         if (!core_runtime_->start(error)) {
             if (error && error->empty()) *error = "CoreRuntime 启动失败";
+            // 启动失败仍保留 want=true：主循环每 2s 自动重试，直到 HDMI/模型就绪
             return false;
         }
         runtime_started_ = true;
         return true;
     }
     if (action == "stop") {
+        want_runtime_running_.store(false);
         core_runtime_->stop();
         runtime_started_ = false;
         return true;
     }
     if (action == "restart") {
+        want_runtime_running_.store(true);
         core_runtime_->stop();
         if (!core_runtime_->start(error)) {
             if (error && error->empty()) *error = "CoreRuntime 重启失败";

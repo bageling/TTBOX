@@ -1,24 +1,4 @@
 // ModelRegistry.cpp — 模型仓库实现
-/*
- * TTBOX 文件说明
- *
- * 文件：ModelRegistry.cpp
- *
- * 作用：
- *   AI 模型仓库管理系统。
- *   负责模型的导入、校验、安装、激活、删除和列表查询。
- *
- * 小白理解：
- *   你在 Web 页面上传模型后，这个模块负责：
- *   1. 把模型文件复制到仓库目录
- *   2. 校验模型文件是否有效
- *   3. 安装到"已安装"目录（可以用了）
- *   4. 激活为当前使用的模型
- *
- * 注意：
- *   本注释仅用于说明代码，不改变程序逻辑。
- */
-
 #include "model/ModelRegistry.hpp"
 
 #include <algorithm>
@@ -79,6 +59,14 @@ JsonValue ModelManifest::to_json() const {
     root.set("origin", JsonValue::string(origin));
     root.set("converter_version", JsonValue::string(converter_version));
     root.set("runtime_version", JsonValue::string(runtime_version));
+    root.set("input_width", JsonValue::number(static_cast<double>(input_width)));
+    root.set("input_height", JsonValue::number(static_cast<double>(input_height)));
+    root.set("output_count", JsonValue::number(static_cast<double>(output_count)));
+    root.set("class_count", JsonValue::number(static_cast<double>(class_count)));
+    JsonValue jnames = JsonValue::array();
+    for (const auto& n : class_names) jnames.push_back(JsonValue::string(n));
+    root.set("class_names", std::move(jnames));
+    root.set("rknn_concurrency", JsonValue::number(static_cast<double>(rknn_concurrency)));
     root.set("status", JsonValue::number(static_cast<double>(static_cast<int>(status))));
     root.set("status_name", JsonValue::string(model_status_name(status)));
     root.set("created_at", JsonValue::number(static_cast<double>(created_at)));
@@ -93,6 +81,10 @@ ModelManifest ModelManifest::from_json(const JsonValue& v) {
         return (p && p->is_string()) ? p->as_string(def) : def;
     };
     m.model_id = get("model_id", "");
+    auto get_int_fn = [&v](const char* key) -> uint32_t {
+        const JsonValue* p = v.find(key);
+        return (p && p->is_number()) ? static_cast<uint32_t>(p->as_int(0)) : 0u;
+    };
     m.label = get("label", "");
     m.version = get("version", "1.0.0");
     m.sha256 = get("sha256", "");
@@ -105,7 +97,20 @@ ModelManifest ModelManifest::from_json(const JsonValue& v) {
     }
     if (const JsonValue* t = v.find("created_at"); t && t->is_number()) {
         m.created_at = t->as_int(0);
+    m.input_width = get_int_fn("input_width");
+    m.input_height = get_int_fn("input_height");
+    m.output_count = get_int_fn("output_count");
+    m.class_count = get_int_fn("class_count");
+    m.rknn_concurrency = get_int_fn("rknn_concurrency");
+    if (m.rknn_concurrency == 0) m.rknn_concurrency = 1;
+    if (const JsonValue* jn = v.find("class_names"); jn && jn->is_array()) {
+        for (const auto& e : jn->as_array()) {
+            if (e.is_string()) {
+                m.class_names.push_back(e.as_string());
+            }
+        }
     }
+        }
     return m;
 }
 
@@ -245,6 +250,24 @@ bool ModelRegistry::validate(const std::string& model_id, std::string* error) {
     // 同步 metadata 快照（供 install 直接搬入）
     if (!metadata.is_null()) {
         write_file(staging_dir(model_id) + "/validation/metadata.json", metadata.dump());
+        // 探测结果合并进 manifest（input/output 尺寸随 MODEL_LIST 下发）
+        const std::string mf_path = staging_dir(model_id) + "/manifest.json";
+        std::string mf_text;
+        if (read_file(mf_path, &mf_text)) {
+            auto mf_res = json_parse(mf_text);
+            if (mf_res.ok) {
+                ModelManifest mf = ModelManifest::from_json(mf_res.value);
+                if (const JsonValue* iw = metadata.find("input_width"))
+                    mf.input_width = static_cast<uint32_t>(std::max<int64_t>(iw->as_int(0), 0));
+                if (const JsonValue* ih = metadata.find("input_height"))
+                    mf.input_height = static_cast<uint32_t>(std::max<int64_t>(ih->as_int(0), 0));
+                if (const JsonValue* oc = metadata.find("output_count"))
+                    mf.output_count = static_cast<uint32_t>(std::max<int64_t>(oc->as_int(0), 0));
+                if (const JsonValue* cc = metadata.find("class_count"))
+                    mf.class_count = static_cast<uint32_t>(std::max<int64_t>(cc->as_int(0), 0));
+                write_file(mf_path, mf.to_json().dump());
+            }
+        }
     }
     return true;
 }

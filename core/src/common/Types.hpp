@@ -1,19 +1,4 @@
 // Types.hpp — C++ Core 基础数据结构（本阶段只定义结构，不实现视觉逻辑）
-/*
- * TTBOX 文件说明
- *
- * 文件：Types.hpp
- *
- * 作用：
- *   定义通用的数据类型，如帧缓冲区、检测框等。
- *
- * 小白理解：
- *   这里是 TTBOX 的数据字典，定义了所有模块之间传递的数据格式。
- *
- * 注意：
- *   本注释仅用于说明代码，不改变程序逻辑。
- */
-
 #pragma once
 
 #include <cstdint>
@@ -43,6 +28,7 @@ struct FrameInfo {
 
     // --- DMA-BUF 信息（阶段 A-2 采集模块填充；-1 表示无 fd）---
     int dma_fd = -1;            // 主 plane 的 DMA-BUF fd（future RgaProcessor 消费入口）
+    void* cpu_va = nullptr;     // 采集侧 mmap 虚拟地址（CPU 直拷用；nullptr=不可用）
     uint32_t buffer_index = 0;  // V4L2 mmap buffer index
     uint32_t num_planes = 1;    // plane 数量
 };

@@ -11,21 +11,6 @@
 //     全部被占时 poll 超时等待，不忙等、不崩溃
 //
 // 线程模型：capture thread（内部）+ 任意 consumer。start()/stop() 负责线程生命周期。
-/*
- * TTBOX 文件说明
- *
- * 文件：V4L2Capture.hpp
- *
- * 作用：
- *   HDMI 采集模块的定义。
- *
- * 小白理解：
- *   这是 V4L2Capture.cpp 的头文件，定义了采集模块的接口。
- *
- * 注意：
- *   本注释仅用于说明代码，不改变程序逻辑。
- */
-
 #pragma once
 
 #include <atomic>
@@ -70,6 +55,7 @@ struct V4L2Metrics {
     std::atomic<uint64_t> poll_timeouts{0};
     std::atomic<uint64_t> errors{0};
     std::atomic<double> capture_fps{0.0};
+    std::atomic<int64_t> last_frame_ts_ms{0};   // 最新帧 v4l2 单调时间戳（ms，供 buffer_age_ms 计算）
 };
 
 // ---------------------------------------------------------------------------
@@ -127,6 +113,8 @@ public:
     const FormatInfo& format() const { return format_; }
     const V4L2Metrics& metrics() const { return metrics_; }
     uint32_t buffer_count() const { return buffer_count_; }
+    // 当前被占用（已 DQBUF 未 QBUF 归还）的 buffer 数（排队深度探测）
+    uint32_t in_use_count() const;
 
     // 调试/验收：每个 buffer 主 plane 的 DMA-BUF fd 列表
     std::vector<int> dma_fds() const;

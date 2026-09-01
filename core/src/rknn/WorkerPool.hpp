@@ -13,21 +13,6 @@
 //     帧在 RGA/RKNN 使用期间由 shared_ptr 保活（V4L2 buffer 不提前归还）
 //
 // 边界：本模块只做"取帧 → RGA → FP16 → RKNN"，不含 Decode/Aim/HID（A-6+）。
-/*
- * TTBOX 文件说明
- *
- * 文件：WorkerPool.hpp
- *
- * 作用：
- *   推理线程池的定义。
- *
- * 小白理解：
- *   管理多个 AI 推理线程的头文件。
- *
- * 注意：
- *   本注释仅用于说明代码，不改变程序逻辑。
- */
-
 #pragma once
 
 #include <atomic>
@@ -61,6 +46,8 @@ struct DecodeStageStats {
 struct WorkerStats {
     std::atomic<uint64_t> processed{0};  // 成功完成解码的帧数
     std::atomic<uint64_t> rga_ok{0};
+    std::atomic<uint64_t> direct_ok{0};  // CPU 直拷帧数（YU cpu_direct 路径）
+    StatsCollector queue_wait;           // 排队等待（帧时间戳→worker 认领，YU buffer_age 同口径）
     std::atomic<uint64_t> inference_ok{0};
     std::atomic<uint64_t> decode_ok{0};
     std::atomic<uint64_t> published{0};
@@ -121,6 +108,9 @@ private:
     std::unique_ptr<RKNNEngine> engine_;
     std::unique_ptr<Decoder> decoder_;       // 本 worker 独立解码器（A-7 Decoder 抽象；委托 DecodeNMS）
     std::vector<uint16_t> fp16_buf_;
+    std::vector<uint8_t> direct_buf_;   // CPU 直拷输入缓冲（ROI 行拷贝，对齐 YU cpu_direct）
+    std::vector<uint32_t> xmap_;        // 采样 X 偏移表（ROI 尺寸变化时重算，避免每像素除法）
+    uint32_t xmap_rw_ = 0;
     uint16_t u8_to_half_lut_[256];
     std::vector<std::vector<uint8_t>> raw_outputs_;  // 原生输出 buffer（want_float=0）
     std::vector<void*> raw_buf_ptrs_;

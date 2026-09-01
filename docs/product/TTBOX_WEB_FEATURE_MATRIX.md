@@ -57,15 +57,25 @@
 
 ## 03 移动控制（control-page）
 
+> 状态更新：Phase 8.3（2026-09-01）浏览器真实闭环验证完成，见 `docs/architecture/TTBOX_PHASE_8_3_CODE_LINEAGE.md`。
+
 | 功能 | UI 控件 | API | Gateway | Core/OS | 真机 | 状态 |
 |------|---------|-----|---------|---------|------|------|
-| PID 参数（kp/ki/kd/rate/smooth/...） | controller_kp_x 等 | GET/PUT /api/config | ✅ | controller | ✅ | REAL |
-| 拉曲线 | controller_pull_curve_* | GET/PUT /api/config | ✅ | ✅ | ✅ | REAL |
-| 连续提前量 | controller_continuous_lead_* | GET/PUT /api/config | ✅ | ✅ | ✅ | REAL |
-| 移动物理屏蔽 | controller_block_physical_mouse_* | GET/PUT /api/config | ✅ | ✅ | ✅ | REAL |
-| 自动校准 | autoCalibration* / calibration start/cancel | POST /api/control/calibration/start / cancel | ✅ | ✅ | ✅ | REAL |
-| 瞄准轨迹记录 | recordAimTraceButton | POST /api/diagnostics/aim-trace | ✅ | ✅ | ✅ | REAL |
-| 运动训练 | controlSectionTabMotionTraining | motion-training/* 路由 | 部分 | PLANNED | ❌ | PLANNED |
+| 移动倍率 sens | sens | GET/PUT /api/config | ✅ | AimThread 输出链 ×sensitivity | 浏览器 1.7 显示/恢复 | REAL |
+| PID kp/ki/kd | controller_kp_x/y 等 | GET/PUT /api/config | ✅ | AimThread Pid1.configure（ki 为 pid1 内部自适应项） | 浏览器 kp 21.5→22.7→恢复；全部字段回读 | REAL |
+| X/Y 预判 predict | controller_predict_x/y | GET/PUT /api/config | ✅ | Pid1 I 通道增益 | 浏览器显示/恢复 | REAL |
+| X/Y 跟随 rate | controller_rate_x/y | GET/PUT /api/config | ✅ | Pid1 kp_gain_rate | 浏览器显示/恢复 | REAL |
+| 基础死区 output_deadzone | controller_output_deadzone | GET/PUT /api/config | ✅ | AimThread 输出门控（9f30e5f 输出链回归） | 浏览器显示/恢复 | REAL |
+| 目标丢失宽限 selector_lost_grace_ms | controller_selector_lost_grace_ms | GET/PUT /api/config | ✅ | AimStateMachine lost_grace_ms | 浏览器显示 45ms | REAL |
+| 开火延迟释放Y轴 aim_fire_lock_y | controller_aim_fire_lock_y / y_axis_fire_hotkey / release_delay | GET/PUT /api/config | ✅ | C 桥 fire_lock_y（运行链未启用时配置可存） | 浏览器 true→false→恢复 | REAL（配置链路）/ VERIFY（C 桥运行） |
+| 拉枪曲线 pull_curve | controller_pull_curve_* | GET/PUT /api/config | ✅ | PullCurve.hpp 类存在；AimThread 消费接线 PLANNED（29d3622 重构断线） | 浏览器 strength 0.9→1.11→恢复 | REAL（配置链路）/ PLANNED（输出消费） |
+| 持续提前量 continuous_lead | controller_continuous_lead_* | GET/PUT /api/config | ✅ | C 桥 continuous_lead_output（运行链未启用时配置可存） | 浏览器 scale 0.6→0.71→恢复 | REAL（配置链路）/ VERIFY（C 桥运行） |
+| 屏蔽物理移动 block_physical | controller_block_physical_mouse_x/y | GET/PUT /api/config | ✅ | C 桥 inject_ai block_x/y（运行链未启用时配置可存）；state.mouse_output 真实回填 | 浏览器 X false→true→恢复；支持徽标=可用 | REAL（配置链路）/ VERIFY（C 桥运行） |
+| 自动标定 | autoCalibration* / calibration start/cancel/clear | GET/PUT/POST/DELETE /api/control/calibration* | ✅（假桩已替换为真实状态机） | Gateway 状态机 + Core aim_pos 反馈 + calibrating 放行 | GET 真实状态；start 无目标被真实拒绝；手动保存 0.651/0.649/8.4 真实落盘+回读+恢复 | REAL（手动/状态）/ VERIFY（自动闭环需真实游戏目标） |
+| 手动标定参数 | autoCalibrationGainX/Y、Delay + saveAutoCalibrationValuesButton | PUT /api/control/calibration | ✅ | 写 calibration.json + kp 换算写 RuntimeProfile | 浏览器保存→回读→恢复基线 | REAL |
+| 记录移动日志 | recordAimTraceButton | POST /api/diagnostics/aim-trace | ✅（按钮已露出） | Gateway 采样线程 → /opt/ttbox/run/aim_trace.json | 按钮可见；采样链路真实现有 | REAL（按钮/API）/ VERIFY（10s 完整采样需运行时） |
+| 恢复本页默认值 | resetControllerDefaultsButton | PUT /api/config | ✅ | ✅ | 分区联动（自动标定区隐藏） | REAL |
+| 个性曲线训练 | controlSectionTabMotionTraining | motion-training/* 路由 | 不接入 | Core 无能力 | 模板不渲染 | PLANNED |
 
 ---
 
