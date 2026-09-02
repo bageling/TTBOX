@@ -153,3 +153,34 @@ TEST(runtime_profile_validate_rejects_nonfinite) {
     p.mouse.kd_y = std::numeric_limits<float>::quiet_NaN();
     CHECK(!p.validate(&err));
 }
+
+TEST(runtime_profile_personal_motion_roundtrip) {
+    RuntimeProfile p;
+    p.mouse.personal_motion.enabled = true;
+    p.mouse.personal_motion.curve_blend = 0.8f;
+    p.mouse.personal_motion.speed_blend = 0.6f;
+    p.mouse.personal_motion.reaction_blend = 0.7f;
+    p.mouse.personal_motion.max_reaction_delay_ms = 250.0f;
+    p.mouse.personal_motion.knots = {0.1f, 0.4f, 0.9f};
+
+    auto parsed = json_parse(p.to_json().dump());
+    CHECK(parsed.ok);
+    if (!parsed.ok) return;
+    RuntimeProfile q = RuntimeProfile::from_json(parsed.value);
+    CHECK(q.mouse.personal_motion.enabled);
+    CHECK_EQ(q.mouse.personal_motion.curve_blend, 0.8f);
+    CHECK_EQ(q.mouse.personal_motion.speed_blend, 0.6f);
+    CHECK_EQ(q.mouse.personal_motion.reaction_blend, 0.7f);
+    CHECK_EQ(q.mouse.personal_motion.max_reaction_delay_ms, 250.0f);
+    CHECK_EQ(q.mouse.personal_motion.knots.size(), 3u);
+}
+
+TEST(runtime_profile_personal_motion_validate_bounds) {
+    RuntimeProfile p;
+    std::string err;
+    p.mouse.personal_motion.curve_blend = 1.1f;
+    CHECK(!p.validate(&err));
+    p.mouse.personal_motion.curve_blend = 0.5f;
+    p.mouse.personal_motion.knots = {1.2f};
+    CHECK(!p.validate(&err));
+}

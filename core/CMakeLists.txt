@@ -47,6 +47,8 @@ set(CORE_SOURCES
   src/output/AiboxHidOutput.cpp
   src/output/OutputBackend.cpp
   src/output/LocalHidBackend.cpp
+  src/output/MakcuMouseBackend.cpp
+  src/output/MouseControlClient.cpp
   src/common/Logger.cpp
   src/common/CpuAffinity.cpp
   src/common/Json.cpp
@@ -73,6 +75,7 @@ set(CORE_SOURCES
   src/mouse/CoordinateTransform.cpp
   src/mouse/MouseRouter.cpp
   src/mouse/AimStateMachine.cpp
+  src/mouse/PersonalMotion.cpp
 )
 if(TTBOX_CORE_BUILD_AUTH)
   list(APPEND CORE_SOURCES
@@ -269,6 +272,14 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_output_backend tests/test_output_backend.cpp)
   target_link_libraries(test_output_backend PRIVATE ttbox_core)
   add_test(NAME test_output_backend COMMAND test_output_backend)
+
+  add_executable(test_mouse_control_client tests/test_mouse_control_client.cpp)
+  target_link_libraries(test_mouse_control_client PRIVATE ttbox_core)
+  add_test(NAME test_mouse_control_client COMMAND test_mouse_control_client)
+
+  add_executable(test_personal_motion tests/test_personal_motion.cpp)
+  target_link_libraries(test_personal_motion PRIVATE ttbox_core)
+  add_test(NAME test_personal_motion COMMAND test_personal_motion)
 
   # G1 metrics 测试：实例化 CoreRuntime（依赖 V4L2Capture/WorkerPool，仅板端编译）
   if(UNIX AND NOT APPLE)

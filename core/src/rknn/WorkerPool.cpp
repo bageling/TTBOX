@@ -309,13 +309,36 @@ void InferenceWorker::loop() {
         const uint8_t* input_ptr = nullptr;
         size_t input_bytes = 0;
         if (use_direct) {
-            // CPU 直拷：直接喂（BGR888 与 RGA 输出同格式，尺寸=模型输入）
-            input_ptr = direct_buf_.data();
-            input_bytes = static_cast<size_t>(direct_w) * direct_h * 3;
+            // CPU 直拷：BGR888 原始数据，但模型可能要求 FP16
+            // 先赋值，后续按 itype 决定是否转换
         }
         const int itype = engine_->info().input_type;
-        if (use_direct) {
-            // 已在上方赋值（CPU 直拷路径）
+        if (use_direct && (itype == 2 || itype == 3)) {
+            // INT8/UINT8 模型：BGR888 直喂，无需转换
+            input_ptr = direct_buf_.data();
+            input_bytes = static_cast<size_t>(direct_w) * direct_h * 3;
+        } else if (use_direct) {
+            // FP16 模型：uint8 -> FP16 查表转换（模型要求 640x640x3x2 字节）
+            const auto tc0 = clock::now();
+            const uint8_t* src = direct_buf_.data();
+            const uint32_t w = static_cast<uint32_t>(direct_w);
+            const uint32_t h = static_cast<uint32_t>(direct_h);
+            const uint32_t src_stride = w * 3;
+            const uint32_t dst_stride_px = w;
+            if (fp16_buf_.size() < static_cast<size_t>(w) * h * 3) {
+                fp16_buf_.resize(static_cast<size_t>(w) * h * 3);
+            }
+            for (uint32_t y = 0; y < h; ++y) {
+                const uint8_t* srow = src + static_cast<size_t>(y) * src_stride;
+                uint16_t* drow = fp16_buf_.data() + static_cast<size_t>(y) * dst_stride_px * 3;
+                for (uint32_t x = 0; x < static_cast<uint32_t>(w) * 3; ++x) {
+                    drow[x] = u8_to_half_lut_[srow[x]];
+                }
+            }
+            stats_.convert.add(
+                std::chrono::duration_cast<std::chrono::microseconds>(clock::now() - tc0).count());
+            input_ptr = reinterpret_cast<const uint8_t*>(fp16_buf_.data());
+            input_bytes = engine_->info().input_size;
         } else if (itype == 2 || itype == 3) {  // RKNN_TENSOR_INT8 / UINT8
             input_ptr = static_cast<const uint8_t*>(rga_out.vir_addr);
             input_bytes = static_cast<size_t>(rga_out.width) * rga_out.height * 3;

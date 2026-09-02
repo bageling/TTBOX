@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import os
 import re
 import socket
@@ -24,6 +25,17 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request, send_file, url_for
+
+# 让板端从 /opt/ttbox/web 运行时也能加载 TTBOX 根目录下的领域包。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from ttbox_motion.training import MotionProfileStore, MotionSampleError, MotionTrainingError
+from ttbox_motion.calibration import (
+    CalibrationAxis,
+    CalibrationObservation,
+    CalibrationSession,
+    CalibrationState,
+    fit_axis_measurements,
+)
 
 try:
     import wifi_manager
@@ -42,6 +54,8 @@ LISTEN_HOST = os.environ.get('TTBOX_WEB_HOST', '0.0.0.0')
 LISTEN_PORT = int(os.environ.get('TTBOX_WEB_PORT', '8081'))
 
 PRESETS_DIR = '/opt/ttbox/presets'
+MOTION_PROFILES_DIR = Path(os.environ.get('TTBOX_MOTION_PROFILES_DIR', '/opt/ttbox/config/motion-profiles'))
+MOTION_STORE = MotionProfileStore(MOTION_PROFILES_DIR)
 
 DEFAULT_LICENSE = {
     'activated': True, 'valid': True, 'mode': 'ttbox',
@@ -363,11 +377,28 @@ def yu_body_to_profile(body: dict) -> dict:
     if continuous_lead:
         mouse['continuous_lead'] = continuous_lead
 
-    # 3) 目标选择
+    # 3) 个人移动曲线：TTBOX 自己的 RuntimeProfile 结构
+    personal_motion = {}
+    for key in ('personal_motion_enabled', 'personal_motion_curve_blend',
+                'personal_motion_speed_blend', 'personal_motion_reaction_blend',
+                'personal_motion_max_reaction_delay_ms'):
+        if ctrl.get(key) is not None:
+            target = {
+                'personal_motion_enabled': 'enabled',
+                'personal_motion_curve_blend': 'curve_blend',
+                'personal_motion_speed_blend': 'speed_blend',
+                'personal_motion_reaction_blend': 'reaction_blend',
+                'personal_motion_max_reaction_delay_ms': 'max_reaction_delay_ms',
+            }[key]
+            personal_motion[target] = ctrl[key]
+    if personal_motion:
+        mouse['personal_motion'] = personal_motion
+
+    # 4) 目标选择
     if ctrl.get('selector_lost_grace_ms') is not None:
         mouse['lost_grace_ms'] = ctrl['selector_lost_grace_ms']
 
-    # 4) aim_profiles[0]：热键 / 瞄准点 / profile 灵敏度
+    # 5) aim_profiles[0]：热键 / 瞄准点 / profile 灵敏度
     profiles = body.get('aim_profiles') or []
     p0 = profiles[0] if profiles else {}
     class_filter_mask = int(p0.get('class_filter_mask', 0) or 0)
@@ -475,6 +506,7 @@ def profile_to_yu(prof: dict) -> dict:
     inf = prof.get('inference') or {}
     cap = prof.get('capture') or {}
 
+    personal_motion = mouse.get('personal_motion') or {}
     ctrl = {
         'kp_x': mouse.get('kp_x'), 'kp_y': mouse.get('kp_y'),
         'ki_x': mouse.get('ki_x'), 'ki_y': mouse.get('ki_y'),
@@ -506,6 +538,11 @@ def profile_to_yu(prof: dict) -> dict:
         'humanize_jitter_px': hz.get('jitter_px', 0.25),
         'humanize_jitter_frequency': hz.get('jitter_frequency', 8),
         'selector_search_radius': mouse.get('selector_search_radius', 170),
+        'personal_motion_enabled': personal_motion.get('enabled', False),
+        'personal_motion_curve_blend': personal_motion.get('curve_blend', 1.0),
+        'personal_motion_speed_blend': personal_motion.get('speed_blend', 1.0),
+        'personal_motion_reaction_blend': personal_motion.get('reaction_blend', 0.7),
+        'personal_motion_max_reaction_delay_ms': personal_motion.get('max_reaction_delay_ms', 250),
     }
 
     lat = {}
@@ -608,8 +645,11 @@ def collect_yu_state() -> dict:
                        [p.stem for p in sorted(Path(PRESETS_DIR).glob('*.json'))] or [],
             'state': {
                 'aim': {'active': m.get('aim_active', False), 'last_error': ''},
+                # 自动标定状态由 TTBOX Calibration Domain 维护，普通轮询只读，不触发保存提示。
+                'calibration': _calibration_payload()['runtime'],
                 'capture': {
-                    'input_width': 0, 'input_height': 0,
+                    'input_width': m.get('input_width', 0),
+                    'input_height': m.get('input_height', 0),
                     'capture_fps': m.get('capture_fps', 0),
                     'buffer_age_ms': m.get('buffer_age_ms', 0),
                     'last_dequeued_count': m.get('last_dequeued_count', 0),
@@ -626,8 +666,36 @@ def collect_yu_state() -> dict:
                     'inference_fps': m.get('fps', 0),
                     'inference_ms': m.get('infer_ms', 0),
                     'model_loaded': bool(prof.get('model_id')),
+                    'frame_id': m.get('last_frame', 0),
+                    'timestamp_us': m.get('last_timestamp_us', 0),
+                    'target_box': {
+                        'x1': m.get('aim_target_x1', 0),
+                        'y1': m.get('aim_target_y1', 0),
+                        'x2': m.get('aim_target_x2', 0),
+                        'y2': m.get('aim_target_y2', 0),
+                        'class_id': m.get('aim_target_class_id', -1),
+                        'target_id': m.get('aim_target_id', -1),
+                    } if m.get('aim_has_target', False) else None,
+                    'boxes': m.get('detection_boxes', []),
                 },
                 'latency': {'capture_to_mouse_send_ms': m.get('e2e_ms', 0), 'preprocess_to_track_ms': m.get('e2e_ms', 0)},
+                'control_trace': {
+                    'target_point': {'x': m.get('target_point_x', 0), 'y': m.get('target_point_y', 0)},
+                    'reference': {'x': m.get('reference_x', 0), 'y': m.get('reference_y', 0)},
+                    'error': {'x': m.get('aim_error_x', 0), 'y': m.get('aim_error_y', 0)},
+                    'pid_output': {'x': m.get('pid_output_x', 0), 'y': m.get('pid_output_y', 0)},
+                    'scheduler_input': {'x': m.get('scheduler_input_x', 0), 'y': m.get('scheduler_input_y', 0)},
+                    'hid_move': {'x': m.get('mouse_dx', 0), 'y': m.get('mouse_dy', 0)},
+                    'injection_allowed': bool(m.get('injection_allowed', False)),
+                    'mouse_control_connected': bool(m.get('mouse_control_connected', False)),
+                    'mouse_control_socket_write_ok': m.get('mouse_control_socket_write_ok', 0),
+                    'mouse_control_socket_write_fail': m.get('mouse_control_socket_write_fail', 0),
+                    'mouse_control_send_count': m.get('mouse_control_send_count', 0),
+                    'last_mouse_control_dx': m.get('last_mouse_control_dx', 0),
+                    'last_mouse_control_dy': m.get('last_mouse_control_dy', 0),
+                    'last_mouse_control_wheel': m.get('last_mouse_control_wheel', 0),
+                    'last_mouse_control_timestamp_us': m.get('last_mouse_control_timestamp_us', 0),
+                },
                 'license': DEFAULT_LICENSE,
                 # 物理移动屏蔽实时状态（真实来源：RuntimeProfile mouse 配置 + 输出模式支持性）
                 'mouse_output': {
@@ -694,8 +762,8 @@ def index():
         asset_version='2026.09.01.1',
         visual_theme={'id': 'default', 'version': 'built-in', 'color_scheme': 'dark', 'styles': []},
         module_labels=['首页', '配置', '模型', '预设', '运动', '校准', '硬件', '网络', '系统', '更新', '主题', '激活'],
-        motion_training_available=False,
-        motion_training_collection_available=False,
+        motion_training_available=True,
+        motion_training_collection_available=True,
         allow_theme_switch=True,
         show_aim_trace_button=True,
         default_hotspot_ssid='TTBOX',
@@ -712,8 +780,8 @@ def desktop():
         asset_version='2026.09.01.1',
         visual_theme={'id': 'default', 'version': 'built-in', 'color_scheme': 'dark', 'styles': []},
         module_labels=['首页', '配置', '模型', '预设', '运动', '校准', '硬件', '网络', '系统', '更新', '主题', '激活'],
-        motion_training_available=False,
-        motion_training_collection_available=False,
+        motion_training_available=True,
+        motion_training_collection_available=True,
         allow_theme_switch=True,
         show_aim_trace_button=True,
         default_hotspot_ssid='TTBOX',
@@ -730,8 +798,8 @@ def mobile():
         asset_version='2026.09.01.1',
         visual_theme={'id': 'default', 'version': 'built-in', 'color_scheme': 'dark', 'styles': []},
         module_labels=['首页', '配置', '模型', '预设', '运动', '校准', '硬件', '网络', '系统', '更新', '主题', '激活'],
-        motion_training_available=False,
-        motion_training_collection_available=False,
+        motion_training_available=True,
+        motion_training_collection_available=True,
         allow_theme_switch=True,
         show_aim_trace_button=True,
         default_hotspot_ssid='TTBOX',
@@ -814,7 +882,11 @@ def update_system_hostname():
 
 @app.put('/api/system/web-port')
 def update_system_web_port():
-    return jsonify({'ok': True, 'data': {'message': 'Web 端口已更新，请重启后生效'}})
+    return jsonify({
+        'ok': False,
+        'error': 'TTBOX Web 端口热修改尚未接入；当前不修改监听配置',
+        'status': 'planned',
+    }), 501
 
 
 @app.get('/api/system/lan-blocklist')
@@ -978,7 +1050,11 @@ def model_device_code():
 
 @app.post('/api/models/cloud-encrypted')
 def add_cloud_encrypted_model():
-    return jsonify({'ok': True, 'data': {'message': '开发中'}})
+    return jsonify({
+        'ok': False,
+        'error': 'TTBOX 云加密模型登记协议尚未接入；当前不写入模型仓库',
+        'status': 'planned',
+    }), 501
 
 
 @app.post('/api/models/import')
@@ -1260,16 +1336,27 @@ def export_preset(name: str):
 CALIBRATION_FILE = '/opt/ttbox/config/calibration.json'
 ACTIVE_MODEL_FILE = '/opt/ttbox/models/active_model.txt'
 _cal = {
-    'phase': 'idle',        # idle|stabilize|moving|measuring|done|error|cancelled
+    'phase': 'idle',
     'status': 'idle',       # idle|running|success|failed|manual
+    'state': 'idle',        # TTBOX CalibrationState 对外镜像
     'ready': False,
     'reason': 'idle',
     'total_rounds': 10,
     'round': 0,
     'progress': 0.0,
+    'current_axis': '',
     'round_gains': [],
+    'axis_fits': {},
+    'valid_sample_count': 0,
     'candidate_count': 0,
+    'candidate_track_id': -1,
+    'candidate_class_id': -1,
+    'candidate_width': 0.0,
+    'candidate_height': 0.0,
+    'stable_frames': 0,
     'stable_ms': 0,
+    'center_jitter_px': 0.0,
+    'size_variation': 0.0,
     'thread': None,
     'elapsed_ms': 0,
     'amplitude_counts': 0,
@@ -1316,29 +1403,53 @@ def _read_active_model() -> str:
         return ''
 
 
-def _calib_target() -> tuple | None:
-    """真实目标中心（crop 系 px），来自 Core AimThread 实时状态（GET_STATUS.metrics）。
-    aim_has_target 表示当前帧有选中目标；文件/指标新鲜度由 running 保证。"""
+def _calib_target() -> dict | None:
+    """读取 Core 当前选中目标的结构化观测。
+
+    数据来自 AimThread 的真实 TargetSelection：目标 ID、类别、中心和框尺寸。
+    没有运行、没有目标或旧版 Core 未提供身份字段时，返回 None。
+    """
     st = _get_status()
     m = st.get('metrics', {}) if isinstance(st, dict) else {}
-    if not st.get('runtime_running'):
+    if not st.get('runtime_running') or not m.get('aim_has_target'):
         return None
-    if not m.get('aim_has_target'):
+    target_id = int(m.get('aim_target_id', -1))
+    class_id = int(m.get('aim_target_class_id', -1))
+    width = float(m.get('aim_target_width', 0.0))
+    height = float(m.get('aim_target_height', 0.0))
+    if target_id < 0 or class_id < 0 or width <= 0 or height <= 0:
         return None
-    return (float(m.get('aim_pos_x', 0.0)), float(m.get('aim_pos_y', 0.0)),
-            float(m.get('aim_error_x', 0.0)))
+    return {
+        'x': float(m.get('aim_pos_x', 0.0)),
+        'y': float(m.get('aim_pos_y', 0.0)),
+        'target_id': target_id,
+        'class_id': class_id,
+        'width': width,
+        'height': height,
+        'error_x': float(m.get('aim_error_x', 0.0)),
+        'error_y': float(m.get('aim_error_y', 0.0)),
+        'timestamp': time.monotonic(),
+    }
+
+
+def _calib_sample_observations(n: int = 3) -> list[dict]:
+    observations = []
+    for _ in range(n):
+        target = _calib_target()
+        if target is not None:
+            observations.append(target)
+        time.sleep(0.05)
+    return observations
 
 
 def _calib_sample_center(n: int = 3):
-    pts = []
-    for _ in range(n):
-        t = _calib_target()
-        if t is not None:
-            pts.append(t[:2])
-        time.sleep(0.05)
-    if not pts:
+    observations = _calib_sample_observations(n)
+    if not observations:
         return None
-    return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+    return (
+        sum(item['x'] for item in observations) / len(observations),
+        sum(item['y'] for item in observations) / len(observations),
+    )
 
 
 def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
@@ -1377,135 +1488,196 @@ def _calib_worker() -> None:
     mo0['calibrating'] = True
     ipc_request('SET_CONFIG', {'profile': prof0})
     try:
-        _calib_set(status='running', phase='stabilize', reason='检测目标稳定性',
+        _calib_set(state='preparing', status='running', phase='preparing', reason='准备标定环境',
                    round=0, progress=0.0, round_gains=[], candidate_count=0,
-                   stable_ms=0, elapsed_ms=0)
-        # 1) stabilize：目标存在（aim_has_target）持续 800ms
+                   stable_frames=0, stable_ms=0, valid_sample_count=0, axis_fits={})
+        # 1) stabilize：同一目标/类别/尺寸稳定，中心抖动 <1px、尺寸变化 <5%，持续 800ms
+        _calib_set(state='stabilize_x', phase='stabilize_x', current_axis='x')
         win, stable_start = [], None
         deadline = time.time() + 12.0
         t0 = time.time()
         while time.time() < deadline:
             if _cal['status'] != 'running':
-                _calib_set(phase='cancelled', reason='cancelled')
+                _calib_set(state='cancelled', phase='cancelled', reason='cancelled')
                 return
-            t = _calib_target()
-            if t is None:
+            target = _calib_target()
+            if target is None:
                 win.clear()
                 stable_start = None
-                _calib_set(reason='no_target', candidate_count=0, stable_ms=0,
+                _calib_set(reason='no_target', candidate_count=0, stable_frames=0, stable_ms=0,
                            elapsed_ms=int((time.time() - t0) * 1000))
                 time.sleep(0.1)
                 continue
-            win.append(t[:2])
+            if win and (target['target_id'] != win[-1]['target_id'] or
+                        target['class_id'] != win[-1]['class_id']):
+                win.clear()
+                stable_start = None
+            win.append(target)
             if len(win) > 10:
                 win.pop(0)
+            widths = [item['width'] for item in win]
+            heights = [item['height'] for item in win]
+            jx = max(item['x'] for item in win) - min(item['x'] for item in win)
+            jy = max(item['y'] for item in win) - min(item['y'] for item in win)
+            size_var = max(
+                max(widths) - min(widths), max(heights) - min(heights)
+            ) / max(max(widths + heights), 1.0)
             with _cal_lock:
                 _cal['candidate_count'] = len(win)
-            if len(win) >= 6:
-                jx = max(p[0] for p in win) - min(p[0] for p in win)
-                jy = max(p[1] for p in win) - min(p[1] for p in win)
-                if jx < 1.0 and jy < 1.0:
-                    if stable_start is None:
-                        stable_start = time.time()
-                    stable_ms = int((time.time() - stable_start) * 1000)
-                    _calib_set(stable_ms=stable_ms, ready=True, reason='ready',
-                               elapsed_ms=int((time.time() - t0) * 1000))
-                    if stable_ms >= 800:
-                        break
-                else:
-                    stable_start = None
-                    _calib_set(ready=False, reason='target_unstable', stable_ms=0)
+                _cal['candidate_track_id'] = target['target_id']
+                _cal['candidate_class_id'] = target['class_id']
+                _cal['candidate_width'] = target['width']
+                _cal['candidate_height'] = target['height']
+                _cal['center_jitter_px'] = max(jx, jy)
+                _cal['size_variation'] = size_var
+                _cal['stable_frames'] = len(win)
+            if len(win) >= 10 and jx < 1.0 and jy < 1.0 and size_var < 0.05:
+                if stable_start is None:
+                    stable_start = time.time()
+                stable_ms = int((time.time() - stable_start) * 1000)
+                _calib_set(state='stabilize_x', stable_ms=stable_ms, ready=True, reason='ready',
+                           elapsed_ms=int((time.time() - t0) * 1000))
+                if stable_ms >= 800:
+                    break
+            else:
+                stable_start = None
+                _calib_set(ready=False, reason='target_unstable', stable_ms=0)
             time.sleep(0.05)
         else:
-            _calib_set(status='failed', phase='error', reason='目标稳定检测超时', ready=False)
+            _calib_set(state='failed', status='failed', phase='error', reason='目标稳定检测超时', ready=False)
             return
-        # 2) rounds：X 轴往返移动，闭环测 px/count
-        total, gains, delays = 10, [], []
-        for rnd in range(total):
-            if _cal['status'] != 'running':
-                _calib_set(phase='cancelled', reason='cancelled')
-                return
-            amp = int(8 + rnd * (24 / 9))
-            _calib_set(phase='moving', round=rnd + 1, progress=rnd / total,
-                       amplitude_counts=amp)
-            base = _calib_sample_center(3)
-            if base is None:
-                _calib_set(reason='no_target')
-                time.sleep(0.2)
-                continue
-            # 正向：通过 calibrating 模式 + kp 驱动目标位移，采样窗口捕获位移
-            t_inj = time.time()
-            max_dx, moved = 0.0, False
-            for _ in range(20):
-                time.sleep(0.05)
-                c = _calib_sample_center(1)
-                if c is None:
-                    continue
-                d = abs(c[0] - base[0])
-                if d > max_dx:
-                    max_dx = d
-                if not moved and d > 0.3:
-                    delays.append((time.time() - t_inj) * 1000)
-                    moved = True
-            if max_dx >= 1.0:
-                gains.append(max_dx / amp)
-            _calib_set(phase='measuring', round_gains=gains[:])
-            time.sleep(0.1)
-            # 反向：切换 calibration_bias 方向让控制链拉回 → 目标回原位
-            base2 = _calib_sample_center(3)
-            if base2 is not None:
+        # 2) X/Y 分轴采样：每轴使用固定幅度，记录真实目标位移/延迟，最后交给 Median/MAD 拟合。
+        amplitudes = [8, 16, 24, 32, 40]
+        axis_observations = {CalibrationAxis.X: [], CalibrationAxis.Y: []}
+        for axis in (CalibrationAxis.X, CalibrationAxis.Y):
+            _calib_set(
+                state=f'stabilize_{axis.value}',
+                phase=f'stabilize_{axis.value}',
+                current_axis=axis.value,
+                round=0,
+                progress=0.5 if axis is CalibrationAxis.Y else 0.0,
+            )
+            # 每轴动作前重新确认同一候选，避免目标切换混入测量。
+            for index, amp in enumerate(amplitudes):
+                if _cal['status'] != 'running':
+                    _calib_set(state='cancelled', phase='cancelled', reason='cancelled')
+                    return
+                base_samples = _calib_sample_observations(3)
+                if not base_samples:
+                    _calib_set(state='failed', status='failed', phase='error', reason='no_target', ready=False)
+                    return
+                base = base_samples[-1]
+                _calib_set(
+                    state=f'sampling_{axis.value}',
+                    phase=f'measure_{axis.value}_response',
+                    current_axis=axis.value,
+                    round=index + 1,
+                    amplitude_counts=amp,
+                    progress=(index + (0 if axis is CalibrationAxis.X else 5)) / 10.0,
+                )
+                bias = {'calibration_bias_x': float(amp) if axis is CalibrationAxis.X else 0.0,
+                        'calibration_bias_y': float(amp) if axis is CalibrationAxis.Y else 0.0}
                 prof = _get_runtime_profile()
                 mo = prof.setdefault('mouse', {})
-                mo['calibration_bias_x'] = float(-amp)
+                mo.update(bias)
                 mo['calibrating'] = True
-                ipc_request('SET_CONFIG', {'profile': prof})
-                max_dx2 = 0.0
+                if ipc_request('SET_CONFIG', {'profile': prof}).get('status') != 0:
+                    _calib_set(state='failed', status='failed', phase='error', reason='Core 配置应用失败', ready=False)
+                    return
+                injected_at = time.monotonic()
+                samples = []
                 for _ in range(20):
                     time.sleep(0.05)
-                    c = _calib_sample_center(1)
-                    if c is None:
+                    target = _calib_target()
+                    if target is None:
                         continue
-                    d = abs(base2[0] - c[0])
-                    if d > max_dx2:
-                        max_dx2 = d
-                if max_dx2 >= 1.0:
-                    gains.append(max_dx2 / amp)
-                prof2 = _get_runtime_profile()
-                mo2 = prof2.setdefault('mouse', {})
-                mo2['calibration_bias_x'] = 0.0
-                ipc_request('SET_CONFIG', {'profile': prof2})
-            _calib_set(round_gains=gains[:])
-        # 质量门槛：至少 5 个有效测量
-        if len(gains) < 5:
-            _calib_set(status='failed', phase='error',
-                       reason=f'有效测量不足（{len(gains)}/20）：目标未随注入移动、已丢失或场景无真实目标',
-                       ready=False)
+                    if target['target_id'] != base['target_id'] or target['class_id'] != base['class_id']:
+                        continue
+                    delta = (target['x'] - base['x']) if axis is CalibrationAxis.X else (target['y'] - base['y'])
+                    samples.append(CalibrationObservation(
+                        axis=axis,
+                        injected_count=float(amp),
+                        measured_delta_px=abs(delta),
+                        response_delay_ms=(target['timestamp'] - injected_at) * 1000.0,
+                        target_id=f"{target['target_id']}:{target['class_id']}",
+                        valid=abs(delta) >= 0.3,
+                    ))
+                # 清除本轮偏置，避免下一轮叠加；仍保持标定模式直到 finally。
+                prof = _get_runtime_profile()
+                mo = prof.setdefault('mouse', {})
+                mo['calibration_bias_x'] = 0.0
+                mo['calibration_bias_y'] = 0.0
+                ipc_request('SET_CONFIG', {'profile': prof})
+                if samples:
+                    # 同一轮取中位数观测，作为一个轴向测量点。
+                    delta = sorted(item.measured_delta_px for item in samples)[len(samples) // 2]
+                    delay = sorted(item.response_delay_ms for item in samples)[len(samples) // 2]
+                    axis_observations[axis].append(CalibrationObservation(
+                        axis=axis,
+                        injected_count=float(amp),
+                        measured_delta_px=delta,
+                        response_delay_ms=max(0.0, delay),
+                        target_id=samples[0].target_id,
+                        valid=True,
+                    ))
+                _calib_set(valid_sample_count=sum(len(v) for v in axis_observations.values()))
+
+            _calib_set(
+                state=f'analyzing_{axis.value}',
+                phase=f'measure_{axis.value}_settle',
+                current_axis=axis.value,
+            )
+        _calib_set(state='validating', phase='validating', current_axis='', progress=0.9)
+        fits = {
+            axis: fit_axis_measurements(axis, values)
+            for axis, values in axis_observations.items()
+        }
+        _calib_set(axis_fits={
+            axis.value: {
+                'gain_px_per_count': fit.gain_px_per_count,
+                'response_delay_ms': fit.response_delay_ms,
+                'sample_count': fit.sample_count,
+                'rejected_count': fit.rejected_count,
+                'consistency': fit.consistency,
+                'converged': fit.converged,
+                'failure_reason': fit.failure_reason,
+            }
+            for axis, fit in fits.items()
+        })
+        if not all(fit.converged for fit in fits.values()):
+            reason = '; '.join(fit.failure_reason for fit in fits.values() if not fit.converged)
+            _calib_set(state='failed', status='failed', phase='error', reason=reason or '轴向拟合失败', ready=False)
             return
-        _calib_set(progress=1.0, phase='done')
-        g = sorted(gains)
-        gain_x = g[len(g) // 2]
-        gain_y = gain_x
-        mean = sum(gains) / len(gains)
-        conf = round(max(0.0, min(1.0, 1.0 - (sum(abs(v - mean) for v in gains)
-                                               / len(gains)) / max(mean, 1e-6))), 3)
-        delay_ms = round(sorted(delays)[len(delays) // 2], 2) if delays else 0.0
+        gain_x = fits[CalibrationAxis.X].gain_px_per_count
+        gain_y = fits[CalibrationAxis.Y].gain_px_per_count
+        delay_ms = max(fits[CalibrationAxis.X].response_delay_ms, fits[CalibrationAxis.Y].response_delay_ms)
+        conf = round(min(fits[CalibrationAxis.X].consistency, fits[CalibrationAxis.Y].consistency), 3)
+        _calib_set(round_gains=[gain_x, gain_y], progress=0.98, phase='saving', state='applying')
         calib = {
             'mouse_gain_x_px_per_count': round(gain_x, 4),
             'mouse_gain_y_px_per_count': round(gain_y, 4),
-            'mouse_response_delay_ms': delay_ms,
+            'mouse_response_delay_ms': round(delay_ms, 2),
             'mouse_calibration_applied': True,
             'valid': True,
             'confidence': conf,
             'calibrated_at': time.strftime('%Y%m%d_%H%M%S'),
             'model_id': _read_active_model(),
             'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
-            'rounds': len(gains),
+            'rounds': len(axis_observations[CalibrationAxis.X]) + len(axis_observations[CalibrationAxis.Y]),
         }
         ok, detail = _write_calibration(calib)
         if ok:
             ok2, detail2 = _calib_apply_gain(calib)
+            ok = ok and ok2
             detail = detail + '；' + detail2
-        _calib_set(status='success' if ok else 'failed', reason='completed' if ok else detail)
+        _calib_set(
+            state='completed' if ok else 'failed',
+            status='success' if ok else 'failed',
+            reason='completed' if ok else detail,
+            ready=ok,
+            progress=1.0 if ok else 0.98,
+            phase='completed' if ok else 'error',
+        )
     finally:
         try:
             prof = _get_runtime_profile()
@@ -1522,14 +1694,25 @@ def _calibration_payload() -> dict:
         runtime = {
             'running': bool(_cal['thread'] and _cal['thread'].is_alive()),
             'phase': _cal['phase'],
+            'state': _cal['state'],
             'status': _cal['status'],
             'ready': _cal['ready'],
             'reason': _cal['reason'],
             'total_rounds': _cal['total_rounds'],
             'round': _cal['round'],
             'progress': _cal['progress'],
+            'current_axis': _cal['current_axis'],
+            'valid_sample_count': _cal['valid_sample_count'],
+            'axis_fits': _cal['axis_fits'],
             'candidate_count': _cal['candidate_count'],
+            'candidate_track_id': _cal['candidate_track_id'],
+            'candidate_class_id': _cal['candidate_class_id'],
+            'candidate_width': _cal['candidate_width'],
+            'candidate_height': _cal['candidate_height'],
+            'stable_frames': _cal['stable_frames'],
             'stable_ms': _cal['stable_ms'],
+            'center_jitter_px': _cal['center_jitter_px'],
+            'size_variation': _cal['size_variation'],
             'elapsed_ms': _cal['elapsed_ms'],
             'amplitude_counts': _cal['amplitude_counts'],
             'error': '' if _cal['status'] != 'failed' else _cal['reason'],
@@ -2130,90 +2313,186 @@ def get_xcsh_background_image():
 
 
 # -- 运动训练 --
+def _motion_error(exc: Exception):
+    message = str(exc)
+    status = 409 if "session" in message or "active" in message or "lease" in message else 422
+    return jsonify({'ok': False, 'error': message}), status
+
+
+def _apply_personal_motion_to_core(enabled: bool, profile_id: str = '', mix: dict | None = None):
+    """把 TTBOX 个人模型的启用状态写入 Core RuntimeProfile，Core 是最终运行真源。"""
+    prof = _get_runtime_profile()
+    if not prof:
+        raise MotionTrainingError('读取 TTBOX Core RuntimeProfile 失败')
+    personal = prof.setdefault('mouse', {}).setdefault('personal_motion', {})
+    personal['enabled'] = bool(enabled)
+    if enabled:
+        profile = MOTION_STORE.list_profile(profile_id)
+        model = profile.get('model') or {}
+        if not model.get('ready'):
+            raise MotionTrainingError('model is not ready')
+        values = mix or MOTION_STORE._mix()
+        personal.update({
+            'curve_blend': values.get('curve', 1.0),
+            'speed_blend': values.get('speed', 1.0),
+            'reaction_blend': values.get('reaction', 0.7),
+            'max_reaction_delay_ms': values.get('max_reaction_delay_ms', 250),
+            'knots': model.get('knots', []),
+        })
+    result = ipc_request('SET_CONFIG', {'profile': prof})
+    if result.get('status') != 0:
+        raise MotionTrainingError(result.get('error', 'Core 配置更新失败'))
+    return prof
+
+
 @app.get('/api/motion-profiles')
 def list_motion_profiles():
-    return jsonify({'ok': True, 'data': {'profiles': []}})
+    try:
+        return jsonify({'ok': True, 'data': MOTION_STORE.list_profiles()})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.post('/api/motion-profiles')
 def create_motion_profile():
-    return jsonify({'ok': True, 'data': {'message': '已创建', 'profile_id': 'default'}})
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'data': MOTION_STORE.create_profile(body.get('name', ''))})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.patch('/api/motion-profiles/<profile_id>')
 def rename_motion_profile(profile_id: str):
-    return jsonify({'ok': True, 'data': {'message': '已重命名'}})
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify({'ok': True, 'data': MOTION_STORE.rename(profile_id, body.get('name', ''))})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.delete('/api/motion-profiles/<profile_id>')
 def delete_motion_profile(profile_id: str):
-    return jsonify({'ok': True, 'data': {'message': '已删除'}})
+    try:
+        return jsonify({'ok': True, 'data': MOTION_STORE.delete(profile_id)})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.get('/api/motion-profiles/<profile_id>/export')
 def export_motion_profile(profile_id: str):
-    return jsonify({'ok': True, 'data': {}})
+    try:
+        profile = MOTION_STORE.list_profile(profile_id)
+        export_path = MOTION_PROFILES_DIR / f'.motion-profile-{profile_id}.json'
+        export_path.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding='utf-8')
+        return send_file(export_path, mimetype='application/json', as_attachment=True,
+                         download_name=f'ttbox-motion-profile-{profile_id}.json')
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.post('/api/motion-training/sessions')
 def start_motion_training_session():
-    return jsonify({'ok': True, 'data': {'session_id': 'mock-session', 'message': '已开始'}})
+    body = request.get_json(silent=True) or {}
+    try:
+        result = MOTION_STORE.start_session(str(body.get('profile_id') or ''), now=time.time())
+        return jsonify({'ok': True, 'data': {
+            'session_id': result['id'], 'profile_id': result['profile_id'],
+            'lease_expires_at': result['lease_expires_at'],
+        }})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.put('/api/motion-training/sessions/<session_id>/heartbeat')
 def heartbeat_motion_training_session(session_id: str):
-    return jsonify({'ok': True, 'data': {'message': 'ok'}})
+    try:
+        return jsonify({'ok': True, 'data': MOTION_STORE.heartbeat(session_id)})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.post('/api/motion-training/sessions/<session_id>/samples')
 def append_motion_training_sample(session_id: str):
-    return jsonify({'ok': True, 'data': {'message': '已采集'}})
+    body = request.get_json(silent=True)
+    try:
+        return jsonify({'ok': True, 'data': MOTION_STORE.append_sample(session_id, body)})
+    except (MotionSampleError, MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.delete('/api/motion-training/sessions/<session_id>')
 def stop_motion_training_session(session_id: str):
-    return jsonify({'ok': True, 'data': {'message': '已停止'}})
+    try:
+        return jsonify({'ok': True, 'data': MOTION_STORE.stop_session(session_id)})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.post('/api/motion-profiles/<profile_id>/train')
 def train_motion_profile(profile_id: str):
-    return jsonify({'ok': True, 'data': {'message': '训练开始'}})
+    try:
+        return jsonify({'ok': True, 'data': MOTION_STORE.train(profile_id)})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.post('/api/motion-profiles/<profile_id>/activate')
 def activate_motion_profile(profile_id: str):
-    return jsonify({'ok': True, 'data': {'message': '已激活'}})
+    body = request.get_json(silent=True) or {}
+    try:
+        result = MOTION_STORE.activate(profile_id, **body)
+        _apply_personal_motion_to_core(True, profile_id, result['mix'])
+        return jsonify({'ok': True, 'data': result})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.delete('/api/motion-profiles/active')
 def deactivate_motion_profile():
-    return jsonify({'ok': True, 'data': {'message': '已停用'}})
+    try:
+        result = MOTION_STORE.deactivate()
+        _apply_personal_motion_to_core(False)
+        return jsonify({'ok': True, 'data': result})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 @app.delete('/api/motion-profiles/<profile_id>/samples')
 def clear_motion_profile_samples(profile_id: str):
-    return jsonify({'ok': True, 'data': {'message': '已清除'}})
+    try:
+        return jsonify({'ok': True, 'data': MOTION_STORE.clear_samples(profile_id)})
+    except (MotionTrainingError, OSError) as exc:
+        return _motion_error(exc)
 
 
 # -- 远程 --
+def _remote_not_ready():
+    return jsonify({
+        'ok': False,
+        'error': 'TTBOX 远程模型协议尚未接入；当前不执行远程连接、导入或删除操作',
+        'status': 'planned',
+    }), 501
+
+
 @app.post('/api/remote/connect')
 def remote_connect():
-    return jsonify({'ok': True, 'data': {'message': '已连接', 'session_id': 'mock-remote'}})
+    return _remote_not_ready()
 
 
 @app.get('/api/remote/models')
 def remote_models():
-    return jsonify({'ok': True, 'data': {'models': []}})
+    return _remote_not_ready()
 
 
 @app.post('/api/remote/import')
 def remote_import():
-    return jsonify({'ok': True, 'data': {'message': '已导入'}})
+    return _remote_not_ready()
 
 
 @app.post('/api/remote/delete')
 def remote_delete():
-    return jsonify({'ok': True, 'data': {'message': '已删除'}})
+    return _remote_not_ready()
 
 
 # -- 其他 --
@@ -2255,7 +2534,11 @@ def list_kmboxb_devices():
 
 @app.post('/api/mouse-output/test-circle')
 def test_mouse_output_circle():
-    return jsonify({'ok': True, 'data': {'message': '测试已开始'}})
+    return jsonify({
+        'ok': False,
+        'error': '鼠标圆周输出测试尚未接入真实输出后端；当前不发送测试动作',
+        'status': 'planned',
+    }), 501
 
 
 # -- 预览 --

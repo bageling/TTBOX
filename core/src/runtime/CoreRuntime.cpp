@@ -59,7 +59,16 @@ bool CoreRuntime::start(std::string* error) {
         running_ = false;
         return false;
     }
-    if (!aim_thread_.start(mailbox_.get(), output_, 4000, runtime_config_)) {
+    std::string mouse_error;
+    if (!mouse_reader_.start("", &mouse_error)) {
+        TTBOX_LOG_WARN("PhysicalMouseReader 启动失败（不阻塞 AI 流水线）: " + mouse_error);
+    }
+    if (auto* backend = dynamic_cast<output::OutputBackend*>(output_.get())) {
+        backend->set_button_source(mouse_reader_.button_source());
+        backend->set_config_source(runtime_config_);
+    }
+    if (!aim_thread_.start(mailbox_.get(), output_, 4000, runtime_config_,
+                           mouse_reader_.button_source())) {
         workers_->stop();
         capture_->stop();
         capture_->close();
@@ -110,6 +119,7 @@ void CoreRuntime::stop() {
         preview_.reset();
     }
     aim_thread_.stop();
+    mouse_reader_.stop();
     if (workers_) {
         workers_->stop();
     }
@@ -138,6 +148,9 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         //   last_dequeued_count = 已 DQBUF 未归还的 buffer 数；buffer_count = 驱动 buffer 总数
         out->last_dequeued_count = capture_->in_use_count();
         out->buffer_count = capture_->buffer_count();
+        const auto& format = capture_->format();
+        out->input_width = format.width;
+        out->input_height = format.height;
     }
     if (workers_ && workers_->worker_count() > 0) {
         // 聚合所有 worker：published 累计 → 推理 FPS；耗时 avg 直接平均
@@ -210,10 +223,27 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
     const auto ast = aim_thread_.status();
     out->aim_error_x = ast.error_x;
     out->aim_error_y = ast.error_y;
+    out->target_point_x = ast.target_point_x;
+    out->target_point_y = ast.target_point_y;
+    out->reference_x = ast.reference_x;
+    out->reference_y = ast.reference_y;
+    out->pid_output_x = ast.pid_output_x;
+    out->pid_output_y = ast.pid_output_y;
+    out->scheduler_input_x = ast.scheduler_input_x;
+    out->scheduler_input_y = ast.scheduler_input_y;
     // 目标中心（crop 系 px）：selected 框中心，标定状态机需要真实目标位移
     out->aim_pos_x = ast.predicted_x;
     out->aim_pos_y = ast.predicted_y;
     out->aim_has_target = ast.has_target;
+    out->aim_target_id = ast.target_id;
+    out->aim_target_class_id = ast.target_class_id;
+    out->aim_target_width = ast.target_width;
+    out->aim_target_height = ast.target_height;
+    out->aim_target_x1 = ast.target_x1;
+    out->aim_target_y1 = ast.target_y1;
+    out->aim_target_x2 = ast.target_x2;
+    out->aim_target_y2 = ast.target_y2;
+    out->detection_boxes = ast.detection_boxes;
     if (preview_) {
         const auto& pm = preview_->metrics();
         out->preview_fps = pm.fps.load();
@@ -233,6 +263,18 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->target_frames = st.target_frames;
         out->no_target_frames = st.no_target_frames;
         out->aim_active = st.has_target;
+        out->injection_allowed = st.last_injection_allowed;
+        if (auto* backend = dynamic_cast<output::OutputBackend*>(output_.get())) {
+            const auto h = backend->health();
+            out->mouse_control_connected = h.state == output::BackendState::kConnected;
+            out->mouse_control_socket_write_ok = h.socket_write_ok;
+            out->mouse_control_socket_write_fail = h.socket_write_fail;
+            out->mouse_control_send_count = h.send_count;
+            out->last_mouse_control_dx = h.last_dx;
+            out->last_mouse_control_dy = h.last_dy;
+            out->last_mouse_control_wheel = h.last_wheel;
+            out->last_mouse_control_timestamp_us = h.last_timestamp_us;
+        }
     }
 }
 

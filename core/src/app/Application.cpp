@@ -151,8 +151,8 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         const std::string fifo_path =
             config_.get_string("output_fifo_path", "/tmp/ttbox_hid.fifo");
         hid_output_ = std::make_shared<output::FifoHidOutput>(fifo_path);
-    } else if (output_kind == "local_hid" || output_kind == "kmboxnet" ||
-               output_kind == "makcu" || output_kind == "ferrum" ||
+    } else if (output_kind == "local_hid" || output_kind == "usb_proxy" ||
+               output_kind == "kmboxnet" || output_kind == "makcu" || output_kind == "ferrum" ||
                output_kind == "kmboxb") {
         // 统一 OutputBackend：按 kind 选择后端，行为与 AiboxHidOutput 完全一致
         // （local_hid 即原 aibox 逻辑迁移；kmboxnet/makcu/ferrum/kmboxb 后续接入）。
@@ -160,6 +160,7 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         output::OutputBackend::Params bp;
         bp.kind = output_kind;
         bp.hidg_path = config_.get_string("output_hidg_path", "/dev/hidg0");
+        bp.proxy_socket_path = config_.get_string("output_proxy_socket", "/run/orangepi-mouse-passthrough/cmd.sock");
         bp.enabled = enabled;
         bp.runtime_config = &runtime_config_;
         // button_source 由 Application::start 阶段绑定（见 add_hid_button_source 处）

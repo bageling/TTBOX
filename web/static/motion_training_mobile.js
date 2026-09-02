@@ -37,16 +37,19 @@
   };
 
   async function api(path, options = {}) {
-    const response = await fetch(path, {
-      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-      cache: "no-store",
-      ...options,
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.error || `请求失败 (${response.status})`);
+    const client = window.ttbox && window.ttbox.api;
+    if (!client || typeof client.request !== "function") throw new Error("TTBOX API Client 未加载");
+    let body = options.body;
+    if (typeof body === "string") {
+      try { body = JSON.parse(body); } catch { body = undefined; }
     }
-    return payload.data || {};
+    const result = await client.request((options.method || "GET").toUpperCase(), path, body, { ...options, body: undefined });
+    if (!result.ok) {
+      const error = new Error(result.error || "请求失败");
+      error.status = result.status;
+      throw error;
+    }
+    return result.data || {};
   }
 
   function selectedProfile() {

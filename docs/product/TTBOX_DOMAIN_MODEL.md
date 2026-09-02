@@ -150,6 +150,44 @@ MouseConfig {
 }
 ```
 
+### PersonalMotionConfig
+
+```text
+PersonalMotionConfig {
+  enabled: bool
+  curve_blend: float              // 0~1，个人曲线混合比例
+  speed_blend: float              // 0~1，个人速度特征混合比例
+  reaction_blend: float           // 0~1，个人反应特征混合比例
+  max_reaction_delay_ms: float    // 0~1000
+  knots: float[]                  // 最多32个，归一化输出曲线
+}
+```
+
+### CalibrationSession
+
+```text
+CalibrationSession {
+  state: idle|preparing|stabilize_x|sampling_x|analyzing_x|
+        stabilize_y|sampling_y|analyzing_y|validating|applying|
+        completed|cancelled|failed
+  current_axis: x|y|empty
+  current_iteration: int
+  total_iterations: int
+  amplitude_counts: int
+  candidate_track_id: int
+  candidate_class_id: int
+  candidate_width: float
+  candidate_height: float
+  stable_frames: int
+  stable_ms: float
+  center_jitter_px: float
+  size_variation: float
+  valid_sample_count: int
+  axis_fits: object
+  failure_reason: string
+}
+```
+
 ### AimConfig
 
 ```

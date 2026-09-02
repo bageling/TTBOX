@@ -71,11 +71,11 @@
 | 拉枪曲线 pull_curve | controller_pull_curve_* | GET/PUT /api/config | ✅ | PullCurve.hpp 类存在；AimThread 消费接线 PLANNED（29d3622 重构断线） | 浏览器 strength 0.9→1.11→恢复 | REAL（配置链路）/ PLANNED（输出消费） |
 | 持续提前量 continuous_lead | controller_continuous_lead_* | GET/PUT /api/config | ✅ | C 桥 continuous_lead_output（运行链未启用时配置可存） | 浏览器 scale 0.6→0.71→恢复 | REAL（配置链路）/ VERIFY（C 桥运行） |
 | 屏蔽物理移动 block_physical | controller_block_physical_mouse_x/y | GET/PUT /api/config | ✅ | C 桥 inject_ai block_x/y（运行链未启用时配置可存）；state.mouse_output 真实回填 | 浏览器 X false→true→恢复；支持徽标=可用 | REAL（配置链路）/ VERIFY（C 桥运行） |
-| 自动标定 | autoCalibration* / calibration start/cancel/clear | GET/PUT/POST/DELETE /api/control/calibration* | ✅（假桩已替换为真实状态机） | Gateway 状态机 + Core aim_pos 反馈 + calibrating 放行 | GET 真实状态；start 无目标被真实拒绝；手动保存 0.651/0.649/8.4 真实落盘+回读+恢复 | REAL（手动/状态）/ VERIFY（自动闭环需真实游戏目标） |
+| 自动标定 | autoCalibration* / calibration start/status/cancel/apply/reset | GET/POST/PUT/DELETE /api/control/calibration* | ✅ | TTBOX Calibration Domain + Core 目标身份/尺寸遥测 | 浏览器状态读取/无目标真实拒绝；完整目标场景待验收 | VERIFY |
 | 手动标定参数 | autoCalibrationGainX/Y、Delay + saveAutoCalibrationValuesButton | PUT /api/control/calibration | ✅ | 写 calibration.json + kp 换算写 RuntimeProfile | 浏览器保存→回读→恢复基线 | REAL |
 | 记录移动日志 | recordAimTraceButton | POST /api/diagnostics/aim-trace | ✅（按钮已露出） | Gateway 采样线程 → /opt/ttbox/run/aim_trace.json | 按钮可见；采样链路真实现有 | REAL（按钮/API）/ VERIFY（10s 完整采样需运行时） |
 | 恢复本页默认值 | resetControllerDefaultsButton | PUT /api/config | ✅ | ✅ | 分区联动（自动标定区隐藏） | REAL |
-| 个性曲线训练 | controlSectionTabMotionTraining | motion-training/* 路由 | 不接入 | Core 无能力 | 模板不渲染 | PLANNED |
+| 个性曲线训练 | controlSectionTabMotionTraining | /api/motion-profiles* + /api/motion-training/sessions* | ✅ | TTBOX MotionProfile + PersonalMotion | 浏览器 12样本→训练→激活→刷新→停用；真实 HID 效果待验收 | VERIFY |
 
 ---
 

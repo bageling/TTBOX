@@ -94,6 +94,8 @@ bool RuntimeProfile::validate(std::string* error) const {
         mouse.hfov, mouse.vfov, mouse.move_speed_x, mouse.move_speed_y,
         mouse.aim_point.aim_offset_x, mouse.aim_point.aim_offset_y,
         mouse.aim_point.offset_x, mouse.aim_point.offset_y,
+        mouse.personal_motion.curve_blend, mouse.personal_motion.speed_blend,
+        mouse.personal_motion.reaction_blend, mouse.personal_motion.max_reaction_delay_ms,
         inference.confidence, inference.iou,
         fov.center_x, fov.center_y, fov.radius,
     };
@@ -168,6 +170,24 @@ bool RuntimeProfile::validate(std::string* error) const {
     }
     if (mouse.lost_grace_ms < 0.0f) {
         if (error) *error = "mouse.lost_grace_ms 不能为负";
+        return false;
+    }
+    if (mouse.personal_motion.curve_blend < 0.0f || mouse.personal_motion.curve_blend > 1.0f ||
+        mouse.personal_motion.speed_blend < 0.0f || mouse.personal_motion.speed_blend > 1.0f ||
+        mouse.personal_motion.reaction_blend < 0.0f || mouse.personal_motion.reaction_blend > 1.0f ||
+        mouse.personal_motion.max_reaction_delay_ms < 0.0f ||
+        mouse.personal_motion.max_reaction_delay_ms > 1000.0f) {
+        if (error) *error = "personal_motion 混合参数超出范围";
+        return false;
+    }
+    for (const float knot : mouse.personal_motion.knots) {
+        if (!std::isfinite(knot) || knot < 0.0f || knot > 1.0f) {
+            if (error) *error = "personal_motion knots 必须在 [0,1]";
+            return false;
+        }
+    }
+    if (mouse.personal_motion.knots.size() > 32) {
+        if (error) *error = "personal_motion knots 最多 32 个";
         return false;
     }
     if (preview.width == 0 || preview.height == 0 ||
@@ -279,6 +299,18 @@ JsonValue RuntimeProfile::to_json() const {
     hz.set("jitter_px", JsonValue::number(static_cast<double>(mouse.humanize.jitter_px)));
     hz.set("jitter_frequency", JsonValue::number(static_cast<double>(mouse.humanize.jitter_frequency)));
     m.set("humanize", std::move(hz));
+    JsonValue pm = JsonValue::object();
+    pm.set("enabled", JsonValue::boolean(mouse.personal_motion.enabled));
+    pm.set("curve_blend", JsonValue::number(static_cast<double>(mouse.personal_motion.curve_blend)));
+    pm.set("speed_blend", JsonValue::number(static_cast<double>(mouse.personal_motion.speed_blend)));
+    pm.set("reaction_blend", JsonValue::number(static_cast<double>(mouse.personal_motion.reaction_blend)));
+    pm.set("max_reaction_delay_ms", JsonValue::number(static_cast<double>(mouse.personal_motion.max_reaction_delay_ms)));
+    JsonValue knots = JsonValue::array();
+    for (const float knot : mouse.personal_motion.knots) {
+        knots.push_back(JsonValue::number(static_cast<double>(knot)));
+    }
+    pm.set("knots", std::move(knots));
+    m.set("personal_motion", std::move(pm));
     m.set("aim_offset_x", JsonValue::number(static_cast<double>(mouse.aim_point.aim_offset_x)));
     m.set("aim_offset_y", JsonValue::number(static_cast<double>(mouse.aim_point.aim_offset_y)));
     m.set("offset_x", JsonValue::number(static_cast<double>(mouse.aim_point.offset_x)));
@@ -414,6 +446,20 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.humanize.curve_strength = static_cast<float>(obj_num(*hz, "curve_strength", 0.45));
             p.mouse.humanize.jitter_px = static_cast<float>(obj_num(*hz, "jitter_px", 0.25));
             p.mouse.humanize.jitter_frequency = static_cast<float>(obj_num(*hz, "jitter_frequency", 8.0));
+        }
+        if (const JsonValue* pm = m->find("personal_motion"); pm && pm->is_object()) {
+            p.mouse.personal_motion.enabled = obj_bool(*pm, "enabled", false);
+            p.mouse.personal_motion.curve_blend = static_cast<float>(obj_num(*pm, "curve_blend", 1.0));
+            p.mouse.personal_motion.speed_blend = static_cast<float>(obj_num(*pm, "speed_blend", 1.0));
+            p.mouse.personal_motion.reaction_blend = static_cast<float>(obj_num(*pm, "reaction_blend", 0.7));
+            p.mouse.personal_motion.max_reaction_delay_ms = static_cast<float>(obj_num(*pm, "max_reaction_delay_ms", 250.0));
+            if (const JsonValue* knots = pm->find("knots"); knots && knots->is_array()) {
+                for (const auto& item : knots->as_array()) {
+                    if (item.is_number() && p.mouse.personal_motion.knots.size() < 32) {
+                        p.mouse.personal_motion.knots.push_back(static_cast<float>(item.as_number()));
+                    }
+                }
+            }
         }
         p.mouse.aim_point.aim_offset_x = static_cast<float>(obj_num(*m, "aim_offset_x", 0.0));
         p.mouse.aim_point.aim_offset_y = static_cast<float>(obj_num(*m, "aim_offset_y", 0.0));

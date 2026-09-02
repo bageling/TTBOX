@@ -106,6 +106,17 @@ struct HumanizeConfig {
     float jitter_frequency = 8.0f; // 抖动频率 Hz
 };
 
+// TTBOX 个人移动曲线模型：只保存已训练模型的安全运行参数。
+// 原始训练样本留在 Gateway 的独立 profile.json，Core 热路径只读 knots。
+struct PersonalMotionConfig {
+    bool enabled = false;
+    float curve_blend = 1.0f;
+    float speed_blend = 1.0f;
+    float reaction_blend = 0.7f;
+    float max_reaction_delay_ms = 250.0f;
+    std::vector<float> knots;
+};
+
 // 鼠标配置（RuntimeProfile.mouse，与模型彻底分离）
 struct MouseProfile {
     bool enabled = false;                       // AI 注入总开关（false = 纯物理透传，与 A9 一致）
@@ -157,10 +168,11 @@ struct MouseProfile {
     bool aim_fire_lock_y = false;               // 开火锁 Y
     int y_axis_fire_hotkey = 0x01;              // 开火热键位掩码（1=left）
     float y_axis_fire_release_delay_sec = 0.3f; // 开火锁 Y 释放延迟
-    // 插件配置（YU pull_curve / continuous_lead / humanize）
+    // 插件配置（pull_curve / continuous_lead / humanize）
     PullCurveConfig pull_curve;
     ContinuousLeadConfig continuous_lead;
     HumanizeConfig humanize;
+    PersonalMotionConfig personal_motion;
     AimPointProfile aim_point;
     float lost_grace_ms = 78.0f;                // 目标丢失宽限期
     // A11 标定闭环：calibrating 强制 AIMING；calibration_bias_* 把准星带到偏置位再拉回

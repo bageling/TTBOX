@@ -39,6 +39,13 @@ struct BackendHealth {
     uint64_t send_fail = 0;
     uint64_t reconnect_count = 0;
     int64_t last_send_ok_us = 0;  // 最近成功发送时刻（steady，us）
+    uint64_t socket_write_ok = 0;
+    uint64_t socket_write_fail = 0;
+    uint64_t send_count = 0;
+    int32_t last_dx = 0;
+    int32_t last_dy = 0;
+    int32_t last_wheel = 0;
+    uint64_t last_timestamp_us = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -98,6 +105,7 @@ public:
     struct Params {
         std::string kind = "local_hid";   // local_hid
         std::string hidg_path = "/dev/hidg1";
+        std::string proxy_socket_path = "/run/orangepi-mouse-passthrough/cmd.sock";
         // Gate / 运行时
         RuntimeConfig* runtime_config = nullptr;
         std::atomic<uint16_t>* button_source = nullptr;
@@ -114,6 +122,9 @@ public:
     const Params& params() const { return params_; }
 
     bool send(const OutputAction& action) override;
+
+    BackendHealth health() const;
+    const char* backend_name() const;
 
     void set_enabled(bool enabled);
     void set_button_source(std::atomic<uint16_t>* source);

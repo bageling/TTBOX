@@ -20,8 +20,25 @@ public:
         bool running = false;
         bool has_task = false;
         bool has_target = false;
+        int target_id = -1;
+        int target_class_id = -1;
+        float target_width = 0.0f;
+        float target_height = 0.0f;
+        float target_x1 = 0.0f;
+        float target_y1 = 0.0f;
+        float target_x2 = 0.0f;
+        float target_y2 = 0.0f;
+        std::vector<DetectionBox> detection_boxes;
+        float target_point_x = 0.0f;
+        float target_point_y = 0.0f;
+        float reference_x = 0.0f;
+        float reference_y = 0.0f;
         float error_x = 0.0f;
         float error_y = 0.0f;
+        float pid_output_x = 0.0f;
+        float pid_output_y = 0.0f;
+        float scheduler_input_x = 0.0f;
+        float scheduler_input_y = 0.0f;
         int16_t move_x = 0;
         int16_t move_y = 0;
         uint64_t last_frame = 0;
@@ -44,6 +61,7 @@ public:
         uint64_t gated_frames = 0;      // Hotkey Gate 拦截的周期数（热键未按）
         uint16_t last_hotkey_bits = 0;  // 最近一次采样的物理按键位图（遥测）
         bool last_injection_allowed = false;  // 最近一次 Gate 判定结果
+        uint64_t last_timestamp_us = 0;
     };
     AimThread() = default;
     ~AimThread() { stop(); }

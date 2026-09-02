@@ -6,6 +6,7 @@
 #include "mouse/FovAngle.hpp"
 #include "mouse/CoordinateTransform.hpp"
 #include "mouse/AimPointProfile.hpp"
+#include "mouse/PersonalMotion.hpp"
 namespace ttbox::core::aim {
 bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us, RuntimeConfig* runtime_config, std::atomic<uint16_t>* physical_buttons) {
     if (!mailbox || !output || running_.exchange(true)) return false;
@@ -37,6 +38,7 @@ void AimThread::loop() {
             // 修复点：此前写死 0.0f 导致 Web 置信度阈值参数无效（中看不中用）。
             float out_sensitivity = 1.0f, out_scale = 1.0f;
             float out_deadzone = 1.0f;
+            PersonalMotionConfig personal_motion;
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
             if (runtime_config_) {
@@ -55,6 +57,7 @@ void AimThread::loop() {
                     out_sensitivity = profile->mouse.sensitivity;
                     out_scale = profile->mouse.output_scale;
                     out_deadzone = profile->mouse.output_deadzone;
+                    personal_motion = profile->mouse.personal_motion;
                     pid_x_.configure(kp_x, kd_x, profile->mouse.predict_x,
                                      profile->mouse.rate_x, profile->mouse.smooth_x);
                     pid_y_.configure(kp_y, kd_y, profile->mouse.predict_y,
@@ -88,6 +91,8 @@ void AimThread::loop() {
             event.now_ms = task.timestamp_us / 1000ULL;
             if (state_machine_.update(event, scfg.lost_grace_ms)) { controller_.reset(); pid_x_.reset(); pid_y_.reset(); remainder_x_=0.0f; remainder_y_=0.0f; last_target_id_=-1; }
             int16_t move_x = 0, move_y = 0; float ex = 0.0f, ey = 0.0f;
+            float tx = 0.0f, ty = 0.0f, ref_x = 0.0f, ref_y = 0.0f;
+            float aibox_x = 0.0f, aibox_y = 0.0f, scaled_x = 0.0f, scaled_y = 0.0f;
             float trace_control_x = 0.0f, trace_control_y = 0.0f;
             float trace_smith_dx = 0.0f, trace_smith_dy = 0.0f;
             // ---- Hotkey Gate：最终输出安全边界 ----
@@ -102,7 +107,6 @@ void AimThread::loop() {
                 remainder_y_ = 0.0f;
             }
             if (selected.valid && task.frame_width > 0 && task.frame_height > 0) {
-                float tx = 0.0f, ty = 0.0f;
                 if (!aim_point_at(selected.box, selected.box.class_id, aim_point, &tx, &ty)) {
                     tx = (selected.box.x1 + selected.box.x2) * 0.5f;
                     ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
@@ -114,7 +118,6 @@ void AimThread::loop() {
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
                 // 速度信息只进入 P_PID 的前馈/Kalman，不在目标坐标层 coast。
-                float ref_x = 0.0f, ref_y = 0.0f;
                 CoordinateTransform::reference_point(static_cast<float>(task.frame_width),
                                                      static_cast<float>(task.frame_height),
                                                      aim_point, &ref_x, &ref_y);
@@ -124,12 +127,19 @@ void AimThread::loop() {
                 float control_y = ey;
                 if (runtime_config_) {
                     auto profile = runtime_config_->snapshot();
-                    if (profile && profile->mouse.fov_mode) {
+                    if (profile) {
+                        // 自动标定偏置进入同一控制误差域，复用正式 PID/输出链测量响应。
+                        if (profile->mouse.calibrating) {
+                            control_x += profile->mouse.calibration_bias_x;
+                            control_y += profile->mouse.calibration_bias_y;
+                        }
+                        if (profile->mouse.fov_mode) {
                         // FOV 模式：先将像素误差转换为角度对应的鼠标移动量。
                         control_x = fov_move_x(ex, static_cast<float>(task.frame_width),
                                                profile->mouse.hfov, profile->mouse.move_speed_x);
                         control_y = fov_move_y(ey, static_cast<float>(task.frame_height),
                                                profile->mouse.vfov, profile->mouse.move_speed_y);
+                        }
                     }
                 }
                 const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
@@ -139,13 +149,18 @@ void AimThread::loop() {
                 trace_smith_dx = 0.0f; trace_smith_dy = 0.0f;
                 trace_control_x = control_x; trace_control_y = control_y;
                 // pid1.cpp P_PID：X predict=3.0，Y predict=0（main() 原始参数）。
-                const float aibox_x = static_cast<float>(pid_x_.update(control_x));
-                const float aibox_y = static_cast<float>(pid_y_.update(control_y));
+                aibox_x = static_cast<float>(pid_x_.update(control_x));
+                aibox_y = static_cast<float>(pid_y_.update(control_y));
                 // 输出链（YU 对齐）：P_PID 输出 × sens（全局灵敏度） × output_scale。
                 // rate_x/y 已在 Pid1 内部作为 kp_gain_rate 消费，此处不再重复。
                 const float out_gain = out_sensitivity * out_scale;
-                float scaled_x = aibox_x * out_gain;
-                float scaled_y = aibox_y * out_gain;
+                scaled_x = aibox_x * out_gain;
+                scaled_y = aibox_y * out_gain;
+                // 个人曲线只改变输出倍率，不绕过 PID、死区和热键安全门。
+                const float personal_distance = std::hypot(control_x, control_y);
+                const float personal_gain = PersonalMotion{}.scale(personal_distance, personal_motion);
+                scaled_x *= personal_gain;
+                scaled_y *= personal_gain;
                 // output_deadzone（YU 自适应死区基准）：低于死区的输出归零（防微抖）。
                 if (std::abs(scaled_x) < out_deadzone) scaled_x = 0.0f;
                 if (std::abs(scaled_y) < out_deadzone) scaled_y = 0.0f;
@@ -176,7 +191,49 @@ void AimThread::loop() {
             last_timestamp_us_ = task.timestamp_us;
             std::lock_guard<std::mutex> lk(status_mutex_);
             status_.has_task = true;
+            status_.detection_boxes = task.detections;
             status_.has_target = selected.valid;
+            status_.target_id = selected.valid ? selected.target_id : -1;
+            status_.target_class_id = selected.valid ? selected.box.class_id : -1;
+            status_.target_width = selected.valid ? selected.box.x2 - selected.box.x1 : 0.0f;
+            status_.target_height = selected.valid ? selected.box.y2 - selected.box.y1 : 0.0f;
+            // 显示框使用同一目标的关联检测框并集，避免只显示头/躯干局部框。
+            // 控制链仍使用 selected.box，显示框扩展不会改变瞄准行为。
+            if (selected.valid) {
+                float display_x1 = selected.box.x1;
+                float display_y1 = selected.box.y1;
+                float display_x2 = selected.box.x2;
+                float display_y2 = selected.box.y2;
+                const float selected_cx = (selected.box.x1 + selected.box.x2) * 0.5f;
+                const float selected_cy = (selected.box.y1 + selected.box.y2) * 0.5f;
+                const float selected_w = std::max(1.0f, selected.box.x2 - selected.box.x1);
+                const float selected_h = std::max(1.0f, selected.box.y2 - selected.box.y1);
+                for (const auto& candidate : task.detections) {
+                    if (&candidate == &selected.box) continue;
+                    const float candidate_cx = (candidate.x1 + candidate.x2) * 0.5f;
+                    const float candidate_cy = (candidate.y1 + candidate.y2) * 0.5f;
+                    const bool vertical_overlap = candidate.y2 >= selected.box.y1 &&
+                                                  candidate.y1 <= selected.box.y2;
+                    const bool horizontal_near = std::fabs(candidate_cx - selected_cx) <=
+                                                 std::max(selected_w * 1.5f, 120.0f);
+                    const bool vertical_near = std::fabs(candidate_cy - selected_cy) <= selected_h * 0.75f;
+                    if (vertical_overlap && horizontal_near && vertical_near) {
+                        display_x1 = std::min(display_x1, candidate.x1);
+                        display_y1 = std::min(display_y1, candidate.y1);
+                        display_x2 = std::max(display_x2, candidate.x2);
+                        display_y2 = std::max(display_y2, candidate.y2);
+                    }
+                }
+                status_.target_x1 = display_x1;
+                status_.target_y1 = display_y1;
+                status_.target_x2 = display_x2;
+                status_.target_y2 = display_y2;
+            } else {
+                status_.target_x1 = 0.0f;
+                status_.target_y1 = 0.0f;
+                status_.target_x2 = 0.0f;
+                status_.target_y2 = 0.0f;
+            }
             if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
             uint32_t active_tracks = 0;
             for (const auto& te : selector_.tracks()) {
@@ -185,8 +242,16 @@ void AimThread::loop() {
             status_.tracks = active_tracks;
             status_.predicted_x = selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f;
             status_.predicted_y = selected.valid ? (selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f) : 0.0f;
+            status_.target_point_x = selected.valid ? tx : 0.0f;
+            status_.target_point_y = selected.valid ? ty : 0.0f;
+            status_.reference_x = selected.valid ? ref_x : 0.0f;
+            status_.reference_y = selected.valid ? ref_y : 0.0f;
             status_.error_x = ex;
             status_.error_y = ey;
+            status_.pid_output_x = selected.valid ? aibox_x : 0.0f;
+            status_.pid_output_y = selected.valid ? aibox_y : 0.0f;
+            status_.scheduler_input_x = selected.valid ? scaled_x : 0.0f;
+            status_.scheduler_input_y = selected.valid ? scaled_y : 0.0f;
             status_.control_x = trace_control_x;
             status_.control_y = trace_control_y;
             status_.smith_dx = trace_smith_dx;
@@ -206,6 +271,7 @@ void AimThread::loop() {
             if (!injection_allowed) ++status_.gated_frames;
             status_.last_hotkey_bits = hotkey_bits;
             status_.last_injection_allowed = injection_allowed;
+            status_.last_timestamp_us = task.timestamp_us;
             status_.last_frame = task.frame_number;
             ++status_.consumed;
         }

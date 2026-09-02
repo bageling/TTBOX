@@ -228,8 +228,8 @@ TTBOX
 | Auto-start | 🟢 完整实现 | 开机自启 |
 | Aim Trace | 🟡 部分实现 | 瞄准轨迹记录（Web 端实现） |
 | Prediction | 🔵 规划中 | 目标运动预测（核心有 AlphaBeta 滤波，未完整接入） |
-| Motion Training | 🔵 规划中 | 运动轨迹训练模块 |
-| Auto Calibration | 🔵 规划中 | 自动标定 |
+| Motion Training | 🟢 已实现 | TTBOX 本地个人移动曲线训练、模型生成与启用 |
+| Auto Calibration | 🟡 部分实现 | TTBOX 行为级自动标定：分轴采样、稳健拟合、状态驱动；真实目标场景待验收 |
 | Remote Sync | 🔵 规划中 | 远程模型同步 |
 | Theme System | ⚪ 保留 | 主题系统 |
 | Update Manager | 🔵 规划中 | 系统更新 |

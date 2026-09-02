@@ -2950,6 +2950,73 @@ function getPreviewImageLayout(stage, cropSize) {
   };
 }
 
+function updateTargetBoxOverlay() {
+  const box = $("targetBoxOverlay");
+  if (!box) return;
+  const label = $("targetBoxLabel");
+  const stage = box.closest(".preview-stage");
+  const detection = state.data?.state?.detection || {};
+  const target = detection.target_box;
+  const allBoxes = Array.isArray(detection.boxes) ? detection.boxes : [];
+  const displayTarget = (() => {
+    if (!target) return null;
+    const related = allBoxes.filter((candidate) => {
+      const cx = (Number(candidate.x1) + Number(candidate.x2)) * 0.5;
+      const cy = (Number(candidate.y1) + Number(candidate.y2)) * 0.5;
+      const tw = Math.max(1, Number(target.x2) - Number(target.x1));
+      const th = Math.max(1, Number(target.y2) - Number(target.y1));
+      const verticalOverlap = Number(candidate.y2) >= Number(target.y1) && Number(candidate.y1) <= Number(target.y2);
+      return verticalOverlap && Math.abs(cx - ((Number(target.x1) + Number(target.x2)) * 0.5)) <= Math.max(tw * 2.5, 180) &&
+        Math.abs(cy - ((Number(target.y1) + Number(target.y2)) * 0.5)) <= th;
+    });
+    const boxes = related.length ? related : [target];
+    return boxes.reduce((merged, candidate) => ({
+      x1: Math.min(merged.x1, Number(candidate.x1)),
+      y1: Math.min(merged.y1, Number(candidate.y1)),
+      x2: Math.max(merged.x2, Number(candidate.x2)),
+      y2: Math.max(merged.y2, Number(candidate.y2)),
+    }), { x1: Number(target.x1), y1: Number(target.y1), x2: Number(target.x2), y2: Number(target.y2) });
+  })();
+  const cropSize = getCropSize(state.config?.capture?.crop_size || 320);
+  const inputWidth = Number(state.data?.state?.capture?.input_width || cropSize);
+  const inputHeight = Number(state.data?.state?.capture?.input_height || cropSize);
+  const configuredCrop = Number(state.config?.capture?.crop_size || 0);
+  const hasCaptureRoi = configuredCrop > 0 && configuredCrop <= inputWidth && configuredCrop <= inputHeight;
+  const sourceWidth = hasCaptureRoi ? configuredCrop : inputWidth;
+  const sourceHeight = hasCaptureRoi ? configuredCrop : inputHeight;
+  const cropOffsetX = Number(state.config?.capture?.crop_offset_x || 0);
+  const cropOffsetY = Number(state.config?.capture?.crop_offset_y || 0);
+  const sourceOriginX = hasCaptureRoi
+    ? Math.max(0, (inputWidth - sourceWidth) * 0.5 + cropOffsetX)
+    : 0;
+  const sourceOriginY = hasCaptureRoi
+    ? Math.max(0, (inputHeight - sourceHeight) * 0.5 + cropOffsetY)
+    : 0;
+  const layout = getPreviewImageLayout(stage, cropSize);
+  if (!displayTarget || !layout || !(sourceWidth > 0 && sourceHeight > 0)) {
+    box.style.display = "none";
+    return;
+  }
+  const sourceXScale = layout.imageWidth / sourceWidth;
+  const sourceYScale = layout.imageHeight / sourceHeight;
+  const x1 = clamp(Number(displayTarget.x1) - sourceOriginX, 0, sourceWidth);
+  const y1 = clamp(Number(displayTarget.y1) - sourceOriginY, 0, sourceHeight);
+  const x2 = clamp(Number(displayTarget.x2) - sourceOriginX, 0, sourceWidth);
+  const y2 = clamp(Number(displayTarget.y2) - sourceOriginY, 0, sourceHeight);
+  if (!(x2 > x1 && y2 > y1)) {
+    box.style.display = "none";
+    return;
+  }
+  box.style.display = "block";
+  box.style.left = `${layout.imageLeft + x1 * sourceXScale}px`;
+  box.style.top = `${layout.imageTop + y1 * sourceYScale}px`;
+  box.style.width = `${(x2 - x1) * sourceXScale}px`;
+  box.style.height = `${(y2 - y1) * sourceYScale}px`;
+  if (label) {
+    label.textContent = `目标 ${target.target_id ?? "-"} · 类别 ${target.class_id ?? "-"}`;
+  }
+}
+
 function updateAimRangeOverlay() {
   const overlay = $("aimRangeOverlay");
   const dot = $("aimReferenceDot");
@@ -5977,6 +6044,7 @@ function renderRuntime(payload) {
     }
   }
   updateAimRangeOverlay();
+  updateTargetBoxOverlay();
 
   const latency = $("mobileLatency");
   if (latency) {
@@ -11796,19 +11864,27 @@ const AUTO_CALIBRATION_REASONS = {
 };
 
 const AUTO_CALIBRATION_PHASES = {
+  preparing: "正在准备",
   starting: "正在准备",
+  stabilize: "正在稳定目标",
   stabilize_x: "正在稳定 X 轴目标",
-  move_x: "正在移动 X 轴",
+  sampling_x: "正在采样 X 轴响应",
   measure_x_response: "正在测量 X 轴响应延迟",
+  analyzing_x: "正在分析 X 轴响应",
   measure_x_settle: "正在拟合 X 轴响应",
   stabilize_y: "正在稳定 Y 轴目标",
-  move_y: "正在移动 Y 轴",
+  sampling_y: "正在采样 Y 轴响应",
   measure_y_response: "正在测量 Y 轴响应延迟",
+  analyzing_y: "正在分析 Y 轴响应",
   measure_y_settle: "正在拟合 Y 轴响应",
+  validating: "正在验证标定结果",
+  applying: "正在应用标定结果",
   saving: "正在保存标定结果",
   cancelling: "正在取消",
   completed: "标定完成",
+  done: "标定完成",
   failed: "标定失败",
+  error: "标定失败",
   cancelled: "标定已取消",
 };
 
@@ -11918,7 +11994,7 @@ function renderAutoCalibration(payload) {
   const ready = !!runtime.ready && !running;
   const completed = runtime.status === "success" || runtime.status === "manual";
   const runningPhase = running
-    ? `${AUTO_CALIBRATION_PHASES[runtime.phase] || "标定中"}${Number(runtime.round) > 0 ? `（第 ${runtime.round}/${runtime.total_rounds || 10} 轮，N=${runtime.amplitude_counts || "--"}，${(Number(runtime.elapsed_ms) / 1000).toFixed(1)} 秒）` : ""}`
+    ? `${AUTO_CALIBRATION_PHASES[runtime.state || runtime.phase] || "标定中"}${Number(runtime.round) > 0 ? `（${runtime.current_axis ? `${runtime.current_axis.toUpperCase()} 轴，` : ""}第 ${runtime.round}/${runtime.total_rounds || 10} 轮，${Number(runtime.valid_sample_count) || 0} 个有效样本，${(Number(runtime.elapsed_ms) / 1000).toFixed(1)} 秒）` : ""}`
     : "";
   const reason = runtime.error ||
     runningPhase ||
@@ -12045,7 +12121,7 @@ async function startAutoCalibration() {
       runtime: result.runtime || {},
       calibration: (state.autoCalibration || {}).calibration || {},
     });
-    showToast("自动标定已开始");
+    setApplyStatus("ready", "标定运行中");
   } finally {
     if (button) {
       button.disabled = false;

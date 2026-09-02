@@ -917,6 +917,30 @@ html[data-theme="light"] .preview-panel {
   object-fit: contain;
 }
 
+.target-box-overlay {
+  position: absolute;
+  z-index: 4;
+  display: none;
+  box-sizing: border-box;
+  pointer-events: none;
+  border: 2px solid #ff4f67;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.75), 0 0 12px rgba(255, 79, 103, 0.45);
+}
+
+.target-box-label {
+  position: absolute;
+  left: -2px;
+  top: -24px;
+  padding: 3px 6px;
+  color: #fff;
+  background: #ff4f67;
+  border-radius: 3px 3px 3px 0;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .aim-range-overlay {
   position: absolute;
   z-index: 2;

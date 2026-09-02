@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
+
+#include "common/Types.hpp"
 
 namespace ttbox::core {
 
@@ -17,7 +20,9 @@ struct PipelineMetrics {
     double buffer_age_ms = 0.0;        // 采集排队：最新帧龄（steady_now - 帧时间戳）
     uint64_t last_dequeued_count = 0;  // 采集排队：当前被占用（DQBUF 后未归还）的 buffer 数
     uint32_t buffer_count = 0;         // 采集排队：驱动 buffer 总数
-    double resize_ms = 0.0;    // 预处理耗时（uint8->FP16 转换 avg；INT8 模型为 0）
+    uint32_t input_width = 0;
+    uint32_t input_height = 0;
+    double resize_ms = 0.0;
     double infer_ms = 0.0;     // 推理耗时（RKNN set_input+run+output avg）
     double infer_set_input_ms = 0.0; // 推理分段：输入拷贝+量化 avg
     double infer_run_ms = 0.0;       // 推理分段：NPU 纯计算 avg
@@ -41,11 +46,38 @@ struct PipelineMetrics {
     uint64_t target_frames = 0;// 有目标帧数
     uint64_t no_target_frames = 0; // 无目标帧数
     bool aim_active = false;   // 热键按下（AI 控制激活中）
+    bool injection_allowed = false;
+    bool mouse_control_connected = false;
+    uint64_t mouse_control_socket_write_ok = 0;
+    uint64_t mouse_control_socket_write_fail = 0;
+    uint64_t mouse_control_send_count = 0;
+    int32_t last_mouse_control_dx = 0;
+    int32_t last_mouse_control_dy = 0;
+    int32_t last_mouse_control_wheel = 0;
+    uint64_t last_mouse_control_timestamp_us = 0;
     double aim_error_x = 0.0;  // 瞄准误差 X（AimThread 实时，诊断用）
     double aim_error_y = 0.0;  // 瞄准误差 Y
+    double target_point_x = 0.0;
+    double target_point_y = 0.0;
+    double reference_x = 0.0;
+    double reference_y = 0.0;
+    double pid_output_x = 0.0;
+    double pid_output_y = 0.0;
+    double scheduler_input_x = 0.0;
+    double scheduler_input_y = 0.0;
     double aim_pos_x = 0.0;    // 目标中心 X（crop 系 px，AimThread 实时；标定/诊断用）
     double aim_pos_y = 0.0;    // 目标中心 Y
     bool aim_has_target = false; // 当前帧是否检测到目标（标定状态机用）
+    int32_t aim_target_id = -1;   // 当前选择目标的稳定 ID
+    int32_t aim_target_class_id = -1;
+    double aim_target_width = 0.0;
+    double aim_target_height = 0.0;
+    double aim_target_x1 = 0.0;
+    double aim_target_y1 = 0.0;
+    double aim_target_x2 = 0.0;
+    double aim_target_y2 = 0.0;
+    // 当前帧全部有效检测框（仅用于预览识别框显示，不参与控制链）。
+    std::vector<DetectionBox> detection_boxes;
     // Phase2：预览指标（PreviewModule 真实统计）
     double preview_fps = 0.0;
     double preview_encode_ms = 0.0;

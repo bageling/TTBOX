@@ -698,12 +698,49 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("target_frames", JsonValue::number(static_cast<double>(status.metrics.target_frames)));
     m.set("no_target_frames", JsonValue::number(static_cast<double>(status.metrics.no_target_frames)));
     m.set("aim_active", JsonValue::boolean(status.metrics.aim_active));
+    m.set("injection_allowed", JsonValue::boolean(status.metrics.injection_allowed));
+    m.set("mouse_control_connected", JsonValue::boolean(status.metrics.mouse_control_connected));
+    m.set("mouse_control_socket_write_ok", JsonValue::number(static_cast<double>(status.metrics.mouse_control_socket_write_ok)));
+    m.set("mouse_control_socket_write_fail", JsonValue::number(static_cast<double>(status.metrics.mouse_control_socket_write_fail)));
+    m.set("mouse_control_send_count", JsonValue::number(static_cast<double>(status.metrics.mouse_control_send_count)));
+    m.set("last_mouse_control_dx", JsonValue::number(static_cast<double>(status.metrics.last_mouse_control_dx)));
+    m.set("last_mouse_control_dy", JsonValue::number(static_cast<double>(status.metrics.last_mouse_control_dy)));
+    m.set("last_mouse_control_wheel", JsonValue::number(static_cast<double>(status.metrics.last_mouse_control_wheel)));
+    m.set("last_mouse_control_timestamp_us", JsonValue::number(static_cast<double>(status.metrics.last_mouse_control_timestamp_us)));
     m.set("aim_error_x", JsonValue::number(status.metrics.aim_error_x));
     m.set("aim_error_y", JsonValue::number(status.metrics.aim_error_y));
+    m.set("target_point_x", JsonValue::number(status.metrics.target_point_x));
+    m.set("target_point_y", JsonValue::number(status.metrics.target_point_y));
+    m.set("reference_x", JsonValue::number(status.metrics.reference_x));
+    m.set("reference_y", JsonValue::number(status.metrics.reference_y));
+    m.set("pid_output_x", JsonValue::number(status.metrics.pid_output_x));
+    m.set("pid_output_y", JsonValue::number(status.metrics.pid_output_y));
+    m.set("scheduler_input_x", JsonValue::number(status.metrics.scheduler_input_x));
+    m.set("scheduler_input_y", JsonValue::number(status.metrics.scheduler_input_y));
     // 目标中心（标定状态机的真实目标位移数据源）
     m.set("aim_pos_x", JsonValue::number(status.metrics.aim_pos_x));
     m.set("aim_pos_y", JsonValue::number(status.metrics.aim_pos_y));
     m.set("aim_has_target", JsonValue::boolean(status.metrics.aim_has_target));
+    m.set("aim_target_id", JsonValue::number(static_cast<double>(status.metrics.aim_target_id)));
+    m.set("aim_target_class_id", JsonValue::number(static_cast<double>(status.metrics.aim_target_class_id)));
+    m.set("aim_target_width", JsonValue::number(status.metrics.aim_target_width));
+    m.set("aim_target_height", JsonValue::number(status.metrics.aim_target_height));
+    m.set("aim_target_x1", JsonValue::number(status.metrics.aim_target_x1));
+    m.set("aim_target_y1", JsonValue::number(status.metrics.aim_target_y1));
+    m.set("aim_target_x2", JsonValue::number(status.metrics.aim_target_x2));
+    m.set("aim_target_y2", JsonValue::number(status.metrics.aim_target_y2));
+    JsonValue boxes = JsonValue::array();
+    for (const auto& box : status.metrics.detection_boxes) {
+        JsonValue item = JsonValue::object();
+        item.set("x1", JsonValue::number(box.x1));
+        item.set("y1", JsonValue::number(box.y1));
+        item.set("x2", JsonValue::number(box.x2));
+        item.set("y2", JsonValue::number(box.y2));
+        item.set("score", JsonValue::number(box.score));
+        item.set("class_id", JsonValue::number(static_cast<double>(box.class_id)));
+        boxes.push_back(std::move(item));
+    }
+    m.set("detection_boxes", std::move(boxes));
     m.set("preview_fps", JsonValue::number(status.metrics.preview_fps));
     m.set("preview_encode_ms", JsonValue::number(status.metrics.preview_encode_ms));
     m.set("preview_width", JsonValue::number(static_cast<double>(status.metrics.preview_width)));
@@ -714,6 +751,8 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("buffer_age_ms", JsonValue::number(status.metrics.buffer_age_ms));
     m.set("last_dequeued_count", JsonValue::number(static_cast<double>(status.metrics.last_dequeued_count)));
     m.set("buffer_count", JsonValue::number(static_cast<double>(status.metrics.buffer_count)));
+    m.set("input_width", JsonValue::number(static_cast<double>(status.metrics.input_width)));
+    m.set("input_height", JsonValue::number(static_cast<double>(status.metrics.input_height)));
     m.set("capture_ms", JsonValue::number(status.metrics.capture_ms));
     m.set("resize_ms", JsonValue::number(status.metrics.resize_ms));
     m.set("infer_ms", JsonValue::number(status.metrics.infer_ms));

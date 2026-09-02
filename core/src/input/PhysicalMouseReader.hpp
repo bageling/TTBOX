@@ -18,8 +18,12 @@ public:
     std::atomic<uint16_t>* button_source(){return &buttons_;}
     std::string device() const{return device_;}
 private:
-    void loop(); bool find_device(std::string* out) const;
-    std::string device_; int fd_=-1; std::atomic<bool> running_{false}; std::thread thread_;
+    void loop();
+    void event_socket_loop();
+    bool find_device(std::string* out) const;
+    bool start_event_socket(std::string* error);
+    std::string device_; std::string event_socket_path_;
+    int fd_=-1; int event_fd_=-1; std::atomic<bool> running_{false}; std::thread thread_; std::thread event_thread_;
     std::atomic<uint16_t> buttons_{0}; std::atomic<int32_t> rel_x_{0},rel_y_{0};
 };
 }

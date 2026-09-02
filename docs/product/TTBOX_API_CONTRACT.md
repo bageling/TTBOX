@@ -121,11 +121,26 @@ TTBOX Update Engine (C++/Python)
 | POST | `/api/update/cancel` | 取消更新 | 🟢 |
 | GET | `/api/update/log` | 获取更新日志 | 🟢 |
 
-### Diagnostics（诊断）
+### Calibration（自动标定）
 
 | 方法 | 路径 | 描述 | 状态 |
 |------|------|------|------|
-| POST | `/api/diagnostics/aim-trace` | 启动瞄准轨迹记录 | 🟡 |
+| GET | `/api/control/calibration` | 获取 TTBOX 标定状态、候选目标、分轴拟合结果和最终参数 | 🟡 VERIFY（真实目标场景待验收） |
+| POST | `/api/control/calibration/start` | 启动真实自动标定状态机 | 🟡 VERIFY |
+| POST | `/api/control/calibration/cancel` | 取消当前标定并恢复临时配置 | 🟢 |
+| PUT | `/api/control/calibration` | 用户明确保存手动 X/Y 响应和延迟 | 🟢 |
+| DELETE | `/api/control/calibration` | 清除已保存标定结果 | 🟢 |
+
+自动标定状态：`idle → preparing → stabilize_x → sampling_x → analyzing_x → stabilize_y → sampling_y → analyzing_y → validating → applying → completed`；任意阶段可进入 `cancelled/failed`。
+
+### Motion Training（个人移动曲线）
+
+| 方法 | 路径 | 描述 | 状态 |
+|------|------|------|------|
+| GET/POST/PATCH/DELETE | `/api/motion-profiles*` | TTBOX 本地档案查询、创建、重命名、删除、导出 | 🟢 |
+| POST/PUT/DELETE | `/api/motion-training/sessions*` | 训练租约、心跳、样本上传、结束会话 | 🟢 |
+| POST | `/api/motion-profiles/<id>/train` | 根据真实样本生成 TTBOX 模型 | 🟢 |
+| POST/DELETE | `/api/motion-profiles/<id>/activate`、`/active` | 启用/停用个人模型并写入 Core RuntimeProfile | 🟡 VERIFY（真实 HID 效果待验收） |
 
 ### Devices（设备枚举）
 

@@ -160,150 +160,193 @@ bool V4L2Capture::open(std::string* error) {
         return false;
     }
 
-    // ---- 1. open ----
-    fd_ = ::open(params_.device.c_str(), O_RDWR);
-    if (fd_ < 0) {
-        if (error) *error = "open(" + params_.device + ") 失败: " + std::string(std::strerror(errno));
-        return false;
-    }
-    TTBOX_LOG_INFO("V4L2 设备已打开: " + params_.device + " fd=" + std::to_string(fd_));
-
-    // ---- 2. QUERYCAP ----
-    struct v4l2_capability cap {};
-    if (ioctl_call(fd_, VIDIOC_QUERYCAP, &cap) != 0) {
-        if (error) *error = "VIDIOC_QUERYCAP 失败";
-        close();
-        return false;
-    }
-    const uint32_t caps = cap.capabilities;
-    const bool mplane_ok = (caps & V4L2_CAP_VIDEO_CAPTURE_MPLANE) != 0;
-    const bool streaming_ok = (caps & V4L2_CAP_STREAMING) != 0;
-    TTBOX_LOG_INFO("QUERYCAP: driver=" + std::string(reinterpret_cast<const char*>(cap.driver)) +
-                   " card=" + std::string(reinterpret_cast<const char*>(cap.card)) +
-                   " MPLANE=" + std::string(mplane_ok ? "yes" : "no") +
-                   " STREAMING=" + std::string(streaming_ok ? "yes" : "no"));
-    if (!mplane_ok || !streaming_ok) {
-        if (error) *error = "设备缺少 V4L2_CAP_VIDEO_CAPTURE_MPLANE 或 V4L2_CAP_STREAMING";
-        close();
-        return false;
-    }
-
-    // ---- 3. G_FMT（读取实际格式，不强制改分辨率）----
-    struct v4l2_format fmt {};
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-    if (ioctl_call(fd_, VIDIOC_G_FMT, &fmt) != 0) {
-        if (error) *error = "VIDIOC_G_FMT 失败";
-        close();
-        return false;
-    }
-    format_.width = fmt.fmt.pix_mp.width;
-    format_.height = fmt.fmt.pix_mp.height;
-    format_.pixelformat = fmt.fmt.pix_mp.pixelformat;
-    format_.num_planes = fmt.fmt.pix_mp.num_planes;
-    format_.bytesperline.clear();
-    format_.sizeimage.clear();
-    for (uint32_t p = 0; p < format_.num_planes; ++p) {
-        format_.bytesperline.push_back(fmt.fmt.pix_mp.plane_fmt[p].bytesperline);
-        format_.sizeimage.push_back(fmt.fmt.pix_mp.plane_fmt[p].sizeimage);
-    }
-    if (format_.num_planes == 0 || format_.num_planes > 8) {
-        if (error) *error = "G_FMT 返回非法 num_planes=" + std::to_string(format_.num_planes);
-        close();
-        return false;
-    }
-    {
-        std::string log = "G_FMT: " + std::to_string(format_.width) + "x" +
-                          std::to_string(format_.height) + " fourcc=" +
-                          format_.fourcc_str() + " planes=" + std::to_string(format_.num_planes);
-        for (uint32_t p = 0; p < format_.num_planes; ++p) {
-            log += " [p" + std::to_string(p) + " bpl=" +
-                   std::to_string(format_.bytesperline[p]) + " size=" +
-                   std::to_string(format_.sizeimage[p]) + "]";
+    // 重试循环：hdmirx 驱动在开机后需要 1~2 秒才能完成 format change
+    // （从中间格式过渡到最终 2560x1440），如果格式不稳定就关闭重开。
+    const int kMaxRetries = 5;
+    for (int retry = 0; retry < kMaxRetries; ++retry) {
+        if (opened_) {
+            // 前一次重试的残余
+            close();
+            opened_ = false;
         }
-        TTBOX_LOG_INFO(log);
-    }
 
-    // ---- 4. REQBUFS（MMAP，默认 4，驱动实际为准）----
-    struct v4l2_requestbuffers req {};
-    req.count = params_.num_buffers;
-    req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-    req.memory = V4L2_MEMORY_MMAP;
-    if (ioctl_call(fd_, VIDIOC_REQBUFS, &req) != 0) {
-        if (error) *error = "VIDIOC_REQBUFS 失败";
-        close();
-        return false;
-    }
-    buffer_count_ = req.count;
-    if (buffer_count_ == 0) {
-        if (error) *error = "REQBUFS 返回 0 个 buffer（驱动拒绝 MMAP）";
-        close();
-        return false;
-    }
-    if (buffer_count_ < params_.num_buffers) {
-        TTBOX_LOG_WARN("REQBUFS: 请求 " + std::to_string(params_.num_buffers) +
-                       " 个 buffer，驱动实际提供 " + std::to_string(buffer_count_) +
-                       " 个，使用实际数量");
-    } else {
-        TTBOX_LOG_INFO("REQBUFS: " + std::to_string(buffer_count_) + " 个 buffer");
-    }
+        // ---- 1. open ----
+        fd_ = ::open(params_.device.c_str(), O_RDWR);
+        if (fd_ < 0) {
+            if (error) *error = "open(" + params_.device + ") 失败: " + std::string(std::strerror(errno));
+            return false;
+        }
+        TTBOX_LOG_INFO("V4L2 设备已打开: " + params_.device + " fd=" + std::to_string(fd_));
 
-    // ---- 5. 每 buffer 每 plane：QUERYBUF + mmap + EXPBUF ----
-    impl_->buffers.resize(buffer_count_);
-    impl_->captured.assign(buffer_count_, false);
-    for (uint32_t i = 0; i < buffer_count_; ++i) {
-        struct v4l2_buffer buf {};
-        struct v4l2_plane planes[8] {};
-        buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-        buf.memory = V4L2_MEMORY_MMAP;
-        buf.index = i;
-        buf.length = format_.num_planes;
-        buf.m.planes = planes;
-        if (ioctl_call(fd_, VIDIOC_QUERYBUF, &buf) != 0) {
-            if (error) *error = "VIDIOC_QUERYBUF[" + std::to_string(i) + "] 失败";
+        // ---- 2. QUERYCAP ----
+        struct v4l2_capability cap {};
+        if (ioctl_call(fd_, VIDIOC_QUERYCAP, &cap) != 0) {
+            if (error) *error = "VIDIOC_QUERYCAP 失败";
+            close();
+            return false;
+        }
+        const uint32_t caps = cap.capabilities;
+        const bool mplane_ok = (caps & V4L2_CAP_VIDEO_CAPTURE_MPLANE) != 0;
+        const bool streaming_ok = (caps & V4L2_CAP_STREAMING) != 0;
+        TTBOX_LOG_INFO("QUERYCAP: driver=" + std::string(reinterpret_cast<const char*>(cap.driver)) +
+                       " card=" + std::string(reinterpret_cast<const char*>(cap.card)) +
+                       " MPLANE=" + std::string(mplane_ok ? "yes" : "no") +
+                       " STREAMING=" + std::string(streaming_ok ? "yes" : "no"));
+        if (!mplane_ok || !streaming_ok) {
+            if (error) *error = "设备缺少 V4L2_CAP_VIDEO_CAPTURE_MPLANE 或 V4L2_CAP_STREAMING";
             close();
             return false;
         }
 
-        BufferRes& bres = impl_->buffers[i];
-        bres.index = static_cast<int>(i);
-        bres.planes.resize(format_.num_planes);
+        // ---- 3. G_FMT（读取实际格式，不强制改分辨率）----
+        struct v4l2_format fmt {};
+        fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+        if (ioctl_call(fd_, VIDIOC_G_FMT, &fmt) != 0) {
+            if (error) *error = "VIDIOC_G_FMT 失败";
+            close();
+            return false;
+        }
+
+        const uint32_t first_w = fmt.fmt.pix_mp.width;
+        const uint32_t first_h = fmt.fmt.pix_mp.height;
+
+        // ---- 4. 等待格式稳定（hdmirx 开机过渡）----
+        // 延迟 800ms 后重新读取格式，如果改变了说明驱动还在过渡中
+        std::this_thread::sleep_for(std::chrono::milliseconds(800));
+
+        struct v4l2_format fmt2 {};
+        fmt2.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+        if (ioctl_call(fd_, VIDIOC_G_FMT, &fmt2) != 0) {
+            if (error) *error = "VIDIOC_G_FMT(重试) 失败";
+            close();
+            return false;
+        }
+
+        if (fmt2.fmt.pix_mp.width != first_w || fmt2.fmt.pix_mp.height != first_h) {
+            TTBOX_LOG_WARN("V4L2 格式不稳定: " + std::to_string(first_w) + "x" + std::to_string(first_h) +
+                           " -> " + std::to_string(fmt2.fmt.pix_mp.width) + "x" + std::to_string(fmt2.fmt.pix_mp.height) +
+                           "，重试 open (" + std::to_string(retry + 1) + "/" + std::to_string(kMaxRetries) + ")");
+            ::close(fd_);
+            fd_ = -1;
+            continue;
+        }
+
+        // 格式稳定，使用 fmt2 继续
+        fmt = fmt2;
+
+        format_.width = fmt.fmt.pix_mp.width;
+        format_.height = fmt.fmt.pix_mp.height;
+        format_.pixelformat = fmt.fmt.pix_mp.pixelformat;
+        format_.num_planes = fmt.fmt.pix_mp.num_planes;
+        format_.bytesperline.clear();
+        format_.sizeimage.clear();
         for (uint32_t p = 0; p < format_.num_planes; ++p) {
-            PlaneRes& pres = bres.planes[p];
-            pres.plane_index = p;
-            pres.length = planes[p].length;
-            pres.addr = ::mmap(nullptr, pres.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd_,
-                               static_cast<off_t>(planes[p].m.mem_offset));
-            if (pres.addr == MAP_FAILED) {
-                pres.addr = nullptr;
-                pres.length = 0;
-                if (error) *error = "mmap[buf=" + std::to_string(i) + ",plane=" + std::to_string(p) + "] 失败";
-                metrics_.errors.fetch_add(1);
+            format_.bytesperline.push_back(fmt.fmt.pix_mp.plane_fmt[p].bytesperline);
+            format_.sizeimage.push_back(fmt.fmt.pix_mp.plane_fmt[p].sizeimage);
+        }
+        if (format_.num_planes == 0 || format_.num_planes > 8) {
+            if (error) *error = "G_FMT 返回非法 num_planes=" + std::to_string(format_.num_planes);
+            close();
+            return false;
+        }
+        {
+            std::string log = "G_FMT: " + std::to_string(format_.width) + "x" +
+                              std::to_string(format_.height) + " fourcc=" +
+                              format_.fourcc_str() + " planes=" + std::to_string(format_.num_planes);
+            for (uint32_t p = 0; p < format_.num_planes; ++p) {
+                log += " [p" + std::to_string(p) + " bpl=" +
+                       std::to_string(format_.bytesperline[p]) + " size=" +
+                       std::to_string(format_.sizeimage[p]) + "]";
+            }
+            TTBOX_LOG_INFO(log);
+        }
+
+        // ---- 5. REQBUFS（MMAP，默认 4，驱动实际为准）----
+        struct v4l2_requestbuffers req {};
+        req.count = params_.num_buffers;
+        req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+        req.memory = V4L2_MEMORY_MMAP;
+        if (ioctl_call(fd_, VIDIOC_REQBUFS, &req) != 0) {
+            if (error) *error = "VIDIOC_REQBUFS 失败";
+            close();
+            return false;
+        }
+        buffer_count_ = req.count;
+        if (buffer_count_ == 0) {
+            if (error) *error = "REQBUFS 返回 0 个 buffer（驱动拒绝 MMAP）";
+            close();
+            return false;
+        }
+        if (buffer_count_ < params_.num_buffers) {
+            TTBOX_LOG_WARN("REQBUFS: 请求 " + std::to_string(params_.num_buffers) +
+                           " 个 buffer，驱动实际提供 " + std::to_string(buffer_count_) +
+                           " 个，使用实际数量");
+        } else {
+            TTBOX_LOG_INFO("REQBUFS: " + std::to_string(buffer_count_) + " 个 buffer");
+        }
+
+        // ---- 6. 每 buffer 每 plane：QUERYBUF + mmap + EXPBUF ----
+        impl_->buffers.resize(buffer_count_);
+        impl_->captured.assign(buffer_count_, false);
+        for (uint32_t i = 0; i < buffer_count_; ++i) {
+            struct v4l2_buffer buf {};
+            struct v4l2_plane planes[8] {};
+            buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+            buf.memory = V4L2_MEMORY_MMAP;
+            buf.index = i;
+            buf.length = format_.num_planes;
+            buf.m.planes = planes;
+            if (ioctl_call(fd_, VIDIOC_QUERYBUF, &buf) != 0) {
+                if (error) *error = "VIDIOC_QUERYBUF[" + std::to_string(i) + "] 失败";
                 close();
                 return false;
             }
 
-            // EXPBUF：导出 DMA-BUF fd（失败则该 plane 无 fd，不整体失败）
-            struct v4l2_exportbuffer eb {};
-            eb.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
-            eb.index = i;
-            eb.plane = p;
-            eb.flags = 0;
-            if (ioctl_call(fd_, VIDIOC_EXPBUF, &eb) != 0) {
-                TTBOX_LOG_WARN("VIDIOC_EXPBUF[buf=" + std::to_string(i) + ",plane=" +
-                               std::to_string(p) + "] 失败: " + std::string(std::strerror(errno)));
-                metrics_.errors.fetch_add(1);
-            } else {
-                pres.dma_fd = DmaBufFd(static_cast<int>(eb.fd), static_cast<uint32_t>(pres.length));
+            BufferRes& bres = impl_->buffers[i];
+            bres.index = static_cast<int>(i);
+            bres.planes.resize(format_.num_planes);
+            for (uint32_t p = 0; p < format_.num_planes; ++p) {
+                PlaneRes& pres = bres.planes[p];
+                pres.plane_index = p;
+                pres.length = planes[p].length;
+                pres.addr = ::mmap(nullptr, pres.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd_,
+                                   static_cast<off_t>(planes[p].m.mem_offset));
+                if (pres.addr == MAP_FAILED) {
+                    pres.addr = nullptr;
+                    pres.length = 0;
+                    if (error) *error = "mmap[buf=" + std::to_string(i) + ",plane=" + std::to_string(p) + "] 失败";
+                    metrics_.errors.fetch_add(1);
+                    close();
+                    return false;
+                }
+
+                // EXPBUF：导出 DMA-BUF fd（失败则该 plane 无 fd，不整体失败）
+                struct v4l2_exportbuffer eb {};
+                eb.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+                eb.index = i;
+                eb.plane = p;
+                eb.flags = 0;
+                if (ioctl_call(fd_, VIDIOC_EXPBUF, &eb) != 0) {
+                    TTBOX_LOG_WARN("VIDIOC_EXPBUF[buf=" + std::to_string(i) + ",plane=" +
+                                   std::to_string(p) + "] 失败: " + std::string(std::strerror(errno)));
+                    metrics_.errors.fetch_add(1);
+                } else {
+                    pres.dma_fd = DmaBufFd(static_cast<int>(eb.fd), static_cast<uint32_t>(pres.length));
+                }
+                TTBOX_LOG_INFO("buffer[" + std::to_string(i) + "] plane[" + std::to_string(p) +
+                               "] mmap=" + std::to_string(reinterpret_cast<uintptr_t>(pres.addr)) +
+                               " len=" + std::to_string(pres.length) +
+                               " dma_fd=" + std::to_string(pres.dma_fd.fd()));
             }
-            TTBOX_LOG_INFO("buffer[" + std::to_string(i) + "] plane[" + std::to_string(p) +
-                           "] mmap=" + std::to_string(reinterpret_cast<uintptr_t>(pres.addr)) +
-                           " len=" + std::to_string(pres.length) +
-                           " dma_fd=" + std::to_string(pres.dma_fd.fd()));
         }
+        opened_ = true;
+        TTBOX_LOG_INFO("V4L2Capture open 完成: " + std::to_string(buffer_count_) + " buffers");
+        return true;
     }
-    opened_ = true;
-    TTBOX_LOG_INFO("V4L2Capture open 完成: " + std::to_string(buffer_count_) + " buffers");
-    return true;
+
+    // 所有重试均失败
+    if (error) *error = "V4L2 格式始终不稳定（" + std::to_string(kMaxRetries) + " 次重试后放弃）";
+    return false;
 }
 
 bool V4L2Capture::start(std::string* error) {
