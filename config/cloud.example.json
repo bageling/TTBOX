@@ -1,0 +1,7 @@
+{
+  "cloud": {
+    "license_base_url": "https://<your-tunnel>.trycloudflare.com",
+    "app_key": "ttbox",
+    "app_secret": "<YOUR_APP_SECRET>"
+  }
+}

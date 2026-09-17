@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="zh-CN" data-ui-brand="{{ ui_brand }}" data-theme="{{ default_theme }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>{{ app_title }}</title>
+  <!-- M2.07 主面板 1:1 对齐竞品：暗色变量 + 侧边栏/page-card 骨架 + 组件语言。
+       裁剪页（Hailo 加速 / 键鼠盒子 / 准星找色）不出现；静态引用仅 console.css/console.js。 -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='console.css') }}?v={{ asset_version }}">
+</head>
+<body>
+  <div class="console-shell">
+    <aside class="sidebar" aria-label="控制台导航">
+      <div class="brand">
+        <span id="brandMark" class="brand-mark">{{ brand_mark }}</span>
+        <div>
+          <p id="brandEyebrow">{{ brand_eyebrow }}</p>
+          <h1 id="brandTitle">{{ brand_title }}</h1>
+        </div>
+      </div>
+
+      <div class="status-strip" aria-live="polite">
+        <span id="statusBadge" class="status-badge idle">未连接</span>
+        <span id="applyIndicator" class="sync-badge ready">已同步</span>
+      </div>
+
+      <nav class="module-tabs" aria-label="功能模块">
+        <button class="module-tab is-active" type="button" data-page-target="home-page"><span>01</span>总览</button>
+        <button class="module-tab" type="button" data-page-target="hotkey-page"><span>02</span>热键控制</button>
+        <button class="module-tab" type="button" data-page-target="control-page"><span>03</span>移动控制</button>
+        <button class="module-tab" type="button" data-page-target="assist-page"><span>04</span>辅助功能</button>
+        <button class="module-tab" type="button" data-page-target="model-page"><span>05</span>模型库</button>
+        <button class="module-tab" type="button" data-page-target="hardware-page"><span>06</span>显示与鼠标</button>
+        <button class="module-tab" type="button" data-page-target="wifi-page"><span>07</span>网络配置</button>
+        <button class="module-tab" type="button" data-page-target="preset-page"><span>08</span>预设参数</button>
+        <button class="module-tab" type="button" data-page-target="license-page"><span>09</span>系统状态</button>
+        <button class="module-tab" type="button" data-page-target="fan-page"><span>10</span>风扇</button>
+      </nav>
+    </aside>
+
+    <div class="workspace">
+      <main class="page-stack">
+        <!-- ============ 01 总览 ============ -->
+        <section id="home-page" class="page-card is-active" data-page>
+          <section id="homeActivationPanel" class="home-activation-panel" aria-label="设备激活">
+            <div class="home-activation-copy">
+              <p>设备授权</p>
+              <h3>输入卡密后首次联网激活</h3>
+            </div>
+            <label class="field">卡密<input id="homeLicenseKey" type="text" autocomplete="off" placeholder="输入卡密"></label>
+            <div class="home-activation-actions">
+              <button id="homeLicenseActivate" class="primary-button" type="button">激活设备</button>
+              <button id="refreshLicenseButton" class="ghost-button" type="button">刷新状态</button>
+            </div>
+          </section>
+
+          <div class="page-head">
+            <div><p>OVERVIEW</p><h2>总览</h2></div>
+            <span class="pill" id="activeModelName">未选择</span>
+          </div>
+
+          <div class="dashboard-grid">
+            <section class="preview-panel" aria-label="实时预览">
+              <div class="panel-title">
+                <div><p>实时画面</p><h3>低帧预览</h3></div>
+                <span class="pill">MJPEG</span>
+              </div>
+              <div class="preview-stage">
+                <img id="previewImage" src="/api/preview.mjpg" alt="实时预览">
+              </div>
+            </section>
+
+            <section class="quick-metrics" aria-label="核心状态">
+              <div><span>链路延迟</span><strong id="mobileLatency">-- ms</strong></div>
+              <div><span>采集帧率</span><strong id="mobileCaptureFps">-- 帧/秒</strong></div>
+              <div><span>检测帧率</span><strong id="mobileFps">-- 帧/秒</strong></div>
+              <div><span>SoC 温度</span><strong id="socTemperature">--</strong></div>
+              <div><span>目标状态</span><strong id="mobileVideoStatus">待机</strong></div>
+              <div><span>检测目标</span><strong id="detectCount">0</strong></div>
+              <div><span>跟踪目标</span><strong id="trackCount">0</strong></div>
+            </section>
+
+            <section class="hero-control" aria-label="启动控制">
+              <div class="hero-copy"><p>主控</p><h2>实时锁定</h2></div>
+              <button id="startButton" class="power-button start" type="button">
+                <span class="power-ring"></span><strong>启动</strong>
+              </button>
+            </section>
+
+            <section class="summary-row" aria-label="授权状态">
+              <div class="panel-title"><div><p>设备授权</p><h3>授权状态</h3></div><span class="pill">云端</span></div>
+              <div class="meter-row"><div class="label-row"><span>卡密类型</span><strong id="licenseCardType">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>到期时间</span><strong id="licenseExpireAt">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>解绑余量</span><strong id="licenseDevices">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>心跳状态</span><strong id="licenseHeartbeat">—</strong></div></div>
+            </section>
+
+            <section class="overview-controls" aria-label="基础检测设置">
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="capture_crop_size">截取尺寸</label>
+                  <input id="capture_crop_size" data-config="capture.crop_size" class="value-input" type="number" min="1" max="1080" step="1">
+                </div>
+                <input id="capture_crop_size_range" type="range" min="192" max="640" step="16">
+              </div>
+
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="range_factor">FOV 半径</label>
+                  <input id="range_factor" data-config="range_factor" class="value-input" type="number" min="0" max="1" step="0.01">
+                </div>
+                <input id="range_factor_range" type="range" min="0" max="1" step="0.01">
+              </div>
+
+              <label class="field">截取位置 X轴偏移
+                <input id="capture_crop_offset_x" data-config="capture.crop_offset_x" class="value-input" type="number" min="-150" max="150" step="1">
+              </label>
+
+              <label class="field">截取位置 Y轴偏移
+                <input id="capture_crop_offset_y" data-config="capture.crop_offset_y" class="value-input" type="number" min="-150" max="150" step="1">
+              </label>
+
+              <label class="field">瞄准点 X轴偏移
+                <input id="controller_aim_reference_offset_x" data-config="ai.controller.aim_reference_offset_x" class="value-input" type="number" min="-160" max="160" step="1">
+              </label>
+
+              <label class="field">瞄准点 Y轴偏移
+                <input id="controller_aim_reference_offset_y" data-config="ai.controller.aim_reference_offset_y" class="value-input" type="number" min="-160" max="160" step="1">
+              </label>
+
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="video_detection_confidence">目标置信度</label>
+                  <input id="video_detection_confidence" data-config="video_detection_confidence" class="value-input" type="number" min="0" max="1" step="0.01">
+                </div>
+                <input id="video_detection_confidence_range" type="range" min="0" max="1" step="0.01">
+              </div>
+
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="video_detection_iou">IOU 阈值</label>
+                  <input id="video_detection_iou" data-config="video_detection_iou" class="value-input" type="number" min="0" max="1" step="0.01">
+                </div>
+                <input id="video_detection_iou_range" type="range" min="0" max="1" step="0.01">
+              </div>
+
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="sens">输出灵敏度</label>
+                  <input id="sens" data-config="sens" class="value-input" type="number" min="0.05" max="5" step="0.01">
+                </div>
+                <input id="sens_range" type="range" min="0.05" max="5" step="0.01">
+              </div>
+
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="pos">瞄准高度</label>
+                  <input id="pos" data-config="pos" class="value-input" type="number" min="0" max="1" step="0.01">
+                </div>
+                <input id="pos_range" type="range" min="0" max="1" step="0.01">
+              </div>
+            </section>
+
+            <section class="module-tile" aria-label="板载资源" style="grid-area:hardware;">
+              <h3>板载资源</h3>
+              <div class="meter-row"><div class="label-row"><span>CPU 占用</span><strong id="resCpu">--</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>内存占用</span><strong id="resMem">--</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>存储占用</span><strong id="resStorage">--</strong></div></div>
+              <div class="controls-row">
+                <button id="rebootButton" class="ghost-button" type="button">重启设备</button>
+                <button id="poweroffButton" class="ghost-button danger-pill" type="button">关机</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 02 热键控制 ============ -->
+        <section id="hotkey-page" class="page-card" data-page>
+          <div class="page-head"><div><p>HOTKEYS</p><h2>热键与类别</h2></div><span class="pill">位掩码</span></div>
+          <div class="settings-grid">
+            <section class="module-tile">
+              <h3>瞄准热键</h3>
+              <label class="field">主热键
+                <select id="aimHotkey">
+                  <option value="right">右键</option>
+                  <option value="left">左键</option>
+                  <option value="middle">中键</option>
+                  <option value="back">侧键后</option>
+                  <option value="forward">侧键前</option>
+                </select>
+              </label>
+              <label class="field">副热键
+                <select id="aimHotkey2">
+                  <option value="">无</option>
+                  <option value="left">左键</option>
+                  <option value="right">右键</option>
+                  <option value="middle">中键</option>
+                  <option value="back">侧键后</option>
+                  <option value="forward">侧键前</option>
+                </select>
+              </label>
+              <label class="field">触发模式
+                <select id="aimHotkeyMode">
+                  <option value="any">任一按下</option>
+                  <option value="all">同时按下</option>
+                </select>
+              </label>
+            </section>
+            <section class="module-tile">
+              <h3>瞄准点与灵敏度</h3>
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="profile_sensitivity">Profile 灵敏度</label>
+                  <input id="profile_sensitivity" class="value-input" type="number" min="0.05" max="5" step="0.01">
+                </div>
+                <input id="profile_sensitivity_range" type="range" min="0.05" max="5" step="0.01">
+              </div>
+              <label class="field">瞄准点 X（归一化）
+                <input id="profile_offset_x" class="value-input" type="number" min="0" max="1" step="0.01">
+              </label>
+              <label class="field">瞄准点 Y（归一化）
+                <input id="profile_offset_y" class="value-input" type="number" min="0" max="1" step="0.01">
+              </label>
+              <div class="hint">热键经 core 位掩码链路（aim_hotkey / aim_hotkey2 / aim_hotkey_mode）落盘。</div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 03 移动控制 ============ -->
+        <section id="control-page" class="page-card" data-page>
+          <div class="page-head"><div><p>MOVEMENT</p><h2>移动控制</h2></div><span class="pill">PID / 拉枪 / 提前量</span></div>
+          <div class="settings-grid">
+            <section class="module-tile">
+              <h3>PID 参数</h3>
+              <div class="slider-field"><div class="label-row"><label for="controller_kp_x">Kp X</label><input id="controller_kp_x" data-config="ai.controller.kp_x" class="value-input" type="number" step="0.01"></div><input id="controller_kp_x_range" type="range" min="0" max="2" step="0.01"></div>
+              <div class="slider-field"><div class="label-row"><label for="controller_kp_y">Kp Y</label><input id="controller_kp_y" data-config="ai.controller.kp_y" class="value-input" type="number" step="0.01"></div><input id="controller_kp_y_range" type="range" min="0" max="2" step="0.01"></div>
+              <div class="slider-field"><div class="label-row"><label for="controller_kd_x">Kd X</label><input id="controller_kd_x" data-config="ai.controller.kd_x" class="value-input" type="number" step="0.001"></div><input id="controller_kd_x_range" type="range" min="0" max="0.2" step="0.001"></div>
+              <div class="slider-field"><div class="label-row"><label for="controller_kd_y">Kd Y</label><input id="controller_kd_y" data-config="ai.controller.kd_y" class="value-input" type="number" step="0.001"></div><input id="controller_kd_y_range" type="range" min="0" max="0.2" step="0.001"></div>
+              <div class="slider-field"><div class="label-row"><label for="controller_predict_x">预测 X</label><input id="controller_predict_x" data-config="ai.controller.predict_x" class="value-input" type="number" step="0.01"></div><input id="controller_predict_x_range" type="range" min="0" max="1" step="0.01"></div>
+              <div class="slider-field"><div class="label-row"><label for="controller_predict_y">预测 Y</label><input id="controller_predict_y" data-config="ai.controller.predict_y" class="value-input" type="number" step="0.01"></div><input id="controller_predict_y_range" type="range" min="0" max="1" step="0.01"></div>
+            </section>
+
+            <section class="module-tile">
+              <h3>输出整形</h3>
+              <div class="slider-field"><div class="label-row"><label for="controller_rate_x">速率上限 X</label><input id="controller_rate_x" data-config="ai.controller.rate_x" class="value-input" type="number" step="0.01"></div><input id="controller_rate_x_range" type="range" min="0" max="5" step="0.01"></div>
+              <div class="slider-field"><div class="label-row"><label for="controller_rate_y">速率上限 Y</label><input id="controller_rate_y" data-config="ai.controller.rate_y" class="value-input" type="number" step="0.01"></div><input id="controller_rate_y_range" type="range" min="0" max="5" step="0.01"></div>
+              <div class="slider-field"><div class="label-row"><label for="controller_smooth_x">平滑 X</label><input id="controller_smooth_x" data-config="ai.controller.smooth_x" class="value-input" type="number" step="0.01"></div><input id="controller_smooth_x_range" type="range" min="0" max="1" step="0.01"></div>
+              <div class="slider-field"><div class="label-row"><label for="controller_smooth_y">平滑 Y</label><input id="controller_smooth_y" data-config="ai.controller.smooth_y" class="value-input" type="number" step="0.01"></div><input id="controller_smooth_y_range" type="range" min="0" max="1" step="0.01"></div>
+              <label class="field">输出死区
+                <input id="controller_output_deadzone" data-config="ai.controller.output_deadzone" class="value-input" type="number" min="0" max="50" step="1">
+              </label>
+              <label class="field">丢失宽限（毫秒）
+                <input id="controller_selector_lost_grace_ms" data-config="ai.controller.selector_lost_grace_ms" class="value-input" type="number" min="0" max="2000" step="10">
+              </label>
+            </section>
+
+            <section class="module-tile">
+              <h3>拉枪曲线</h3>
+              <label class="field"><input id="pull_curve_enabled" data-config="ai.controller.pull_curve_enabled" type="checkbox"> 启用拉枪曲线</label>
+              <div class="slider-field"><div class="label-row"><label for="pull_curve_strength">强度</label><input id="pull_curve_strength" data-config="ai.controller.pull_curve_strength" class="value-input" type="number" min="0" max="1" step="0.01"></div><input id="pull_curve_strength_range" type="range" min="0" max="1" step="0.01"></div>
+              <label class="field">抖动像素
+                <input id="pull_curve_jitter_px" data-config="ai.controller.pull_curve_jitter_px" class="value-input" type="number" min="0" max="20" step="0.5">
+              </label>
+              <label class="field">最小距离
+                <input id="pull_curve_min_distance" data-config="ai.controller.pull_curve_min_distance" class="value-input" type="number" min="0" max="400" step="5">
+              </label>
+            </section>
+
+            <section class="module-tile">
+              <h3>持续提前量</h3>
+              <label class="field"><input id="continuous_lead_enabled" data-config="ai.controller.continuous_lead_enabled" type="checkbox"> 启用持续提前量</label>
+              <label class="field">进入距离
+                <input id="continuous_lead_enter_distance" data-config="ai.controller.continuous_lead_enter_distance" class="value-input" type="number" min="0" max="600" step="5">
+              </label>
+              <div class="slider-field"><div class="label-row"><label for="continuous_lead_scale">提前量系数</label><input id="continuous_lead_scale" data-config="ai.controller.continuous_lead_scale" class="value-input" type="number" min="0" max="1" step="0.01"></div><input id="continuous_lead_scale_range" type="range" min="0" max="1" step="0.01"></div>
+              <div class="hint">渐入/渐出与近距禁用系数为 Core 预留字段（P1），面板不展示。</div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 04 辅助功能 ============ -->
+        <section id="assist-page" class="page-card" data-page>
+          <div class="page-head"><div><p>ASSIST</p><h2>辅助功能</h2></div><span class="pill">压枪 / 拟人 / 锁定</span></div>
+          <div class="settings-grid">
+            <section class="module-tile">
+              <h3>压枪</h3>
+              <label class="field"><input id="recoil_enabled" data-config="recoil.enabled" type="checkbox"> 启用压枪</label>
+              <label class="field">触发热键
+                <select id="recoil_hotkey" data-config="recoil.hotkey">
+                  <option value="left">左键</option>
+                  <option value="right">右键</option>
+                  <option value="middle">中键</option>
+                </select>
+              </label>
+              <label class="field">模式
+                <select id="recoil_hotkey_mode" data-config="recoil.hotkey_mode">
+                  <option value="any">任一按下</option>
+                  <option value="all">同时按下</option>
+                </select>
+              </label>
+              <div class="slider-field"><div class="label-row"><label for="recoil_strength">强度</label><input id="recoil_strength" data-config="recoil.strength" class="value-input" type="number" step="0.01"></div><input id="recoil_strength_range" type="range" min="0" max="20" step="0.1"></div>
+              <div class="slider-field"><div class="label-row"><label for="recoil_speed">速度</label><input id="recoil_speed" data-config="recoil.speed" class="value-input" type="number" step="0.01"></div><input id="recoil_speed_range" type="range" min="0" max="20" step="0.1"></div>
+              <label class="field"><input id="recoil_only_when_target_visible" data-config="recoil.only_when_target_visible" type="checkbox"> 仅目标可见时压枪</label>
+              <label class="field">目标丢失释放（毫秒）
+                <input id="recoil_target_lost_release_ms" data-config="recoil.target_lost_release_ms" class="value-input" type="number" min="0" max="2000" step="10">
+              </label>
+            </section>
+
+            <section class="module-tile">
+              <h3>拟人化整形</h3>
+              <label class="field"><input id="humanize_enabled" data-config="ai.controller.humanize_enabled" type="checkbox"> 启用拟人化</label>
+              <div class="slider-field"><div class="label-row"><label for="humanize_curve_strength">曲线强度</label><input id="humanize_curve_strength" data-config="ai.controller.humanize_curve_strength" class="value-input" type="number" min="0" max="1" step="0.01"></div><input id="humanize_curve_strength_range" type="range" min="0" max="1" step="0.01"></div>
+              <label class="field">抖动像素
+                <input id="humanize_jitter_px" data-config="ai.controller.humanize_jitter_px" class="value-input" type="number" min="0" max="5" step="0.01">
+              </label>
+              <label class="field">抖动频率（Hz）
+                <input id="humanize_jitter_frequency" data-config="ai.controller.humanize_jitter_frequency" class="value-input" type="number" min="0" max="30" step="1">
+              </label>
+            </section>
+
+            <section class="module-tile">
+              <h3>头部瞄准与锁定确认</h3>
+              <label class="field"><input id="head_aim_enabled" data-config="ai.controller.head_aim_enabled" type="checkbox"> 启用头部瞄准</label>
+              <div class="slider-field"><div class="label-row"><label for="head_aim_head_height_fraction">头高占比</label><input id="head_aim_head_height_fraction" data-config="ai.controller.head_aim_head_height_fraction" class="value-input" type="number" min="0" max="1" step="0.01"></div><input id="head_aim_head_height_fraction_range" type="range" min="0" max="1" step="0.01"></div>
+              <label class="field">安全内缩占比
+                <input id="head_aim_safe_inset_fraction" data-config="ai.controller.head_aim_safe_inset_fraction" class="value-input" type="number" min="0" max="1" step="0.01">
+              </label>
+              <label class="field">最大滞后（像素）
+                <input id="head_aim_max_lag_px" data-config="ai.controller.head_aim_max_lag_px" class="value-input" type="number" min="0" max="10" step="0.05">
+              </label>
+              <label class="field">确认帧数
+                <input id="lock_confirm_confirmation_frames" data-config="ai.controller.lock_confirm_confirmation_frames" class="value-input" type="number" min="1" max="10" step="1">
+              </label>
+              <label class="field">进入置信度
+                <input id="lock_confirm_enter_conf" data-config="ai.controller.lock_confirm_enter_conf" class="value-input" type="number" min="0" max="1" step="0.01">
+              </label>
+              <label class="field">保持置信度
+                <input id="lock_confirm_hold_conf" data-config="ai.controller.lock_confirm_hold_conf" class="value-input" type="number" min="0" max="1" step="0.01">
+              </label>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 05 模型库 ============ -->
+        <section id="model-page" class="page-card" data-page>
+          <div class="page-head"><div><p>MODELS</p><h2>本地模型库</h2></div><span class="pill">ONNX → RKNN</span></div>
+          <div class="settings-grid">
+            <section class="module-tile">
+              <h3>导入模型</h3>
+              <div class="hint">导入语义 = ONNX 转 RKNN（/api/models/import-onnx），转换完成后经校验入库。</div>
+              <label class="field">选择 .onnx 文件
+                <input id="modelImportInput" type="file" accept=".onnx">
+              </label>
+              <div class="controls-row">
+                <button id="modelImportButton" class="primary-button" type="button">开始转换导入</button>
+              </div>
+            </section>
+            <section class="module-tile">
+              <h3>已安装模型</h3>
+              <table class="data-table">
+                <thead><tr><th>名称</th><th>格式</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody id="modelTableBody"></tbody>
+              </table>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 06 显示与鼠标 ============ -->
+        <section id="hardware-page" class="page-card" data-page>
+          <div class="page-head"><div><p>HARDWARE</p><h2>显示器与鼠标描述</h2></div><span class="pill">EDID / USB</span></div>
+          <div class="settings-grid">
+            <section class="module-tile">
+              <h3>显示器模式</h3>
+              <div class="meter-row"><div class="label-row"><span>当前模式</span><strong id="displayCurrentMode">—</strong></div></div>
+              <label class="field">目标模式
+                <select id="displayModeSelect"></select>
+              </label>
+              <div class="controls-row">
+                <button id="displayApplyButton" class="ghost-button" type="button">应用显示模式</button>
+              </div>
+            </section>
+            <section class="module-tile">
+              <h3>USB 鼠标硬件</h3>
+              <div class="meter-row"><div class="label-row"><span>设备</span><strong id="mouseDeviceName">—</strong></div></div>
+              <label class="field">输出模式
+                <select id="mouseModeSelect"></select>
+              </label>
+              <div class="controls-row">
+                <button id="mouseModeApplyButton" class="ghost-button" type="button">应用鼠标模式</button>
+                <button id="mouseTestCircleButton" class="ghost-button" type="button">画圆测试输出</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 07 网络配置 ============ -->
+        <section id="wifi-page" class="page-card" data-page>
+          <div class="page-head"><div><p>NETWORK</p><h2>网络配置</h2></div><span class="pill">Wi-Fi / 黑名单</span></div>
+          <div class="settings-grid">
+            <section class="module-tile">
+              <h3>无线网络</h3>
+              <div class="meter-row"><div class="label-row"><span>状态</span><strong id="wifiStatus">—</strong></div></div>
+              <div class="controls-row">
+                <button id="wifiScanButton" class="ghost-button" type="button">扫描网络</button>
+              </div>
+              <ul id="wifiScanList"></ul>
+            </section>
+            <section class="module-tile">
+              <h3>局域网黑名单</h3>
+              <div class="hint">被封禁的 IP 无法访问面板（网络层功能；iptables + Web 入口双重执法）。</div>
+              <div class="meter-row"><div class="label-row"><span>当前封禁</span><strong id="blocklistSummary">—</strong></div></div>
+              <div class="controls-row">
+                <button id="blocklistRefreshButton" class="ghost-button" type="button">刷新黑名单</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 08 预设参数 ============ -->
+        <section id="preset-page" class="page-card" data-page>
+          <div class="page-head"><div><p>PRESETS</p><h2>预设参数</h2></div><span class="pill">保存 / 导入导出</span></div>
+          <div class="settings-grid">
+            <section class="module-tile">
+              <h3>保存当前参数</h3>
+              <label class="field">预设名称
+                <input id="presetNameInput" type="text" placeholder="例如：近战腰射">
+              </label>
+              <div class="controls-row">
+                <button id="presetSaveButton" class="primary-button" type="button">保存为预设</button>
+              </div>
+            </section>
+            <section class="module-tile">
+              <h3>已有预设</h3>
+              <table class="data-table">
+                <thead><tr><th>名称</th><th>操作</th></tr></thead>
+                <tbody id="presetTableBody"></tbody>
+              </table>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 09 系统状态 ============ -->
+        <section id="license-page" class="page-card" data-page>
+          <div class="page-head"><div><p>SYSTEM</p><h2>授权、更新与存储</h2></div><span class="pill">云端授权</span></div>
+          <div class="settings-grid">
+            <section class="module-tile">
+              <h3>设备授权</h3>
+              <div class="meter-row"><div class="label-row"><span>授权状态</span><strong id="licensePageState">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>卡密</span><strong id="licensePageCard">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>到期时间</span><strong id="licensePageExpire">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>心跳</span><strong id="licensePageHeartbeat">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>解绑余量</span><strong id="licensePageDevices">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>机器码</span><strong id="licensePageMachine">—</strong></div></div>
+            </section>
+
+            <section class="module-tile">
+              <h3>系统信息</h3>
+              <div class="meter-row"><div class="label-row"><span>主机名</span><strong id="sysHostname">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>局域网地址</span><strong id="sysLanIp">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>运行时长</span><strong id="sysUptime">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>版本</span><strong id="sysVersion">—</strong></div></div>
+            </section>
+
+            <section class="module-tile">
+              <h3>系统更新（OTA）</h3>
+              <label class="field">更新包地址（https）
+                <input id="otaUrlInput" type="text" placeholder="https://.../ttbox-update.tar.gz">
+              </label>
+              <div class="controls-row">
+                <button id="otaInstallButton" class="primary-button" type="button">安装更新</button>
+              </div>
+              <div class="hint">版本列表由云端 update-server 提供（M2.07 未接，不展示假壳按钮）。</div>
+            </section>
+          </div>
+        </section>
+
+        <!-- ============ 10 风扇控制 ============ -->
+        <section id="fan-page" class="page-card" data-page>
+          <div class="page-head"><div><p>FAN</p><h2>风扇控制</h2></div><span class="pill">PWM 实读</span></div>
+          <div class="settings-grid">
+            <section class="module-tile">
+              <h3>运行状态</h3>
+              <div class="meter-row"><div class="label-row"><span>转速占空比</span><strong id="fanPercent">—</strong></div></div>
+              <div class="meter-row"><div class="label-row"><span>温度来源</span><strong id="fanTemperature">—</strong></div></div>
+              <div class="hint">温度来源为 SoC/NPU（无 Hailo 选项）；PWM 写入路径 P1 盘点中，本页只读展示真实读数。</div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script>
+    // 品牌上下文（服务端注入，_page_context 单一来源；运行期由 console.js 应用）
+    window.__TTBOX_UI__ = {
+      ui_brand: {{ ui_brand | tojson }},
+      brand_mark: {{ brand_mark | tojson }},
+      brand_eyebrow: {{ brand_eyebrow | tojson }},
+      brand_title: {{ brand_title | tojson }},
+      default_theme: {{ default_theme | tojson }},
+      app_title: {{ app_title | tojson }}
+    };
+  </script>
+  <script src="{{ url_for('static', filename='console.js') }}?v={{ asset_version }}"></script>
+</body>
+</html>

@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>设备激活</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #050505;
+  --surface: #101010;
+  --surface-strong: #181818;
+  --line: #2f2f2f;
+  --text: #f7f7f7;
+  --muted: #a8a8a8;
+  --danger: #f4f4f4;
+  font-family: Inter, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: #050505;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 34%),
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08), transparent 42vw),
+    var(--bg);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.activation-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.activation-panel {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--surface-strong), var(--surface));
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.42);
+}
+
+.activation-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.activation-mark {
+  width: 46px;
+  height: 46px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid #f2f2f2;
+  border-radius: 8px;
+  color: #050505;
+  background: #f2f2f2;
+  font-weight: 900;
+}
+
+.activation-head p,
+.activation-status,
+.activation-field {
+  color: var(--muted);
+}
+
+.activation-head p {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.activation-head h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.18;
+}
+
+.activation-status {
+  min-height: 22px;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.activation-status.error {
+  color: var(--danger);
+}
+
+.activation-field {
+  display: grid;
+  gap: 7px;
+  font-weight: 800;
+}
+
+.activation-field input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text);
+  background: #070707;
+  outline: none;
+}
+
+.activation-field input:focus {
+  border-color: #f2f2f2;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.16);
+}
+
+.activation-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.activation-actions button {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+#activateButton {
+  color: #050505;
+  border-color: #f2f2f2;
+  background: #f2f2f2;
+}
+
+#activateButton:hover {
+  background: #ffffff;
+}
+
+#refreshButton {
+  color: var(--text);
+  background: transparent;
+}
+
+#refreshButton:hover {
+  border-color: #f2f2f2;
+}
+
+.activation-actions button:disabled,
+.activation-field input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.activation-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  max-width: min(420px, calc(100vw - 24px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: var(--text);
+  background: #101010;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38);
+}
+
+.activation-toast.error {
+  color: #050505;
+  border-color: #f2f2f2;
+  background: #f2f2f2;
+}
+
+@media (max-width: 520px) {
+  .activation-shell {
+    padding: 14px;
+    align-items: stretch;
+  }
+
+  .activation-panel {
+    align-self: center;
+    padding: 18px;
+  }
+
+  .activation-head h1 {
+    font-size: 21px;
+  }
+
+  .activation-actions button {
+    width: 100%;
+  }
+}
+</style>
+</head>
+<body>
+  <main class="activation-shell">
+    <section class="activation-panel" aria-label="设备激活">
+      <div class="activation-head">
+        <span class="activation-mark">{{ brand_mark }}</span>
+        <div>
+          <p>Device Activation</p>
+          <h1>输入激活码后进入系统</h1>
+        </div>
+      </div>
+      <p id="activationStatus" class="activation-status">设备未激活，请输入激活码完成授权。</p>
+      <label class="activation-field">激活码
+        <input id="activationKeyInput" type="text" autocomplete="off" inputmode="text" placeholder="输入激活码">
+      </label>
+      <div class="activation-actions">
+        <button id="activateButton" type="button">激活设备</button>
+        <button id="refreshButton" type="button">刷新状态</button>
+      </div>
+    </section>
+  </main>
+  <div id="activationToast" class="activation-toast" hidden></div>
+<script>
+const statusEl = document.getElementById("activationStatus");
+const keyInput = document.getElementById("activationKeyInput");
+const activateButton = document.getElementById("activateButton");
+const refreshButton = document.getElementById("refreshButton");
+const toastEl = document.getElementById("activationToast");
+
+function setStatus(message, isError = false) {
+  if (!statusEl) return;
+  statusEl.textContent = message || "";
+  statusEl.classList.toggle("error", !!isError);
+}
+
+function showToast(message, isError = false) {
+  if (!toastEl) return;
+  toastEl.textContent = message || "";
+  toastEl.className = `activation-toast${isError ? " error" : ""}`;
+  toastEl.hidden = false;
+  window.clearTimeout(showToast.timer);
+  showToast.timer = window.setTimeout(() => {
+    toastEl.hidden = true;
+  }, 2600);
+}
+
+function setBusy(busy) {
+  [keyInput, activateButton, refreshButton].forEach((el) => {
+    if (el) el.disabled = !!busy;
+  });
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    ...options,
+    headers: {
+      Accept: "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) {
+    throw new Error(payload.error || `HTTP ${response.status}`);
+  }
+  return payload.data;
+}
+
+function licenseValid(payload) {
+  const license = payload && payload.license;
+  return !!(license && license.valid);
+}
+
+async function refreshStatus({ quiet = false } = {}) {
+  setBusy(true);
+  try {
+    const payload = await api("/api/license");
+    if (licenseValid(payload)) {
+      setStatus("设备已激活，正在进入系统。");
+      window.location.replace("/");
+      return;
+    }
+    setStatus("设备未激活，请输入激活码完成授权。");
+    if (!quiet) showToast("授权状态已刷新");
+  } catch (error) {
+    setStatus(error.message || String(error), true);
+    if (!quiet) showToast(error.message || String(error), true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function activate() {
+  const licenseKey = keyInput ? keyInput.value.trim() : "";
+  if (!licenseKey) {
+    setStatus("请输入激活码。", true);
+    if (keyInput) keyInput.focus();
+    return;
+  }
+  setBusy(true);
+  setStatus("正在验证激活码，请稍候。");
+  try {
+    await api("/api/license/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ license_key: licenseKey }),
+    });
+    setStatus("激活成功，正在进入系统。");
+    window.setTimeout(() => window.location.replace("/"), 600);
+  } catch (error) {
+    setStatus(error.message || String(error), true);
+    showToast(error.message || String(error), true);
+  } finally {
+    setBusy(false);
+  }
+}
+
+if (activateButton) activateButton.addEventListener("click", activate);
+if (refreshButton) refreshButton.addEventListener("click", () => refreshStatus());
+if (keyInput) {
+  keyInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      activate();
+    }
+  });
+  keyInput.focus();
+}
+
+refreshStatus({ quiet: true });
+</script>
+</body>
+</html>

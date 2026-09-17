@@ -1,0 +1,143 @@
+// AimThread.hpp — 独立瞄准控制线程骨架。
+// 当前阶段只验证 Worker -> Mailbox -> AimThread 的数据链路，不改变现有采集/推理行为。
+#pragma once
+#include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include "pipeline/AimTargetMailbox.hpp"
+#include "output/IHidOutput.hpp"
+#include "mouse/AimStateMachine.hpp"
+#include "mouse/TargetSelector.hpp"
+#include "model/RuntimeProfile.hpp"
+#include "aim/Pid1Controller.hpp"
+#include "aim/PipelineDebug.hpp"
+#include "aim/PidTrace.hpp"
+#include "mouse/AimTracker.hpp"
+#include "mouse/OneEuroFilter.hpp"
+#include "mouse/PullCurve.hpp"
+#include "mouse/ContinuousLead.hpp"
+#include "mouse/PersonalTrajectoryShader.hpp"
+#include "mouse/RecoilController.hpp"
+namespace ttbox::core::aim {
+class AimThread {
+public:
+    struct Status {
+        bool running = false;
+        bool has_task = false;
+        bool has_target = false;
+        int target_id = -1;
+        int target_class_id = -1;
+        float target_width = 0.0f;
+        float target_height = 0.0f;
+        float target_x1 = 0.0f;
+        float target_y1 = 0.0f;
+        float target_x2 = 0.0f;
+        float target_y2 = 0.0f;
+        std::vector<DetectionBox> detection_boxes;
+        float target_point_x = 0.0f;
+        float target_point_y = 0.0f;
+        float reference_x = 0.0f;
+        float reference_y = 0.0f;
+        float error_x = 0.0f;
+        float error_y = 0.0f;
+        float pid_output_x = 0.0f;
+        float pid_output_y = 0.0f;
+        float scheduler_input_x = 0.0f;
+        float scheduler_input_y = 0.0f;
+        int16_t move_x = 0;
+        int16_t move_y = 0;
+        uint64_t last_frame = 0;
+        uint64_t consumed = 0;
+        uint64_t stale = 0;
+        uint64_t target_frames = 0;
+        uint64_t no_target_frames = 0;
+        uint32_t tracks = 0;           // 当前跟踪中的目标数（detections/tracks 显示）
+        float predicted_x = 0.0f;
+        float predicted_y = 0.0f;
+        float control_x = 0.0f;
+        float control_y = 0.0f;
+        float smith_dx = 0.0f;
+        float smith_dy = 0.0f;
+        int16_t min_move_x = 0;
+        int16_t max_move_x = 0;
+        int16_t min_move_y = 0;
+        int16_t max_move_y = 0;
+        uint64_t clipped_frames = 0;
+        uint64_t gated_frames = 0;      // Hotkey Gate 拦截的周期数（热键未按）
+        uint16_t last_hotkey_bits = 0;  // 最近一次采样的物理按键位图（遥测）
+        bool last_injection_allowed = false;  // 最近一次 Gate 判定结果
+        uint64_t last_timestamp_us = 0;
+    };
+    AimThread() = default;
+    ~AimThread() { stop(); }
+    bool start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us = 4000, RuntimeConfig* runtime_config = nullptr, std::atomic<uint16_t>* physical_buttons = nullptr);
+    void stop();
+
+    // 第13阶段：链路诊断开关（config 控制；默认关闭，不影响实时链路）
+    void set_pipeline_debug(bool enabled, uint32_t sample_interval = 60) {
+        pipeline_debug_.enabled = enabled;
+        pipeline_debug_.sample_interval = sample_interval > 0 ? sample_interval : 60;
+    }
+
+    // 第13阶段：PID Trace 采集开关（config 控制；默认关闭，只记录不改变行为）
+    void set_pid_trace(bool enabled, const std::string& path = "") {
+        if (enabled) {
+            if (!pid_trace_.open(path)) {
+                std::fprintf(stderr, "[PidTrace] 打开 Trace 文件失败: %s\n",
+                             path.empty() ? "/tmp/pid_trace.csv" : path.c_str());
+                return;
+            }
+        } else {
+            pid_trace_.close();
+        }
+    }
+
+    // 第15阶段：预测时域（秒；0=关闭预测，保持原行为）
+    void set_prediction_time(float seconds) {
+        prediction_time_s_ = seconds > 0.0f ? seconds : 0.0f;
+    }
+    Status status() const;
+private:
+    // 每次 start 都代表一个全新的采集/模型运行世代。必须清除旧模型的目标锁定、
+    // 跟踪、PID、亚像素余数、显示滤波和压枪/拟人状态，禁止 A 模型状态泄漏到 B。
+    void reset_runtime_state();
+    void loop();
+    AimTargetMailbox* mailbox_ = nullptr;
+    std::shared_ptr<output::IHidOutput> output_;
+    std::atomic<bool> running_{false};
+    std::thread thread_;
+    int interval_us_ = 4000;
+    RuntimeConfig* runtime_config_ = nullptr;
+    std::atomic<uint16_t>* physical_buttons_ = nullptr;
+    TargetSelector selector_;
+    Pid1Controller pid_x_;   // P_PID：X 轴（predict=3.0）
+    Pid1Controller pid_y_;   // P_PID：Y 轴（predict=0.0）
+    AimStateMachine state_machine_;
+    PipelineDebug pipeline_debug_;  // 第13阶段：链路诊断采样器（默认关闭）
+    PidTrace pid_trace_;            // 第13阶段：PID 逐帧 Trace 采集（默认关闭）
+    AimTracker tracker_;            // 第15阶段：目标跟踪器（速度估计+预测）
+    PullCurve pull_curve_;          // 拉枪曲线：远距离拉枪时附加弧线/抖动（deadzone 前生效）
+    ContinuousLead continuous_lead_;  // 持续提前量：AI 输出持续同向后附加 X 偏置（pull_curve 后、recoil 前注入 scaled_x）
+    PersonalTrajectoryShader personal_shader_;  // 拟人化整形引擎：Fitts 时长+包络+垂直抖动（Gate 前生效）
+    RecoilController recoil_;       // 压枪引擎：开火期间下压（pull_curve 后、deadzone 前注入 scaled_y）
+    // 显示框 One-Euro 平滑（第15阶段）：检测框上边缘 y1 帧间跳变 ±18px（模型头顶边界），
+    // 平滑后预览框稳定、标定稳定检测可过。仅影响显示/标定观测，不影响瞄准控制链。
+    OneEuroFilter display_smooth_x1_{0.8f, 0.10f, 1.0f};
+    OneEuroFilter display_smooth_y1_{0.8f, 0.10f, 1.0f};
+    OneEuroFilter display_smooth_x2_{0.8f, 0.10f, 1.0f};
+    OneEuroFilter display_smooth_y2_{0.8f, 0.10f, 1.0f};
+    int last_display_target_id_ = -1;
+    uint64_t last_display_ts_us_ = 0;  // 显示框平滑用的上一帧时间戳（display 块独立于控制 dt）
+    float target_age_ms_ = 0.0f;                    // 当前选中目标年龄（ms，拟人化整形用）
+    float prediction_time_s_ = 0.0f;  // 第15阶段：预测时域（秒；0=关闭预测，保持原行为）
+    uint64_t last_timestamp_us_ = 0;
+    float remainder_x_ = 0.0f;
+    float remainder_y_ = 0.0f;
+    int last_target_id_ = -1;
+    mutable std::mutex status_mutex_;
+    Status status_{};
+};
+}  // namespace ttbox::core::aim

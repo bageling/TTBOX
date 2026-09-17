@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# ttbox_ensure_services.sh — TTBOX 幂等自愈（DEP-01 / T1.03）
+#
+# 作用：把 5 个 ttbox unit（core/web/preview/usbproxy/edid）从【发布树】同步到
+#       /etc/systemd/system/ —— 现场 unit 被误删/误改后能自动长回（配 ttbox-ensure.timer，
+#       每 10 分钟巡检一次；fhs_init 尾部也会调用一次）。
+#
+# 架构借鉴竞品 yu 的 `ensure_makcu_service.sh`（幂等、cmp -s 后才 install、二进制不存在
+# 就 exit 0），但**零字节复制**，并对其做两处加固：
+#   ★ 比 yu 多一步：unit 源取自 /opt/ttbox/current/deploy/systemd/（随版本交付）——
+#     current 断链时【全部跳过】（此时自愈无意义，发布系统才是病根，不该乱写 unit）。
+#   ★ 只为【已具备可执行产物】的 unit 写文件：ExecStart 首 token 经 current 解析后不可执行
+#     时跳过该 unit，绝不产生"装上就 203/EXEC"的僵尸服务。
+#
+# 契约（design §B3.1，逐条落实）：
+#   1. 非 root（id -u != 0）            → exit 0（不制造半套自愈）
+#   2. current 断链 / unit 源缺失       → exit 0 且不写任何 unit
+#   3. ExecStart 二进制缺失（! -x）     → 跳过该 unit，不写
+#   4. 同文件系统 mktemp 落候选 → cmp -s 自证完整 → 与已装 cmp -s 比对；
+#      一致跳过；不一致 **原子 mv -f 替换** + changed=1
+#      ★ 不变量：UNIT_DIR 内只有「完整 unit」或「缺席」两种状态；
+#        既有完整 unit **绝不因一次写失败而被销毁**（自愈是「补」，不是「删」）。
+#      ★ 禁止任何 `rm <dst>` 分支 —— 写失败时 dst 必须保持原样。
+#   5. changed 时才 systemctl daemon-reload
+#   6. systemctl enable <unit> --now（|| true，幂等；已启动也不报错）
+#
+# 幂等：重复运行无副作用；本脚本自身【永远 exit 0】（自愈失败要可观测、但不得让 timer 失败刷屏）。
+#
+# 可测性：TTBOX_PREFIX / TTBOX_UNIT_DIR / TTBOX_SYSTEMD 均可覆盖，便于临时前缀自测。
+#
+# 用法：
+#   sudo scripts/ttbox_ensure_services.sh
+#   自测: TTBOX_PREFIX=/tmp/pfx TTBOX_UNIT_DIR=/tmp/units TTBOX_SYSTEMD=0 bash scripts/ttbox_ensure_services.sh
+
+set -uo pipefail
+
+TTBOX_PREFIX="${TTBOX_PREFIX:-/opt/ttbox}"
+UNIT_DIR="${TTBOX_UNIT_DIR:-/etc/systemd/system}"
+SYSTEMD_MODE="${TTBOX_SYSTEMD:-auto}"
+
+# 受管 unit（收敛后每 unit 全仓仅一份，见 T1.05；此处为按依赖顺序的显式清单）
+UNITS="ttbox-core.service ttbox-web.service ttbox-preview.service ttbox-usbproxy.service ttbox-edid.service"
+UNIT_SRC_REL="deploy/systemd"
+
+log()  { printf '[ensure] %s\n' "$*"; }
+warn() { printf '[ensure][WARN] %s\n' "$*" >&2; }
+
+have_systemd() {
+    case "$SYSTEMD_MODE" in
+        0|no|off|false) return 1 ;;
+        1|yes|on|true)  return 0 ;;
+    esac
+    [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1
+}
+
+# 把 unit 内硬编码的 /opt/ttbox 前缀重映射到当前 TTBOX_PREFIX（仅自测时生效）
+remap_path() {
+    local p="$1"
+    if [[ "$TTBOX_PREFIX" != "/opt/ttbox" ]]; then
+        printf '%s' "${p/#\/opt\/ttbox/$TTBOX_PREFIX}"
+    else
+        printf '%s' "$p"
+    fi
+}
+
+# unit 的 ExecStart 首 token（去掉 systemd exec 前缀符号 - @ + !）
+unit_execstart_bin() {
+    local f="$1" raw
+    raw="$(awk -F= '/^ExecStart=/{sub(/^ExecStart=/,"");print;exit}' "$f")"
+    raw="${raw#-}"; raw="${raw#@}"; raw="${raw#+}"; raw="${raw#!}"
+    printf '%s' "$(remap_path "${raw%% *}")"
+}
+
+# ---------------------------------------------------------------------------
+# 1. 非 root → exit 0
+# ---------------------------------------------------------------------------
+if [ "$(id -u)" -ne 0 ]; then
+    log "非 root（id=$(id -u)）：自愈需写 ${UNIT_DIR} 与调用 systemctl —— 跳过，exit 0"
+    exit 0
+fi
+
+CURRENT_LINK="${TTBOX_PREFIX}/current"
+SRC_DIR="${CURRENT_LINK}/${UNIT_SRC_REL}"
+
+# ---------------------------------------------------------------------------
+# 2. current 断链 / unit 源缺失 → exit 0 且不写任何 unit
+# ---------------------------------------------------------------------------
+current_resolved="$(readlink -f -- "$CURRENT_LINK" 2>/dev/null || true)"
+if [ ! -L "$CURRENT_LINK" ] || [[ -z "$current_resolved" ]] || [ ! -d "$SRC_DIR" ]; then
+    log "current 断链或 ${SRC_DIR} 不存在（发布系统才是病根）—— 全部跳过，exit 0"
+    exit 0
+fi
+log "unit 源：${SRC_DIR}（current -> ${current_resolved}）"
+
+# ---------------------------------------------------------------------------
+# 3/4/5. 逐 unit：比对 → 安装 → daemon-reload
+# ---------------------------------------------------------------------------
+changed=0
+installed=""
+for unit in $UNITS; do
+    src="${SRC_DIR}/${unit}"
+    if [ ! -f "$src" ]; then
+        warn "${unit}: 源缺失 ${src} —— 跳过"
+        continue
+    fi
+
+    exec_bin="$(unit_execstart_bin "$src")"
+    # 仅对绝对路径做可执行性预检（自测前缀下可能故意指向别处）
+    if [[ "$exec_bin" == /* ]] && [ ! -x "$exec_bin" ]; then
+        warn "${unit}: ExecStart 不可执行（${exec_bin}）—— 跳过，不写 unit（防僵尸服务）"
+        continue
+    fi
+
+    dst="${UNIT_DIR}/${unit}"
+    # ① 目标目录提前创建（原在 install 前才 mkdir，太晚——下一步 mktemp 就要用它）
+    mkdir -p -- "$UNIT_DIR"
+    # ② 候选文件与 dst **同文件系统**（tmp 落 ${UNIT_DIR} 内）—— T5b 的**根因修复**：
+    #    mktemp 默认落 ${TMPDIR:-/tmp}，与 ${UNIT_DIR} 不同 fs ⇒ "就地写 dst" 只能拷+删、**非原子**。
+    #    末段是 `.XXXXXX`（不是 `.service`）⇒ systemd 扫描 *.{service,unit,...} 时不会把它当 unit。
+    tmp="$(mktemp "${UNIT_DIR}/.${unit}.XXXXXX")" || {
+        warn "${unit}: 无法在 ${UNIT_DIR} 建候选文件 —— 跳过，dst 不动"
+        continue
+    }
+    # ③ 候选写入完整性护栏：cat 必须成功 **且** 与源逐字节一致，否则跳过、dst 不动。
+    if ! cat -- "$src" > "$tmp" || ! cmp -s -- "$tmp" "$src"; then
+        warn "${unit}: 候选写入不完整（磁盘满 / 写限？）—— 跳过，dst 不动"
+        rm -f -- "$tmp"
+        continue
+    fi
+    # ④ 已是最新 → 跳过（原语义）
+    if [ -f "$dst" ] && cmp -s -- "$tmp" "$dst"; then
+        rm -f -- "$tmp"
+        log "${unit}: 已是最新（cmp -s 一致），跳过"
+        installed="${installed} ${unit}"
+        continue
+    fi
+    # ⑤ 设定候选文件的权限与属主（失败只告警，不阻断替换）
+    chmod 0644 -- "$tmp" 2>/dev/null || true
+    chown root:root -- "$tmp" 2>/dev/null || warn "${unit}: chown 失败（继续）"
+    # ⑥ **原子替换**：同 fs 的 `mv` 走 rename(2)——要么完整新 unit，要么保持旧 unit，
+    #    **绝不 `rm` 目标文件**。不变量：${UNIT_DIR} 内只有"完整 unit"或"缺席"两种状态，
+    #    且**既有完整 unit 绝不因一次写失败而被销毁**（自愈是"补"，不是"删"）。
+    if mv -f -- "$tmp" "$dst"; then
+        if cmp -s -- "$src" "$dst"; then
+            log "${unit}: 安装/更新 -> ${dst}"
+            changed=1
+            installed="${installed} ${unit}"
+        else
+            warn "${unit}: 落盘后复核不一致（极端情况）—— 文件已替换，仍标记 changed"
+            changed=1
+        fi
+    else
+        warn "${unit}: mv 失败 —— **dst 未被修改（保持原样）**"
+        rm -f -- "$tmp"
+    fi
+done
+
+if (( changed )) && have_systemd; then
+    if systemctl daemon-reload; then
+        log "systemctl daemon-reload"
+    else
+        warn "daemon-reload 失败（继续）"
+    fi
+elif (( changed )); then
+    log "SKIP：无 systemd，跳过 daemon-reload"
+fi
+
+# ---------------------------------------------------------------------------
+# 6. enable --now（|| true，幂等）
+# ---------------------------------------------------------------------------
+if have_systemd; then
+    for unit in $installed; do
+        if systemctl enable --now "$unit" >/dev/null 2>&1; then
+            log "enable --now ${unit} OK"
+        else
+            warn "enable --now ${unit} 失败（已启动/无权限等，已忽略）"
+        fi
+    done
+else
+    log "SKIP：无 systemd，跳过 enable --now"
+fi
+
+log "完成（changed=${changed}）"
+exit 0

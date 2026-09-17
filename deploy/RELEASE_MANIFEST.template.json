@@ -1,0 +1,21 @@
+{
+  "_comment": "TTBOX release 清单模板。发布时由构建流程填充：files_sha256 覆盖 release 树内所有随版本交付的文件（含 bin/ lib/ plugins/ framework/ ttbox_motion/ platform/ usbproxy/ scripts/ deploy/）。bin/ 下的条目在安装前会被逐条校验（install step1），全部条目在发布前会被整树校验（install step3 / verify 脚本）。★bin/ 为白名单闭集：当前仅 ttbox_core_main（T1.16 只有它带 $ORIGIN RUNPATH；ipc_ping/imgdetect 无 RUNPATH 不发货），verify 会拒绝任何非闭集成员。",
+  "_layout": "此 manifest 位于 releases/<version>/RELEASE_MANIFEST.json，随完整运行树一起发布。",
+  "version": "<version>",
+  "built_at": "<ISO-8601 UTC, e.g. 2026-09-16T00:00:00Z>",
+  "git_sha": "<full-40-hex-sha>",
+  "files_sha256": {
+    "bin/ttbox_core_main": "<sha256>",
+    "lib/librknnrt.so": "<sha256>",
+    "plugins/web/bin/ttbox-web": "<sha256>",
+    "plugins/web/bin/ttbox-web.py": "<sha256>",
+    "plugins/preview/bin/ttbox-preview": "<sha256>",
+    "usbproxy/board/run-ttbox-usb-proxy.sh": "<sha256>",
+    "scripts/edid/edid_apply.sh": "<sha256>",
+    "deploy/systemd/ttbox-core.service": "<sha256>",
+    "deploy/systemd/ttbox-web.service": "<sha256>",
+    "deploy/systemd/ttbox-preview.service": "<sha256>",
+    "deploy/systemd/ttbox-usbproxy.service": "<sha256>",
+    "deploy/systemd/ttbox-edid.service": "<sha256>"
+  }
+}
