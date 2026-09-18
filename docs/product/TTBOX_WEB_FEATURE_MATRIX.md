@@ -207,4 +207,4 @@
 | ~~update-page~~ | update/versions、update/install 旧调用 | ⛔ 页面与 /api/update/* 已随离线更新功能删除 |
 | theme-store-page | 主题商店（未做） | PLANNED |
 | `plugins/web/tests/test_web_calibration_apply.py`、`test_web_recoil_translation.py` | **脚本式自测**（模块级代码 + `sys.exit()`，非 pytest 用例）⇒ 直接跑 `pytest plugins/web/tests` 会在收集期 `INTERNALERROR: SystemExit`，**整个目录一条都跑不到**，而 CI 若只看"没有 failed"会把 INTERNALERROR 当成功。**这正是本仓历来警惕的"静默跳过"**（发现于 2026-09-17） | 两个选择：①（推荐）给模块级执行体加 `if __name__ == '__main__':` 守卫，使 pytest 能正常收集（用例本身仍可 `python <file>` 直跑）；② 迁移为真正的 `def test_*()` 形式。**在修好之前，跑插件测试请逐文件指定**（见 `docs/ops/测试说明.md`），勿用目录形式 |
-| `plugins/web/templates/index-preview.html` | 仍有 `continuous_lead` 占位文字，与已落地的正式 `index.html` 真控件并存 | 建议删除该占位页或同步为真控件（不影响生产；正式页已是真控件） |
+| `plugins/web/static/legacy/index-preview.html` | 已归档的遗留模板（原 `templates/`）；仍有"持续提前量参数配置占位"字样，正式页 `index.html` 已是真控件 | 已于 2026-09-18 控制台 1:1 采用时移入 `static/legacy/`；无路由引用、不影响生产，**不再构成待办** |
