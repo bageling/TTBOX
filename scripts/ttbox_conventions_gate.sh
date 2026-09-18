@@ -14,6 +14,8 @@
 #   ⑤ 跨语言同值常量：socket / web 端口 / EDID attempts / 心跳 60·180 逐值相等（B-CONST-2）
 #   ⑥ 版本：core/include/ttbox/core/version.hpp::kCoreVersion == core/CMakeLists.txt project VERSION
 #   ⑦ 无补丁残迹：hardware_display.json 单点（V-19）；systemd_units.py / runner.py / test_systemd_units.py 已删（V-15/16）
+#   ⑧ V-07 无绝对路径注入：出货 Python 禁 `sys.path.insert(0, '/opt/…')`（散落字面量 + insert(0) 遮蔽 stdlib）
+#   ⑨ TTBOX_PROJECT_ROOT 兜底清零：`#define TTBOX_PROJECT_ROOT` 出现次数必须为 0（强制由 CMake -D 注入）
 #
 # 用法：
 #   bash scripts/ttbox_conventions_gate.sh              # 执行门禁
@@ -279,8 +281,12 @@ def check_env():
             elif name not in ENV_ALLOW:
                 bad("② 未登记 env %s @ %s（需登记 docs/protocols/config-path-env-registry.md）"
                     % (name, p))
-    # ③ 同义异名：全仓（含注释剥离后）不得再出现。
-    #   例外 = env_scan_excluded（测试/门禁脚本）——回归测试必须**点名**同义异名以断言其绝迹。
+    # ③ 同义异名：**生产代码**（含注释剥离后）不得再出现。
+    #   carve-out = env_scan_excluded（**仅 TEST 域**：tests/、test_*.py、scripts/ttbox_m207*、
+    #   *_verify.sh / *_selftest.sh）。唯一理由：回归/验收脚本必须**点名**同义异名，才能断言其
+    #   "绝迹"（B27 断言 TTBOX_MODEL_ROOT 残留=False、B29 断言 TTBOX_WEB_HOST/PORT 无残留）。
+    #   范围严格限定 TEST 域 —— 生产源码（core/src、core/include、plugins/web/bin、scripts/*.py
+    #   非验收件等）**不在**豁免内，仍逐行扫。
     for p in iter_files():
         if env_scan_excluded(p):
             continue
@@ -438,6 +444,53 @@ def check_no_patch():
 
 
 # ---------------------------------------------------------------------------
+# ⑧ V-07：出货 Python 禁绝对路径 sys.path 注入
+# ---------------------------------------------------------------------------
+# 反模式：sys.path.insert(0, '/opt/ttbox/scripts') —— 既散落绝对路径字面量（A-PATH-3/5 违背），
+# 又把目录顶到 sys.path 最前（insert(0)）有遮蔽 stdlib 的风险（见 ttbox-web.py 头部 platform 冲突）。
+# 正解：经 lib.paths 相对派生 + append（受单点真源约束）。
+_ABS_INSERT = re.compile(r'sys\.path\.insert\(\s*0\s*,\s*[\'"](/[^\'"]*)[\'"]')
+
+
+def check_no_abs_insert():
+    found = []
+    for p in iter_files():
+        if os.path.splitext(p)[1] != ".py":
+            continue
+        for n, line in enumerate(read(p).splitlines(), 1):
+            m = _ABS_INSERT.search(strip_comment(line, ".py"))
+            if m:
+                found.append((p, n, m.group(1)))
+    for p, n, lit in found:
+        bad("⑧ 出货 Python 绝对路径注入 sys.path.insert(0, '%s') @ %s:%d"
+            "（V-07：改走 lib.paths 相对派生 + append）" % (lit, p, n))
+    if not found:
+        ok("⑧ 无绝对路径 sys.path 注入（出货 Python 全绿）")
+
+
+# ---------------------------------------------------------------------------
+# ⑨ TTBOX_PROJECT_ROOT 兜底清零
+# ---------------------------------------------------------------------------
+# TTBOX_PROJECT_ROOT 必须由 CMake -D 注入（target_compile_definitions(ttbox_core PUBLIC ...)）。
+# 任何 `#define TTBOX_PROJECT_ROOT` 兜底都会把"/"或"."静默顶替真实运行根 ⇒ 掩蔽注入掉线。
+_ROOT_FALLBACK = re.compile(r'^\s*#\s*define\s+TTBOX_PROJECT_ROOT\b')
+
+
+def check_project_root_injected():
+    hits = []
+    for p in iter_files():
+        if os.path.splitext(p)[1] not in (".cpp", ".hpp", ".h"):
+            continue
+        for n, line in enumerate(read(p).splitlines(), 1):
+            if _ROOT_FALLBACK.search(line):
+                hits.append("%s:%d" % (p, n))
+    for h in hits:
+        bad("⑨ TTBOX_PROJECT_ROOT 静默兜底 #define 仍在（应改 #error，由 CMake -D 注入）：%s" % h)
+    if not hits:
+        ok("⑨ 无 TTBOX_PROJECT_ROOT 兜底 #define（强制由 CMake 注入）")
+
+
+# ---------------------------------------------------------------------------
 # --selftest 负向控制（证明检测器真能捕获篡改）
 # ---------------------------------------------------------------------------
 def run_selftest(factory):
@@ -459,6 +512,15 @@ def run_selftest(factory):
     if hpp_const('inline constexpr const char* kCoreVersion = "9.9.9";', "kCoreVersion") == \
             re.search(r'project\(ttbox_core VERSION ([\d.]+)', read("core/CMakeLists.txt")).group(1):
         st_bad("版本检测器失效：异值未被捕获")
+    # 6) V-07：绝对路径 insert(0, '/opt/…') ⇒ 必被捕获
+    if not _ABS_INSERT.search('sys.path.insert(0, "/opt/ttbox/scripts")'):
+        st_bad("V-07 检测器失效：绝对路径 sys.path 注入未被捕获")
+    # 7) V-07：相对派生 append ⇒ 不得误报
+    if _ABS_INSERT.search('sys.path.append(str(Path(__file__).resolve().parents[1]))'):
+        st_bad("V-07 检测器误报：相对派生 append 被误判为绝对路径注入")
+    # 8) TTBOX_PROJECT_ROOT 兜底 ⇒ 必被捕获
+    if not _ROOT_FALLBACK.search('#define TTBOX_PROJECT_ROOT "."'):
+        st_bad("TTBOX_PROJECT_ROOT 兜底检测器失效：兜底 #define 未被捕获")
     if not _selftest_err:
         print("[gate][ OK ] --selftest 负向控制全部命中（篡改必被捕获、注释不误报）")
 
@@ -474,6 +536,8 @@ def main():
     check_crosslang()
     check_version()
     check_no_patch()
+    check_no_abs_insert()
+    check_project_root_injected()
     if SELFTEST:
         run_selftest(factory)
 

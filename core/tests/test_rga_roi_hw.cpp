@@ -20,7 +20,7 @@
 using namespace ttbox::core;
 
 #ifndef TTBOX_PROJECT_ROOT
-#define TTBOX_PROJECT_ROOT "."
+#error "TTBOX_PROJECT_ROOT must be injected by CMake (-DTTBOX_PROJECT_ROOT); refuse silent fallback to '.'."
 #endif
 
 int main(int argc, char** argv) {

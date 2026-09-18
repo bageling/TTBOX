@@ -2250,8 +2250,9 @@ _MODEL_UI_META_KEYS = ('game_profile', 'preset_name', 'hailo_pipeline_depth',
 
 
 def _model_ui_meta_path(model_id: str) -> Path:
-    # V-04：模型库 env 归一为 TTBOX_MODELS_ROOT（原 TTBOX_MODEL_ROOT 已删除，不保留兼容读）
-    return Path(os.environ.get('TTBOX_MODELS_ROOT', ttbox_paths.ttbox_prefix() + '/models')) / 'installed' / model_id / 'ui_meta.json'
+    # V-04：模型库根经 lib.paths.models_root() 单点派生（TTBOX_MODELS_ROOT > <prefix>/models）；
+    # 原同义异名 TTBOX_MODEL_ROOT 已删除，不保留兼容读。
+    return Path(ttbox_paths.models_root()) / 'installed' / model_id / 'ui_meta.json'
 
 
 def _read_model_ui_meta(model_id: str) -> dict:
@@ -2541,7 +2542,8 @@ def _conversion_worker(onnx_tmp: Path, calib_tmp, model_id: str, label: str,
                                          (f'：{detail}' if detail else '')),
                                   finished_at=time.time())
             return
-        inc = Path('/opt/ttbox/models/_incoming')
+        # V-04：转换产物落点与 core 同根（lib.paths.models_root()），不再写死 /opt/ttbox/models/_incoming。
+        inc = Path(ttbox_paths.models_root()) / '_incoming'
         inc.mkdir(parents=True, exist_ok=True)
         incoming_rknn = inc / (model_id + '.rknn')
         incoming_rknn.write_bytes(rknn_out.read_bytes())
@@ -2686,7 +2688,7 @@ def import_model():
     model_id = re.sub(r'[^A-Za-z0-9_\-]', '_', stem)[:64].strip('_') or 'model'
     # label 保留原始文件名主干（含中文），供前端显示；model_id 是净化后的内部标识
     label = stem.strip() or model_id
-    incoming = Path(os.environ.get('TTBOX_MODELS_ROOT', ttbox_paths.ttbox_prefix() + '/models')) / '_incoming'
+    incoming = Path(ttbox_paths.models_root()) / '_incoming'
     incoming.mkdir(parents=True, exist_ok=True)
     src_ext = '.onnx' if lower.endswith('.onnx') else '.rknn'
     dst = incoming / f'{model_id}{src_ext}'
@@ -4020,8 +4022,10 @@ def get_display_hardware():
     data['available'] = hdmi.get('connected', False)
     data['config'] = cfg_disp
     # monitor 模块：真实 hdmirx RX 状态（独立于板端其它服务）
+    # V-07 收口：scripts 目录已在文件头经 ttbox_paths.scripts_dir() append 进 sys.path
+    # （A-PATH-3 相对派生）；此处**不再** sys.path.insert(0, '/opt/ttbox/scripts')
+    # —— 绝对路径注入既散落字面量，又有 insert(0) 遮蔽 stdlib 的风险。
     try:
-        sys.path.insert(0, '/opt/ttbox/scripts')
         from edid.monitor import read_hdmirx_status
         rx = read_hdmirx_status()
         data['hdmirx'] = rx

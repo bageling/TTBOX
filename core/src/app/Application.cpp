@@ -49,7 +49,7 @@ std::atomic<bool> g_shutdown_requested{false};
 std::atomic<bool>& shutdown_flag() { return g_shutdown_requested; }
 
 #ifndef TTBOX_PROJECT_ROOT
-#define TTBOX_PROJECT_ROOT "."
+#error "TTBOX_PROJECT_ROOT must be injected by CMake (-DTTBOX_PROJECT_ROOT); refuse silent fallback to '.'."
 #endif
 const char* kDefaultConfigPath = TTBOX_PROJECT_ROOT "/config/default.json";
 // 系统 license 文件路径**唯一真源** = common/Paths.hpp::kSystemLicenseFile（A-PATH-5）；

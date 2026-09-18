@@ -29,7 +29,7 @@
 
 // TTBOX_PROJECT_ROOT 由 CMake 注入（<root>/ttbox/core）
 #ifndef TTBOX_PROJECT_ROOT
-#define TTBOX_PROJECT_ROOT "."
+#error "TTBOX_PROJECT_ROOT must be injected by CMake (-DTTBOX_PROJECT_ROOT); refuse silent fallback to '.'."
 #endif
 
 namespace {
