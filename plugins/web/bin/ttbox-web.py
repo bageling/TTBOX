@@ -1418,32 +1418,10 @@ def _retire_web_credentials() -> None:
         print(f'[M2.07] 凭据退役失败（忽略，不阻断启动）: {e}')
 
 
-# ---- R4（SEC-03）：局域网黑名单判定收敛到请求入口（before_request），只认 remote_addr ----
-# iptables 链（TTBOX_BLOCKLIST）在内核层挡流量是第一道；这里是 Web 层的入口强制
-# （第二道，无防火墙环境/规则漂移时仍生效）。状态查询带 TTL 缓存，避免每请求 fork 子进程。
-#
-# ★ 缓存对象与 TTL 常量（M2.07 免密化改造中一度丢失其定义 ⇒ _is_blocked 触发 NameError
-#   ⇒ 所有非静态请求 500）。硬约束：这两个名字必须与 _is_blocked / _run_lan_blocklist
-#   同文件同作用域，缺一不可。
-_BLOCKLIST_CACHE: dict = {'ts': 0.0, 'ips': frozenset()}
-_BLOCKLIST_TTL = 5.0   # 秒；封禁/解封即时生效由 _invalidate_blocklist_cache() 保证
-
-
-def _is_blocked(ip: str) -> bool:
-    """封禁判定：只认 remote_addr（绝不读 X-Forwarded-For —— A29 的结构性保证）。"""
-    if not ip:
-        return False
-    now = time.time()
-    if now - _BLOCKLIST_CACHE['ts'] > _BLOCKLIST_TTL:
-        st = _run_lan_blocklist('status')      # noqa: F821（定义在下方；请求期才解析）
-        _BLOCKLIST_CACHE['ts'] = now
-        _BLOCKLIST_CACHE['ips'] = frozenset(st.get('blocked_ips') or [])
-    return ip in _BLOCKLIST_CACHE['ips']
-
-
-def _invalidate_blocklist_cache() -> None:
-    """set/clear 黑名单后立即失效缓存（使封禁/解封即时生效）。"""
-    _BLOCKLIST_CACHE['ts'] = 0.0
+# ---- 局域网黑名单整块下线（D04，2026-09-18 定案 §2.5）----
+# 现状是"看起来在拦、其实全放行"：名单来源脚本未进 payload ⇒ 名单恒空 ⇒ fail-open。
+# 坏掉的安全功能比没有更危险（使用者以为被挡住了）⇒ Web 层判定、缓存、端点、
+# scripts/lan_blocklist.sh 一并删除，不做修复替代。
 
 
 # ---- 激活 gate（D9）----
@@ -1510,16 +1488,12 @@ def _enforce_gate():
     """★ M2.07 唯一入口执法点（D1/D9）：LAN 黑名单 403 + 激活 gate。
 
     判定顺序：
-      静态/页面 → 黑名单(403, 只认 remote_addr) → 页面未激活(302 /activate)
-      → API 白名单 → API 未激活(403 activation_required)。
+      静态/页面 → 页面未激活(302 /activate) → API 白名单 → API 未激活(403 activation_required)。
     鉴权语义已整体退役（D1）：所有 API 免密直通，安全边界由网络层承担。
     """
     path = request.path
     if _is_static(path):
         return None
-    # ★ SEC-03：封禁判定只认 remote_addr（绝不读 XFF）。黑名单是网络层功能，保留（D1）。
-    if _is_blocked(request.remote_addr):
-        return jsonify({'ok': False, 'error': 'blocked'}), 403
     if path in _PAGE_ROUTES:
         # 页面路由：需激活的页面在未激活时 → 激活页（302，P0-2）；/activate 本体恒可渲染。
         if path in _ACTIVATION_PAGES and not _activation_ok():
@@ -1844,76 +1818,8 @@ def update_system_web_port():
     return jsonify({'ok': True, 'data': summary})
 
 
-LAN_BLOCKLIST_SCRIPT = '/opt/ttbox/scripts/lan_blocklist.sh'
-
-
-def _run_lan_blocklist(*args: str) -> dict:
-    """执行 TTBOX 防火墙脚本（独立 chain TTBOX_BLOCKLIST，隔离其它服务）。"""
-    if not os.path.exists(LAN_BLOCKLIST_SCRIPT):
-        return {
-            'blocked_ips': [], 'chain': 'TTBOX_BLOCKLIST',
-            'firewall_supported': False,
-            'message': '局域网黑名单脚本未安装', 'supported': False,
-        }
-    try:
-        out = subprocess.check_output([LAN_BLOCKLIST_SCRIPT, *args],
-                                      text=True, timeout=10)
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-        return {
-            'blocked_ips': [], 'chain': 'TTBOX_BLOCKLIST',
-            'firewall_supported': False,
-            'message': f'局域网黑名单执行失败：{exc}', 'supported': False,
-        }
-    try:
-        return json.loads(out.strip() or '{}')
-    except Exception:
-        return {'message': out.strip(), 'ok': False}
-
-
-@app.get('/api/system/lan-blocklist')
-def get_lan_blocklist():
-    # 保持 Web 契约 结构（chain 用 TTBOX 自己的名字，隔离板端其它防火墙链）
-    return jsonify({'ok': True, 'data': _run_lan_blocklist('status')})
-
-
-@app.post('/api/system/lan-blocklist/scan')
-def scan_lan_blocklist_devices():
-    try:
-        out = subprocess.check_output(['arp', '-a'], text=True, timeout=5)
-        devices = []
-        for line in out.splitlines():
-            if '(' in line and ')' in line:
-                ip = line.split('(')[1].split(')')[0]
-                mac = next((w for w in line.split() if ':' in w), '')
-                if mac and mac != '<incomplete>':
-                    devices.append({'ip': ip, 'mac': mac})
-        return jsonify({'ok': True, 'data': {'devices': devices}})
-    except Exception as exc:
-        return jsonify({'ok': False, 'error': f'扫描失败: {exc}'})
-
-
-@app.post('/api/system/lan-blocklist')
-def set_lan_blocklist():
-    body = request.get_json(silent=True) or {}
-    ip = str(body.get('ip', '')).strip()
-    # 保持 Web 契约：ip 必填
-    if not ip:
-        return jsonify({'ok': False, 'error': '请选择或输入要拉黑的局域网 IP'})
-    # 保持 Web 契约：不能拉黑请求来源
-    if ip == request.remote_addr:
-        return jsonify({'ok': False, 'error': '不能拉黑当前正在访问页面的设备'})
-    payload = _run_lan_blocklist('set', ip)
-    _invalidate_blocklist_cache()   # T1.12（R4）：封禁即时生效（before_request 入口判定）
-    if not payload.get('ok', True) and payload.get('error'):
-        return jsonify({'ok': False, 'error': payload['error']})
-    return jsonify({'ok': True, 'data': payload})
-
-
-@app.delete('/api/system/lan-blocklist')
-def clear_lan_blocklist():
-    payload = _run_lan_blocklist('clear')
-    _invalidate_blocklist_cache()   # T1.12（R4）：解封即时生效
-    return jsonify({'ok': True, 'data': payload})
+# 局域网黑名单 4 个端点（GET/POST /api/system/lan-blocklist、/scan、DELETE）已随
+# D04（2026-09-18 定案 §2.5）整块下线，不再保留任何壳。
 
 
 @app.post('/api/system/reactivate')
@@ -1934,23 +1840,100 @@ def api_ota_install():
     return _ota_install_impl()
 
 
-# ---- M2.07：/api/update/* 薄映射（YU 端点兼容层，§2.4）----
+# ---- 2026-09-18 更新功能定案（§三 D 组）：OTA 接线 ----
+# 分发服务器地址**写死在盒子里**（业主自建；交付前由业主替换为正式地址后重新出包）。
+# ★ 单点纪律：本常量与 scripts/ttbox.sh 的 TTBOX_OTA_SERVER_URL 必须同值——
+#   改一处必须同步改另一处；ttbox.sh doctor 会比对两处一致。
+#   占位值含 example.com ⇒ /api/update/check 会以 ota_server_not_configured fail-closed。
+OTA_SERVER_URL = 'https://ota.ttbox.example.com'
+# 任务目录（特权通道，§2.2）：web（User=ttbox）写 JSON，root 更新器经 path 单元消费
+OTA_JOBS_DIR = '/var/lib/ttbox/ota/jobs'
+OTA_UPDATER_PATH = '/opt/ttbox/current/scripts/ttbox_ota_updater.py'
+OTA_STATUS_FILE = '/opt/ttbox/state/ota_status.json'
+OTA_DEFAULT_KEY_ID = 'ttbox-ota-2026b'
+
+
+def _ota_current_version() -> str:
+    """当前版本：current 软链目录名优先，IPC GET_STATUS.version 兜底（web 侧单点）。"""
+    try:
+        name = os.path.basename(os.path.realpath('/opt/ttbox/current').rstrip('/'))
+        if name and name != 'current':
+            return name
+    except Exception:
+        pass
+    try:
+        return str((_get_status() or {}).get('version') or '')
+    except Exception:
+        return ''
+
+
+def _ota_ver_key(v):
+    """与 scripts/ttbox_ota_updater.py::_version_key 同源（数字段按值、其余按字典序）。"""
+    import re as _re
+    parts = []
+    for seg in _re.split(r'[.\-_+]', str(v or '')):
+        if not seg:
+            continue
+        if seg.isdigit():
+            parts.append((0, int(seg), ''))
+        else:
+            parts.append((1, 0, seg))
+    return tuple(parts)
+
+
+def _ota_server_latest() -> dict:
+    """向写死的分发服务器发**一次查询**（O11 契约，docs/protocols/ota-server-contract.md）。
+
+    返回 {'latest_version':…, 'package_url':…, 'sign_url':…}；任何异常上抛由调用方转错。
+    """
+    import urllib.request as _ur
+    url = OTA_SERVER_URL.rstrip('/') + '/latest?current=' + _ota_current_version()
+    with _ur.urlopen(url, timeout=6) as r:
+        doc = json.loads(r.read().decode('utf-8', 'replace'))
+    if not isinstance(doc, dict) or not doc.get('latest_version'):
+        raise ValueError('服务器响应缺 latest_version')
+    return doc
+
+
 def _ota_install_impl():
-    """OTA 安装实现（/api/ota/install 与 /api/update/install 共用，单一实现点）。"""
+    """OTA 安装实现（/api/ota/install 与 /api/update/install 共用，单一实现点）。
+
+    2026-09-18 定案 §2.2/D03：web（User=ttbox）无 sudoers/polkit，不再用 systemd-run；
+    改为**写任务文件**到 OTA_JOBS_DIR（root:ttbox 0770），由 ttbox-ota.path 监听并拉起
+    root 更新器。前置校验失败**返错**，绝不返回 ok:true（消灭 D03 假成功）。
+    """
     if not _license_block().get('capabilities', {}).get('ota'):
         return jsonify({'ok': False, 'error': "feature 'ota' not licensed"}), 403
     body = request.get_json(silent=True) or {}
     url = str(body.get('url') or '').strip()
-    key_id = str(body.get('key_id') or 'ttbox-ota-2026a').strip()
+    key_id = str(body.get('key_id') or OTA_DEFAULT_KEY_ID).strip()
     if not url:
         return jsonify({'ok': False, 'error': 'url is required'}), 400
     if not url.startswith('https://'):
         return jsonify({'ok': False, 'error': '仅接受 https 更新源'}), 400
-    unit = 'ttbox-update-%d' % int(time.time())
-    updater = '/opt/ttbox/current/scripts/ttbox_ota_updater.py'
-    subprocess.Popen(['systemd-run', '--unit', unit, '--collect', '--on-active=2s',
-                      updater, url, key_id])
-    return jsonify({'ok': True, 'scheduled': unit})
+    # 前置校验（D03）：更新器在、任务目录在且可写 —— 任何一条不满足都是环境故障，
+    # 必须当场报错而不是假装调度成功（旧版假成功 = 装了也白装）。
+    if not os.path.isfile(OTA_UPDATER_PATH):
+        return jsonify({'ok': False, 'error': f'更新器缺失: {OTA_UPDATER_PATH}'}), 500
+    if not os.path.isdir(OTA_JOBS_DIR):
+        return jsonify({'ok': False, 'error': f'任务目录缺失: {OTA_JOBS_DIR}'}), 500
+    try:
+        probe = os.path.join(OTA_JOBS_DIR, '.probe-%d' % int(time.time()))
+        with open(probe, 'w', encoding='utf-8') as f:
+            f.write('{}')
+        os.remove(probe)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'任务目录不可写: {e!r}'}), 500
+    job = {'url': url, 'key_id': key_id, 'enqueued_at': int(time.time())}
+    if str(body.get('version') or '').strip():
+        job['version'] = str(body['version']).strip()
+    name = 'job-%d.json' % int(time.time() * 1000)
+    try:
+        with open(os.path.join(OTA_JOBS_DIR, name), 'w', encoding='utf-8') as f:
+            json.dump(job, f, ensure_ascii=False, sort_keys=True)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'写任务文件失败: {e!r}'}), 500
+    return jsonify({'ok': True, 'data': {'scheduled': name, 'message': '更新任务已受理'}})
 
 
 @app.post('/api/update/install')
@@ -1961,40 +1944,63 @@ def api_update_install():
 
 @app.get('/api/update/status')
 def api_update_status():
-    """YU 前端兼容：updater 单元状态投影（thin）。无在途更新 ⇒ idle（无假壳）。"""
-    status = 'idle'
-    detail = ''
+    """读更新器的 ota_status.json（2026-09-18 定案 D-14）。
+
+    更新器在 run() 开始时写 RUNNING、结束写 SUCCESS/FAILED；本端点投影成前端
+    轮询期望的形状。文件不存在 = 从未跑过更新 ⇒ idle（无假壳）。
+    """
     try:
-        out = subprocess.run(
-            ['systemctl', 'list-units', '--type=service', '--no-legend', 'ttbox-update-*'],
-            capture_output=True, text=True, timeout=3)
-        lines = [ln.strip() for ln in (out.stdout or '').splitlines() if ln.strip()]
-        if lines:
-            parts = lines[-1].split()
-            if len(parts) >= 4:
-                status = parts[3].lower() or 'idle'   # active / activating / failed / inactive
-                detail = parts[0]
+        doc = json.loads(open(OTA_STATUS_FILE, encoding='utf-8').read())
     except Exception:
-        pass
-    if status in ('inactive', 'dead', ''):
-        status = 'idle'
-    return jsonify({'ok': True, 'data': {'status': status, 'unit': detail}})
+        doc = {}
+    state = str(doc.get('state') or '').upper()
+    if state == 'RUNNING':
+        return jsonify({'ok': True, 'data': {'status': 'running', 'progress': 50,
+                                             'message': '更新进行中',
+                                             'version': doc.get('version') or ''}})
+    if state == 'SUCCESS':
+        return jsonify({'ok': True, 'data': {'status': 'success', 'progress': 100,
+                                             'version': doc.get('version') or ''}})
+    if state == 'FAILED':
+        return jsonify({'ok': True, 'data': {'status': 'failed', 'progress': 100,
+                                             'error': str(doc.get('detail')
+                                                          or doc.get('error') or '更新失败')}})
+    return jsonify({'ok': True, 'data': {'status': 'idle'}})
 
 
-@app.get('/api/update/versions')
-def api_update_versions():
-    # 无后端能力（需云端 update-server 配合）⇒ not_supported；UI 不出现对应按钮（无假壳）
-    return jsonify({'ok': False, 'error': 'not_supported'}), 400
-
-
-@app.get('/api/update/check')
+@app.post('/api/update/check')
 def api_update_check():
-    return jsonify({'ok': False, 'error': 'not_supported'}), 400
+    """检查更新（2026-09-18 定案 §2.1/§三 H-25）：向写死的服务器查一次，比对版本。
 
-
-@app.post('/api/update/cleanup-stuck')
-def api_update_cleanup_stuck():
-    return jsonify({'ok': False, 'error': 'not_supported'}), 400
+    返回 data：{update_available, current_version, latest_version,
+                package_url, sign_url, key_id}。前端拿 package_url 直接安装；
+    sign_url 必须等于 package_url + '.sign.json'（更新器旁车规则，契约已钉死）。
+    服务器地址仍是占位值（含 example.com）⇒ fail-closed 503，不给假结果。
+    """
+    if 'example.com' in OTA_SERVER_URL:
+        return jsonify({'ok': False, 'error': 'ota_server_not_configured',
+                        'detail': '分发服务器地址尚未配置（OTA_SERVER_URL 仍为占位值）'}), 503
+    if not OTA_SERVER_URL.startswith('https://'):
+        return jsonify({'ok': False, 'error': 'ota_server_not_configured',
+                        'detail': 'OTA_SERVER_URL 必须是 https'}), 503
+    try:
+        latest = _ota_server_latest()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': 'ota_server_unreachable',
+                        'detail': repr(e)}), 502
+    cur = _ota_current_version()
+    ver = str(latest.get('latest_version') or '').strip()
+    pkg = str(latest.get('package_url') or '').strip()
+    sig = str(latest.get('sign_url') or (pkg + '.sign.json' if pkg else '')).strip()
+    update_available = bool(ver and pkg and _ota_ver_key(ver) > _ota_ver_key(cur)) if cur else bool(ver and pkg)
+    return jsonify({'ok': True, 'data': {
+        'update_available': update_available,
+        'current_version': cur,
+        'latest_version': ver,
+        'package_url': pkg,
+        'sign_url': sig,
+        'key_id': OTA_DEFAULT_KEY_ID,
+    }})
 
 
 @app.post('/api/system/reboot')

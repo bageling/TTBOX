@@ -34,7 +34,7 @@ UNIT_REL_DIR="deploy/systemd"
 #   目的是抓住"新增一个硬编码路径却忘了补软链"的回归。
 TRANSITIONAL_LINKS=(
     "plugins:current/plugins"   # 插件发现 + 旧 web unit 路径
-    "scripts:current/scripts"   # lan_blocklist / edid 工具链 import（wifi_manager 已移出）
+    "scripts:current/scripts"   # edid 工具链 import（wifi_manager / lan_blocklist 已移出）
 )
 
 # 设备专有库名单：其解析路径必须落在本 release 的 lib/ 内（可覆盖）

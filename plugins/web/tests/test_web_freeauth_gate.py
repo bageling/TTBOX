@@ -69,10 +69,8 @@ def web_mod():
 
 @pytest.fixture(autouse=True)
 def fresh_state(web_mod, monkeypatch):
-    """每用例：重置激活缓存 / 黑名单缓存；默认 mock 成已激活 + core 可达。"""
+    """每用例：重置激活缓存；默认 mock 成已激活 + core 可达。"""
     web_mod._ACTIVATION_CACHE['ts'] = 0.0
-    web_mod._BLOCKLIST_CACHE['ts'] = 0.0
-    web_mod._BLOCKLIST_CACHE['ips'] = frozenset()
     monkeypatch.setattr(web_mod, '_license_block', lambda: dict(ACTIVATED_LICENSE))
     monkeypatch.setattr(web_mod, 'ipc_request',
                         lambda *a, **k: {'status': 0, 'data': {}})
@@ -116,15 +114,21 @@ def test_apis_free_access_when_activated(client, web_mod, monkeypatch):
     assert client.post('/api/system/poweroff', json={'dry_run': True}).status_code == 200
 
 
-def test_ota_install_free_access_with_capability(client, web_mod, monkeypatch):
-    # capabilities.ota=true + mock 掉 systemd-run（宿主机无 systemd）
+def test_ota_install_free_access_with_capability(client, web_mod, monkeypatch, tmp_path):
+    # capabilities.ota=true + mock 掉 OTA 环境（宿主机无 /var/lib/ttbox/ota/jobs）
     monkeypatch.setattr(web_mod, '_license_block', lambda: dict(ACTIVATED_LICENSE))
-    launched = {}
-    monkeypatch.setattr(web_mod.subprocess, 'Popen',
-                        lambda cmd, **k: launched.setdefault('cmd', cmd))
+    jobs = tmp_path / 'jobs'
+    jobs.mkdir()
+    monkeypatch.setattr(web_mod, 'OTA_JOBS_DIR', str(jobs))
+    monkeypatch.setattr(web_mod, 'OTA_UPDATER_PATH', WEB_SRC)
     r = client.post('/api/ota/install', json={'url': 'https://example.com/t.tar.gz'})
     assert r.status_code == 200
-    assert 'cmd' in launched
+    assert r.get_json().get('ok') is True
+    written = list(jobs.glob('job-*.json'))
+    assert written, '已授权 + 环境齐备 ⇒ 任务文件必须落盘'
+    job = json.loads(written[0].read_text(encoding='utf-8'))
+    assert job['url'] == 'https://example.com/t.tar.gz'
+    assert job['key_id'] == web_mod.OTA_DEFAULT_KEY_ID
     # 能力门控保留（M2.03 机制不动）：ota 未授权 ⇒ 403
     unlic = dict(ACTIVATED_LICENSE)
     unlic['capabilities'] = {'capture': True, 'inference': True, 'aim': True, 'ota': False}
@@ -184,16 +188,16 @@ def test_activated_pages_render(client, web_mod, monkeypatch):
 # ======================================================================
 # ④ LAN 黑名单 403 执法保留
 # ======================================================================
-def test_blocklist_403_still_enforced(client, web_mod, monkeypatch):
-    monkeypatch.setattr(web_mod, '_run_lan_blocklist',
-                        lambda *a, **k: {'blocked_ips': ['9.9.9.9']})
-    web_mod._BLOCKLIST_CACHE['ts'] = 0.0
-    r = client.get('/api/system', environ_base={'REMOTE_ADDR': '9.9.9.9'})
-    assert r.status_code == 403
-    assert r.get_json() == {'ok': False, 'error': 'blocked'}
-    # 未被封禁 IP 正常
-    assert client.get('/api/system',
-                      environ_base={'REMOTE_ADDR': '127.0.0.1'}).status_code == 200
+def test_blocklist_removed(client):
+    """D04（2026-09-18 定案 §2.5）：局域网黑名单整块下线——端点必须 404。
+
+    旧断言（blocked IP ⇒ 403）随功能删除失效：名单来源脚本从未进 payload，
+    名单恒空 ⇒ fail-open，坏掉的安全功能比没有更危险。
+    """
+    r = client.get('/api/system/lan-blocklist')
+    assert r.status_code == 404
+    assert client.post('/api/system/lan-blocklist/scan').status_code == 404
+    assert client.delete('/api/system/lan-blocklist').status_code == 404
 
 
 # ======================================================================
@@ -220,22 +224,28 @@ def test_credentials_retired_on_startup(web_mod):
 # ======================================================================
 # ⑥ /api/update/* 薄映射
 # ======================================================================
-def test_update_thin_endpoints(client, web_mod, monkeypatch):
+def test_update_thin_endpoints(client, web_mod, monkeypatch, tmp_path):
     monkeypatch.setattr(web_mod, '_license_block', lambda: dict(ACTIVATED_LICENSE))
     web_mod._ACTIVATION_CACHE['ts'] = 0.0
-    launched = {}
-    monkeypatch.setattr(web_mod.subprocess, 'Popen',
-                        lambda cmd, **k: launched.setdefault('cmd', cmd))
+    jobs = tmp_path / 'jobs'
+    jobs.mkdir()
+    monkeypatch.setattr(web_mod, 'OTA_JOBS_DIR', str(jobs))
+    monkeypatch.setattr(web_mod, 'OTA_UPDATER_PATH', WEB_SRC)
     r = client.post('/api/update/install', json={'url': 'https://example.com/t.tar.gz'})
     assert r.status_code == 200
-    assert 'cmd' in launched
+    assert r.get_json().get('ok') is True
+    assert list(jobs.glob('job-*.json')), 'install 薄映射应与 /api/ota/install 同义（写任务文件）'
     r2 = client.get('/api/update/status')
     assert r2.status_code == 200
     body = r2.get_json()
     assert body['ok'] is True and 'status' in body['data']
-    # 无后端能力的端点 ⇒ not_supported（无假壳）
-    assert client.get('/api/update/versions').status_code == 400
-    assert client.get('/api/update/check').status_code == 400
+    # 2026-09-18 定案：versions 死端点已删（404）；check 仅 POST
+    assert client.get('/api/update/versions').status_code == 404
+    assert client.get('/api/update/check').status_code == 405
+    # check：默认 example.com 占位服务器 ⇒ 503 ota_server_not_configured（无假壳）
+    r3 = client.post('/api/update/check')
+    assert r3.status_code == 503
+    assert r3.get_json().get('error') == 'ota_server_not_configured'
 
 
 # ======================================================================

@@ -117,17 +117,19 @@ def test_ota_install_403_when_not_licensed(web_mod, monkeypatch):
     assert scheduled == [], '未授权卡不得调度 updater（否则越权升级）'
 
 
-def test_ota_install_proceeds_when_licensed(web_mod, monkeypatch):
+def test_ota_install_proceeds_when_licensed(web_mod, monkeypatch, tmp_path):
     client = _authed_client(web_mod)
     monkeypatch.setattr(web_mod, '_get_status', lambda: _license_status(
         capabilities={'capture': True, 'inference': True, 'aim': True, 'ota': True}))
-    scheduled = []
-    monkeypatch.setattr(web_mod.subprocess, 'Popen',
-                        lambda args, *a, **k: scheduled.append(args))
+    jobs = tmp_path / 'jobs'
+    jobs.mkdir()
+    monkeypatch.setattr(web_mod, 'OTA_JOBS_DIR', str(jobs))
+    monkeypatch.setattr(web_mod, 'OTA_UPDATER_PATH', str(pathlib.Path(web_mod.__file__)))
     r = client.post('/api/ota/install', json={'url': 'https://example.com/u.bin'})
     assert r.status_code == 200
     assert r.get_json().get('ok') is True
-    assert scheduled, '已授权应调度 updater'
+    written = list(jobs.glob('job-*.json'))
+    assert written, '已授权应落盘任务文件（写任务文件通道，非 Popen 调度）'
 
 
 def test_ota_install_core_unreachable_is_403(web_mod, monkeypatch):

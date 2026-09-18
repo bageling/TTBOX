@@ -14,7 +14,7 @@
 #
 # 契约（design §B3.1，逐条落实）：
 #   1. 非 root（id -u != 0）            → exit 0（不制造半套自愈）
-#   2. current 断链 / unit 源缺失       → exit 0 且不写任何 unit
+#   2. current 断链 / unit 源缺失       → 告警 + 非零退出，且不写任何 unit（D15）
 #   3. ExecStart 二进制缺失（! -x）     → 跳过该 unit，不写
 #   4. 同文件系统 mktemp 落候选 → cmp -s 自证完整 → 与已装 cmp -s 比对；
 #      一致跳过；不一致 **原子 mv -f 替换** + changed=1
@@ -24,7 +24,8 @@
 #   5. changed 时才 systemctl daemon-reload
 #   6. systemctl enable <unit> --now（|| true，幂等；已启动也不报错）
 #
-# 幂等：重复运行无副作用；本脚本自身【永远 exit 0】（自愈失败要可观测、但不得让 timer 失败刷屏）。
+# 幂等：重复运行无副作用。D15（2026-09-18 定案）：current 断链 = 自愈失能本身，
+#       改为【告警 + 非零退出】可观测；其余失败仍不中断（不得让 timer 失败刷屏）。
 #
 # 可测性：TTBOX_PREFIX / TTBOX_UNIT_DIR / TTBOX_SYSTEMD 均可覆盖，便于临时前缀自测。
 #
@@ -39,7 +40,9 @@ UNIT_DIR="${TTBOX_UNIT_DIR:-/etc/systemd/system}"
 SYSTEMD_MODE="${TTBOX_SYSTEMD:-auto}"
 
 # 受管 unit（收敛后每 unit 全仓仅一份，见 T1.05；此处为按依赖顺序的显式清单）
-UNITS="ttbox-core.service ttbox-web.service ttbox-preview.service ttbox-usbproxy.service ttbox-edid.service"
+# OTA 特权通道两个 unit（2026-09-18 定案）：path 负责监听触发，service 是 root 执行端。
+#   path unit 无 ExecStart ⇒ ExecStart 预检自然放行（unit_execstart_bin 返回空）。
+UNITS="ttbox-core.service ttbox-web.service ttbox-preview.service ttbox-usbproxy.service ttbox-edid.service ttbox-ota.path ttbox-ota.service"
 UNIT_SRC_REL="deploy/systemd"
 
 log()  { printf '[ensure] %s\n' "$*"; }
@@ -83,12 +86,15 @@ CURRENT_LINK="${TTBOX_PREFIX}/current"
 SRC_DIR="${CURRENT_LINK}/${UNIT_SRC_REL}"
 
 # ---------------------------------------------------------------------------
-# 2. current 断链 / unit 源缺失 → exit 0 且不写任何 unit
+# 2. current 断链 / unit 源缺失 → 告警 + 非零退出（D15，2026-09-18 定案 I-32）
+#    旧行为是静默 exit 0 —— 自愈失效时 timer 每 10 分钟静默空转，无人知晓。
+#    断链意味着"自愈机制失能"本身，必须可观测：告警 + 非零退出。
 # ---------------------------------------------------------------------------
 current_resolved="$(readlink -f -- "$CURRENT_LINK" 2>/dev/null || true)"
 if [ ! -L "$CURRENT_LINK" ] || [[ -z "$current_resolved" ]] || [ ! -d "$SRC_DIR" ]; then
-    log "current 断链或 ${SRC_DIR} 不存在（发布系统才是病根）—— 全部跳过，exit 0"
-    exit 0
+    log "ALERT: current 断链或 ${SRC_DIR} 不存在 —— 自愈失效，请立即检查发布树（ttbox.sh doctor 可诊断）"
+    echo "[ttbox-ensure][ALERT] current 断链：自愈失效（current=${CURRENT_LINK}）" >&2
+    exit 1
 fi
 log "unit 源：${SRC_DIR}（current -> ${current_resolved}）"
 

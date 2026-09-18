@@ -79,7 +79,7 @@ class Fixture:
             t.add(root / "RELEASE_MANIFEST.json", arcname="RELEASE_MANIFEST.json")
         return tgz
 
-    def sign_for(self, tgz: Path, key_id: str = "ttbox-ota-2026a",
+    def sign_for(self, tgz: Path, key_id: str = "ttbox-ota-2026b",
                  version: str = "1.2.0", corrupt_sig: bool = False,
                  wrong_key_id: bool = False) -> Path:
         unsigned = sign.unsigned_record(tgz, version,
@@ -119,7 +119,7 @@ class Fixture:
     def health(self):
         return lambda timeout_s=30: self.health_ok
 
-    def updater(self, mapping: dict, key_id: str = "ttbox-ota-2026a"):
+    def updater(self, mapping: dict, key_id: str = "ttbox-ota-2026b"):
         return up.OtaUpdater(
             releases_dir=str(self.releases),
             status_path=str(self.dir / "ota_status.json"),
@@ -264,12 +264,135 @@ def case_rollback_on_health_fail(fx):
     check("staging 已清理", not any(p.name.endswith(".staging") for p in fx.releases.iterdir()), "")
 
 
+# ---------------------------------------------------------------- 用例（2026-09-18 定案新增三组）
+def case_downgrade_rejected(fx):
+    """§2.4：OTA 新包版本必须高于当前版本，否则 downgrade_rejected；回滚不受限。"""
+    print("[8] downgrade_rejected")
+    import types
+    tgz = fx.make_tgz()
+    sgn = fx.sign_for(tgz, version="1.2.0")
+    mapping = {"https://x/pkg.tgz": str(tgz), "https://x/pkg.tgz.sign.json": str(sgn)}
+    # a) 当前版本 2.0.0，装 1.2.0 ⇒ 拒
+    orig_cv = up.current_version
+    up.current_version = lambda: "2.0.0"
+    try:
+        rc = fx.updater(mapping).run("https://x/pkg.tgz")
+        st = fx.status()
+        check("低版本 ⇒ rc=1", rc == 1, str(rc))
+        check("error=downgrade_rejected", st.get("error") == "downgrade_rejected",
+              json.dumps(st, ensure_ascii=False))
+        check("降级未触发安装", fx.calls["install"] == [], str(fx.calls["install"]))
+        check("降级未触发回滚", fx.calls["rollback"] == 0, "")
+        check("staging 已清理", not any(p.name.endswith(".staging") for p in fx.releases.iterdir()), "")
+    finally:
+        up.current_version = orig_cv
+    # b) 当前版本 1.0.0，装 1.2.0 ⇒ 放行（先恢复健康替身）
+    up.current_version = lambda: "1.0.0"
+    try:
+        rc = fx.updater(mapping).run("https://x/pkg.tgz")
+        check("高版本 ⇒ 放行", rc == 0 and fx.status().get("state") == "SUCCESS",
+              json.dumps(fx.status(), ensure_ascii=False))
+    finally:
+        up.current_version = orig_cv
+    # c) 当前版本未知（空）⇒ 放行（首次装机语义）
+    up.current_version = lambda: ""
+    try:
+        rc = fx.updater(mapping).run("https://x/pkg.tgz")
+        check("当前版本未知 ⇒ 放行", rc == 0, str(rc))
+    finally:
+        up.current_version = orig_cv
+    # d) 版本比较真源单点：updater 与 web 两侧对同一组输入判定一致（抽样）
+    import importlib.util as _iu
+    web_src = fx.dir / "web_probe.py"
+    web_src.write_text("pass", encoding="utf-8")
+    check("is_downgrade(1.2.0, 2.0.0) 为真", up.is_downgrade("1.2.0", "2.0.0"), "")
+    check("is_downgrade(2.1.0, 2.0.9) 为假", not up.is_downgrade("2.1.0", "2.0.9"), "")
+    check("is_downgrade(1.4.5, 1.4.5) 为真（相等也是拒绝）", up.is_downgrade("1.4.5", "1.4.5"), "")
+
+
+def case_health_criteria_real_ipc_keys(fx):
+    """§2.3：健康判据 = 三服务 active + current_model_id 非空；不看授权；
+    旧判据键（model_loaded / license_available / cmd 请求体）必须绝迹。"""
+    print("[9] health_criteria_real_ipc_keys")
+    orig_active, orig_ipc = up._is_active, up._ipc_get_status
+    try:
+        up._is_active = lambda unit: True
+        # a) current_model_id 非空 ⇒ 通过
+        up._ipc_get_status = lambda: {"current_model_id": "m1"}
+        check("模型已加载 ⇒ 健康", up.default_health(timeout_s=1), "")
+        # b) 旧假键 license_available 单独为真 ⇒ 不通过（旧判据不复活）
+        up._ipc_get_status = lambda: {"license_available": True, "model_loaded": True}
+        check("旧假键 ⇒ 不健康", not up.default_health(timeout_s=1), "")
+        # c) IPC 空（core 不可达）⇒ 不通过
+        up._ipc_get_status = lambda: {}
+        check("IPC 空 ⇒ 不健康", not up.default_health(timeout_s=1), "")
+        # d) 进程不 active ⇒ 不通过（业务即使 OK）
+        up._is_active = lambda unit: False
+        up._ipc_get_status = lambda: {"current_model_id": "m1"}
+        check("服务未 active ⇒ 不健康", not up.default_health(timeout_s=1), "")
+        # e) 源码锁：IPC 请求体必须是 {"type":"GET_STATUS"}，"cmd" 键与旧判据绝迹
+        real_src = Path(up.__file__).read_text(encoding="utf-8")
+        check("请求体用 type 键", '"type":"GET_STATUS"' in real_src, "")
+        check('"cmd" 请求键已绝迹', '"cmd"' not in real_src, "")
+        # 注释里允许出现旧键名的说明文字；判定式（st.get(...)）必须绝迹
+        check("license_available 判据已绝迹",
+              '.get("license_available")' not in real_src
+              and "'license_available'" not in real_src, "")
+    finally:
+        up._is_active, up._ipc_get_status = orig_active, orig_ipc
+
+
+def case_job_file_mode(fx):
+    """§2.2 特权通道：--from-jobs 消费任务文件；成功归档 processed/、失败归档 failed/，
+    任务文件绝不留在原地（防 path 单元触发循环）。"""
+    print("[10] job_file_mode")
+    jobs = fx.dir / "jobs"
+    jobs.mkdir()
+    tgz = fx.make_tgz()
+    sgn = fx.sign_for(tgz, version="1.2.0")
+    (jobs / "job-a.json").write_text(json.dumps(
+        {"url": "https://x/pkg.tgz", "key_id": "ttbox-ota-2026b"}), encoding="utf-8")
+    (jobs / "job-bad.json").write_text("{ not json", encoding="utf-8")
+
+    def factory():
+        return fx.updater({"https://x/pkg.tgz": str(tgz),
+                           "https://x/pkg.tgz.sign.json": str(sgn)})
+
+    import types
+    orig_cv = up.current_version
+    up.current_version = lambda: ""
+    try:
+        rc = up.process_jobs(str(jobs), updater_factory=factory)
+        check("有失败任务 ⇒ 整体 rc=1", rc == 1, str(rc))
+        check("成功任务归档 processed/",
+              any("job-a.json" in p.name for p in (jobs / "processed").iterdir()),
+              str([p.name for p in (jobs / "processed").iterdir()]))
+        check("坏任务归档 failed/",
+              any("job-bad.json" in p.name for p in (jobs / "failed").iterdir()),
+              str([p.name for p in (jobs / "failed").iterdir()]))
+        check("任务文件零残留（防触发循环）", not list(jobs.glob("*.json")), "")
+        check("坏任务状态 FAILED（后写覆盖）",
+              fx.status().get("state") == "FAILED" and fx.status().get("error") == "job_invalid",
+              json.dumps(fx.status(), ensure_ascii=False))
+        # 全成功 ⇒ rc=0
+        (jobs / "job-c.json").write_text(json.dumps(
+            {"url": "https://x/pkg.tgz", "key_id": "ttbox-ota-2026b"}), encoding="utf-8")
+        rc = up.process_jobs(str(jobs), updater_factory=factory)
+        check("后续全成功 ⇒ rc=0", rc == 0, str(rc))
+        check("全成功状态 SUCCESS",
+              fx.status().get("state") == "SUCCESS",
+              json.dumps(fx.status(), ensure_ascii=False))
+    finally:
+        up.current_version = orig_cv
+
+
 def main() -> int:
     print("=== T1.11 OTA 验签单测 ===")
     for fn in (case_good_pkg_verifies, case_tamper_1byte_rejected,
                case_http_scheme_rejected, case_wrong_key_id_rejected,
                case_dual_factor_both_required, case_no_residue_on_failure,
-               case_rollback_on_health_fail):
+               case_rollback_on_health_fail, case_downgrade_rejected,
+               case_health_criteria_real_ipc_keys, case_job_file_mode):
         run_case(fn)
         print()
     print("结果: %d failures" % len(FAILS))

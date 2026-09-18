@@ -1,0 +1,23 @@
+# ttbox-ota.service — OTA 特权通道的执行端（2026-09-18 定案 §2.2）
+#
+# User=root：更新器要写 /opt/ttbox/releases、切 current 软链、重启服务——这些只有 root 能做。
+# oneshot + --from-jobs：消费任务目录里的 *.json（web 写入），处理完移入 processed/failed。
+# 更新器自身强制 https + sha256 + Ed25519 双因子验签 ⇒ 即便有人能投递任务文件，
+# 也只能装我们签过名的包。
+
+[Unit]
+Description=TTBOX OTA updater (consume job files as root)
+Documentation=file:/opt/ttbox/current/docs/交付前更新功能定案-2026-09-18.md
+# 升级过程会重启 ttbox-web 自身，绝不能与 web 同生共死
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/ttbox/current/scripts/ttbox_ota_updater.py --from-jobs /var/lib/ttbox/ota/jobs
+# 任务处理可能含下载+30 秒健康检查，放宽超时
+TimeoutStartSec=600
+# 失败不自动重试（任务文件已归档到 failed/，重复执行无意义；重试 = 面板重新点安装）
+RemainAfterExit=no

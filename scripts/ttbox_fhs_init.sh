@@ -403,12 +403,25 @@ sync_tree() {
 
     # scripts/：edid 工具链 + ensure 脚本（Web/EDID 硬依赖）
     # S1-2026-09-18（A903/C 组）：wifi_manager.py 随无线功能整体移出出货包（仓库内保留）。
+    # 2026-09-18 更新功能定案（A-1/O13/O14）：OTA 更新器 + 运维六件 + 恢复凭据脚本进 payload。
     tcopy "${REPO_ROOT}/scripts/edid" "${payload}/scripts/edid"
     install -m 0755 "${ENSURE_SCRIPT}" "${payload}/scripts/ttbox_ensure_services.sh"
+    install -m 0755 "${REPO_ROOT}/scripts/ttbox_ota_updater.py" \
+                    "${payload}/scripts/ttbox_ota_updater.py"
+    install -m 0755 "${REPO_ROOT}/scripts/ttbox-web-reset-credentials.sh" \
+                    "${payload}/scripts/ttbox-web-reset-credentials.sh"
+    for op in ttbox.sh ttbox_backup.sh ttbox_restore.sh ttbox_uninstall.sh ttbox_doctor.sh; do
+        install -m 0755 "${REPO_ROOT}/scripts/${op}" "${payload}/scripts/${op}"
+    done
 
-    # deploy/systemd/：unit 随版本走（DEP-07 前置）
+    # deploy/keys/：OTA 验签公钥随包（定案 A-2；私钥永不入包）
+    mkdir -p -- "${payload}/deploy/keys"
+    install -m 0644 "${REPO_ROOT}"/deploy/keys/*.pub "${payload}/deploy/keys/"
+
+    # deploy/systemd/：unit 随版本走（DEP-07 前置）；.path（OTA 特权通道）一并交付
     install -m 0644 "${REPO_ROOT}"/deploy/systemd/*.service "${payload}/deploy/systemd/"
     install -m 0644 "${REPO_ROOT}"/deploy/systemd/*.timer "${payload}/deploy/systemd/"
+    install -m 0644 "${REPO_ROOT}"/deploy/systemd/*.path "${payload}/deploy/systemd/"
 
     # deploy/config/：出厂基线（10-device.json 属设备层，绝不拷）
     install -m 0644 "${REPO_ROOT}/deploy/config/00-factory.json" "${payload}/deploy/config/00-factory.json"
@@ -484,7 +497,9 @@ run_ensure_and_units() {
 VER="${1:-${TTBOX_RELEASE_VERSION:-1.0.0}}"
 echo ""
 echo "== 装货进 release 树（sync_tree，版本 ${VER}）=="
-sync_tree "$VER" || echo "  [!] sync_tree 未完成（见上），跳过后续激活相关步骤"
+# D02（2026-09-18 更新功能定案 A-3）：sync_tree 失败必须 fail-closed——
+# 残缺 payload 一旦被激活就是半套服务，比装不上更糟。
+sync_tree "$VER" || { echo "  [✗] sync_tree 未完成（见上）—— 中止，绝不产出残缺 payload" >&2; exit 1; }
 
 echo ""
 echo "== 首次部署：复制既有模型到 /var/lib/ttbox/models =="

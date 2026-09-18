@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TTBOX OTA 更新器（root 独立进程；由 `systemd-run` 拉起，脱离 Web 存活）。
+"""TTBOX OTA 更新器（root 独立进程；由 ttbox-ota.path 路径单元拉起，脱离 Web 存活）。
 
 ★ 结构必经步骤（t1.11 §0.1）——**任一前置不通过即终止，绝不进入下一步**：
   ① URL scheme 白名单（仅 https）
@@ -8,13 +8,27 @@
   ④ Ed25519 验签（对 canonical JSON）
   ⑤ 展开到 `releases/<ver>.staging/`
   ⑥ 全量 sha256 复验（RELEASE_MANIFEST.json）
+  ⑥b 降级拒绝：新包版本必须**高于**当前版本，否则 `downgrade_rejected`
+     （例外：⑦b 健康检查失败后的自动回滚不受此限——那是保命路径，不是"装包"）
   ⑦ 调 T1.01 原子发布 → 健康检查 → 失败自动 rollback
 
 ★ 双因子是 `and`（③ 与 ④ 缺一不可，PRD SEC-01 验收 1）。
 ★ 失败即删包（§0.2）：`finally` 清临时目录；失败分支清 staging。
 ★ 签名对象 = **旁车 `<pkg>.tgz.sign.json`**（不在 tgz 内）—— 消除 §6 陷阱 3 的自指，
   详见 `tools/ota/ttbox_ota_sign.py` 文件头的契约裁定。
-★ 私钥永不入库；本进程**只有公钥**。
+★ 私钥永不入库；本进程**只有公钥**（发布树内 `deploy/keys/`）。
+
+★ 健康检查判据（2026-09-18 业主定案 §2.3）：三个服务进程 active + 模型已加载
+  （IPC `current_model_id` 非空）；**不看授权** —— 授权是客户状态，与"本次升级是否
+  成功"无关，放进门禁会造成死锁（授权到期 ⇒ 升不了级 ⇒ 升级恰是解授权问题的手段）。
+  历史教训：旧版判据写 `model_loaded`/`license_available`，两个键在 IPC 契约里
+  从未存在过 ⇒ 健康检查恒假 ⇒ 升级必自动回滚。此处键名以
+  `core/src/ipc/IpcServer.cpp:890` 为准。
+
+★ 任务文件模式（2026-09-18 定案 §2.2 特权通道）：`--from-jobs [DIR]` 无 URL 运行；
+  web（User=ttbox）往任务目录丢 JSON（0770 root:ttbox），本进程（root）消费后把
+  任务文件移入 processed/ 或 failed/ 留审计。任务文件字段：`url`（必填）、`key_id`、
+  `version`（可选，缺省取签名记录）。
 """
 from __future__ import annotations
 
@@ -23,6 +37,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -40,15 +55,19 @@ except ImportError:  # pragma: no cover
     sys.stderr.write("需要 cryptography：apt-get install -y python3-cryptography\n")
     raise
 
-DEFAULT_KEY_ID = "ttbox-ota-2026a"
+DEFAULT_KEY_ID = "ttbox-ota-2026b"
 RELEASES = "/opt/ttbox/releases"
+CURRENT_LINK = "/opt/ttbox/current"
 STATE = "/opt/ttbox/state"
 STATUS_FILE = os.path.join(STATE, "ota_status.json")
-KEYS_DIR = Path(__file__).resolve().parents[1] / "tools" / "ota" / "keys"
+# 发布树内公钥落点（2026-09-18 定案 §2.7）：<ver>/deploy/keys/<key_id>.pub。
+# 旧路径（按仓库布局写的 tools/ota/keys）在板端发布树不存在，已废弃。
+KEYS_DIR = Path(CURRENT_LINK) / "deploy" / "keys"
 INSTALL_SCRIPT = "/opt/ttbox/current/scripts/ttbox_release_install.sh"
 HEALTH_UNITS = ("ttbox-core", "ttbox-web", "ttbox-usbproxy")
 HEALTH_TIMEOUT_S = 30
 SIGNED_FIELDS = ("sha256", "version", "built_at", "key_id")
+DEFAULT_JOBS_DIR = "/var/lib/ttbox/ota/jobs"
 
 
 class OtaError(Exception):
@@ -69,6 +88,42 @@ def sha256_file(path: str) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+# ---------------------------------------------------------------- 版本真源（单点）
+def current_version() -> str:
+    """当前运行版本：读 `current` 软链指向的 releases/<ver> 目录名；软链不可用时
+    回退 `/opt/ttbox/state/version`；都拿不到返回空串（= 未知，降级判定放行）。"""
+    try:
+        name = os.path.basename(os.path.realpath(CURRENT_LINK).rstrip("/"))
+        if name and name != "current":
+            return name
+    except Exception:
+        pass
+    try:
+        return Path(STATE, "version").read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def _version_key(v: str) -> tuple:
+    """版本排序键：数字段按数值、其余段按字典序，段间逐位比较。"""
+    parts = []
+    for seg in re.split(r"[.\-_+]", str(v or "")):
+        if not seg:
+            continue
+        if seg.isdigit():
+            parts.append((0, int(seg), ""))
+        else:
+            parts.append((1, 0, seg))
+    return tuple(parts)
+
+
+def is_downgrade(new_ver: str, cur_ver: str) -> bool:
+    """禁止降级（§2.4）：新包版本必须**高于**当前版本；相等也算拒绝（无意义重装）。"""
+    if not cur_ver:
+        return False
+    return _version_key(new_ver) <= _version_key(cur_ver)
 
 
 # ---------------------------------------------------------------- 默认（真实）实现
@@ -92,8 +147,11 @@ def _is_active(unit: str) -> bool:
 
 
 def _ipc_get_status() -> dict:
-    """读 core IPC（unix socket）拿业务能力；失败返回 {}（= 业务不可用）。"""
-    # IPC socket 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py。
+    """读 core IPC（unix socket）拿业务能力；失败返回 {}（= 业务不可用）。
+
+    请求体键名是 `type`（IpcServer.cpp:450 `request.find("type")`），
+    不是旧版写的 `cmd` —— 那个键 core 根本不认识，GET_STATUS 永远答非所问。
+    """
     import sys as _sys
     from pathlib import Path as _Path
     _sys.path.append(str(_Path(__file__).resolve().parents[1] / "plugins" / "web"))
@@ -104,7 +162,7 @@ def _ipc_get_status() -> dict:
         with _s.socket(_s.AF_UNIX, _s.SOCK_STREAM) as c:
             c.settimeout(2.0)
             c.connect(sock_path)
-            c.sendall(b'{"cmd":"GET_STATUS"}')
+            c.sendall(b'{"type":"GET_STATUS"}')
             raw = c.recv(65536)
         d = json.loads(raw.decode("utf-8", "replace"))
         return d.get("data", {}) if isinstance(d, dict) else {}
@@ -113,12 +171,13 @@ def _ipc_get_status() -> dict:
 
 
 def default_health(timeout_s: int = HEALTH_TIMEOUT_S) -> bool:
-    """业务能力优先（§0.5）：进程 active **且** IPC 显示模型已加载 + 授权可用。"""
+    """业务能力优先（§0.5 + 2026-09-18 定案 §2.3）：
+    三服务进程 active **且** IPC `current_model_id` 非空。不看授权（理由见文件头）。"""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         units_ok = all(_is_active(u) for u in HEALTH_UNITS)
         st = _ipc_get_status()
-        biz_ok = bool(st.get("model_loaded")) and bool(st.get("license_available"))
+        biz_ok = bool(str(st.get("current_model_id") or "").strip())
         if units_ok and biz_ok:
             return True
         time.sleep(1)
@@ -234,6 +293,7 @@ class OtaUpdater:
         if u.scheme != "https":
             return self._fail("scheme_rejected", f"non-https URL: {u.scheme or '<空>'}")
 
+        self._write_status({"state": "RUNNING", "url": url, "key_id": key_id})
         work = tempfile.mkdtemp(prefix="ttbox-ota-", dir="/var/tmp" if os.path.isdir("/var/tmp") else None)
         staging = ""
         try:
@@ -271,12 +331,18 @@ class OtaUpdater:
             if not self._verify_manifest(staging):
                 shutil.rmtree(staging, ignore_errors=True)
                 return self._fail("manifest_mismatch", "staging sha256 != RELEASE_MANIFEST")
+            # ⑥b 降级拒绝（§2.4）：包必须新于当前版本；回滚路径不经过这里（天然豁免）
+            cur = current_version()
+            if is_downgrade(ver, cur):
+                shutil.rmtree(staging, ignore_errors=True)
+                return self._fail("downgrade_rejected",
+                                  f"包版本 {ver} 不高于当前版本 {cur or '<未知>'}（禁止降级）")
             # ⑦ 原子发布
             rc = self.install(staging, ver)
             if rc != 0:
                 shutil.rmtree(staging, ignore_errors=True)
                 return self._fail("install_failed", f"release_install rc={rc}")
-            # ⑦b 健康检查（业务能力）
+            # ⑦b 健康检查（业务能力；失败自动回滚——保命路径，不受降级限制）
             if not self.health(HEALTH_TIMEOUT_S):
                 self.rollback()
                 shutil.rmtree(staging, ignore_errors=True)
@@ -292,12 +358,64 @@ class OtaUpdater:
             shutil.rmtree(work, ignore_errors=True)   # §0.2：无论成败，临时目录零残留
 
 
+# ---------------------------------------------------------------- 任务文件模式
+def process_jobs(jobs_dir: str, updater_factory=OtaUpdater) -> int:
+    """消费任务目录里的 *.json（web 写入；本进程以 root 身份跑）。
+
+    每个任务处理完**必须移走**（否则 path 单元会因文件仍在而再次触发）：
+    成功 → processed/，失败 → failed/（都留审计）。返回值：全部成功 0，任一失败 1。
+    """
+    jp = Path(jobs_dir)
+    if not jp.is_dir():
+        sys.stderr.write(f"[ota] 任务目录不存在: {jobs_dir}\n")
+        return 0
+    done_dir = jp / "processed"
+    fail_dir = jp / "failed"
+    jobs = sorted(jp.glob("*.json"))
+    rc_all = 0
+    for f in jobs:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        try:
+            job = json.loads(f.read_text(encoding="utf-8"))
+            url = str(job.get("url") or "").strip()
+            key_id = str(job.get("key_id") or DEFAULT_KEY_ID).strip()
+            if not url:
+                raise ValueError("任务文件缺 url")
+            rc = updater_factory().run(url, key_id, job.get("version"))
+        except Exception as e:  # 任务文件本身坏 ⇒ 记失败，绝不留在原地造成触发循环
+            sys.stderr.write(f"[ota] 任务文件不可用: {f.name}: {e!r}\n")
+            updater_factory()._write_status(
+                {"state": "FAILED", "error": "job_invalid", "detail": repr(e)})
+            rc = 1
+        dest_dir = done_dir if rc == 0 else fail_dir
+        if rc != 0:
+            rc_all = 1
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            f.rename(dest_dir / f"{stamp}-{f.name}")
+        except Exception as e:
+            sys.stderr.write(f"[warn] 任务文件归档失败（原地删除以防触发循环）: {e!r}\n")
+            try:
+                f.unlink()
+            except Exception:
+                pass
+    return rc_all
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="TTBOX OTA 更新器（root 独立进程）")
-    ap.add_argument("url", help="https://…/ttbox-update-<ver>.tgz")
+    ap.add_argument("url", nargs="?", default=None,
+                    help="https://…/ttbox-update-<ver>.tgz（省略时须给 --from-jobs）")
     ap.add_argument("key_id", nargs="?", default=DEFAULT_KEY_ID)
     ap.add_argument("--version", default=None)
+    ap.add_argument("--from-jobs", dest="from_jobs", nargs="?", const=DEFAULT_JOBS_DIR,
+                    default=None, metavar="JOBS_DIR",
+                    help="任务文件模式：消费 <dir>/*.json（特权通道，§2.2）")
     a = ap.parse_args(argv)
+    if a.from_jobs is not None:
+        return process_jobs(a.from_jobs)
+    if not a.url:
+        ap.error("需要 url 或 --from-jobs")
     return OtaUpdater().run(a.url, a.key_id, a.version)
 
 

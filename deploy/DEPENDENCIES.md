@@ -48,12 +48,12 @@ sudo cp models/installed/jwdl_sjzv11/model.rknn /var/lib/ttbox/models/installed/
 | HDMI RX overlay | `/boot/extlinux/extlinux.conf` 追加 `fdtoverlays rk3588-hdmirx.dtbo`，重启后出现 `/dev/video0` |
 | 内核模块 | `CONFIG_VIDEO_ROCKCHIP_HDMIRX=y`（已编译进内核，Ubuntu 官方内核自带） |
 | NPU 设备 | DRM 模式：`/dev/dri/renderD129`（librknnrt.so 兼容） |
-| EDID 注入 | `deploy/inject_edid.sh`（写 sysfs 节点切换 EDID 版本：1=340M/1080p，2=600M/4K） |
+| EDID 注入 | `deploy/scripts/edid/edid_apply.sh（已取代孤儿脚本 deploy/inject_edid.sh，2026-09-18 J-35 处置）`（写 sysfs 节点切换 EDID 版本：1=340M/1080p，2=600M/4K） |
 | 生产配置模板 | `deploy/config/default.json.prod`（rgb/0.25/640/安全基线，部署时复制到 /opt/ttbox/config/） |
 
 EDID 注入（新板首次部署必须执行，否则 PC 端虚拟屏只能枚举 1080p）：
 ```bash
-sudo bash deploy/inject_edid.sh 2   # 注入 600M EDID，PC 切换 4K 输出
+sudo bash deploy/scripts/edid/edid_apply.sh（已取代孤儿脚本 deploy/inject_edid.sh，2026-09-18 J-35 处置） 2   # 注入 600M EDID，PC 切换 4K 输出
 cat /sys/devices/platform/fdee0000.hdmirx-controller/hdmirx/hdmirx/edid  # 应输出 2
 ```
 

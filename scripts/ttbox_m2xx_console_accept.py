@@ -17,7 +17,7 @@
       **不得 500/白屏**
   A7  旧测试全绿：需在**仓库树**跑 `python -m pytest plugins/web/tests/`（板端 release 树无测试）→ 记为宿主侧
   A8  品牌皮肤回退：/（已激活）200 即证 _brand_template_name 回退链未回归
-  A9  黑名单执法：/api/system/lan-blocklist 结构可达（读；默认不改网络层）
+  A9  黑名单已下线：/api/system/lan-blocklist 必须已卸载（404；D04 fail-open 判死）
   A10 无构建链：/ 与 /activate 零 <link> / 零 <script src> / 零 http(s):// 资源
 
 用法（板端 root @ 192.168.0.104）：
@@ -495,19 +495,16 @@ def a8() -> None:
 
 
 # ===========================================================================
-# A9 黑名单执法
+# A9 黑名单已下线
 # ===========================================================================
 def a9() -> None:
-    desc = 'A9 黑名单执法（/api/system/lan-blocklist 结构可达；网络层功能不回归）'
+    # D04（2026-09-18 定案 §2.5）：黑名单 fail-open（名单恒空），整块下线删干净。
+    desc = 'A9 黑名单已下线（/api/system/lan-blocklist 必须已卸载 404）'
     if not lic_core().get('activated'):
         skip('A9', desc, '需已激活基线')
         return
     r = http('GET', '/api/system/lan-blocklist', timeout=8)
-    d = r.data()
-    # 契约：读 {blocked_ips|ips}
-    struct_ok = r.status == 200 and isinstance(d, dict) and ('blocked_ips' in d or 'ips' in d or True)
-    check('A9', desc, r.status == 200 and struct_ok,
-          'HTTP %s keys=%s（写路径需人工；本项只读结构）' % (r.status, sorted(d.keys())))
+    check('A9', desc, r.status == 404, 'HTTP %s' % r.status)
 
 
 # ===========================================================================

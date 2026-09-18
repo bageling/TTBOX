@@ -71,8 +71,8 @@ SELFTEST_STALL=0   # 唯一赋值点：--selftest-stall 参数解析处（且需
 TRANSITIONAL_LINKS=(
     # 插件发现（framework plugin root）+ 旧 web unit 停血路径
     "plugins:current/plugins"
-    # lan_blocklist / edid 工具链 import（ttbox-web.py、scripts/edid/hdmirx_edid.py:9、
-    # edid_apply.sh:17；wifi_manager.py 已随无线功能移出出货包）
+    # edid 工具链 import（ttbox-web.py、scripts/edid/hdmirx_edid.py:9、
+    # edid_apply.sh:17；wifi_manager 与 lan_blocklist 已随 S1/D04 移出出货包）
     "scripts:current/scripts"
 )
 
@@ -97,7 +97,8 @@ usage() {
   <ver>              版本号（如 1.2.0），仅允许 [A-Za-z0-9._-]
   <payload_dir>      发布 payload 目录，必须含 RELEASE_MANIFEST.json
   --activate         发布后原子切换 current 指针并重启服务（含 30s 健康检查）
-  --rollback         current 指回上一版本并重启
+  --rollback [ver]   current 指回上一版本（或指定 <ver>，D14）并重启；
+                     回滚后健康检查失败 ⇒ 非零退出（不假绿）
   --selftest-stall N 仅自测用：需同时设 TTBOX_RELEASE_SELFTEST=1 才生效（生产不可达），
                      staging 完成后停顿 N 秒，用于验证"中途 kill 不留半截版本"
 
@@ -363,6 +364,10 @@ reload_and_restart() {
             warn "restart ${u} 失败（继续，交由健康检查判定）"
         fi
     done
+    # OTA 特权通道（2026-09-18 定案 §2.2）：path 单元 enable 一次即可（幂等）
+    if systemctl list-unit-files 2>/dev/null | grep -q '^ttbox-ota\.path'; then
+        systemctl enable --now ttbox-ota.path 2>/dev/null || true
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -454,22 +459,31 @@ prune_versions() {
 }
 
 # ---------------------------------------------------------------------------
-# --rollback：换指针回上一版本
+# --rollback：换指针回上一版本（D14：支持 --rollback <ver> 指定目标版本）
 # ---------------------------------------------------------------------------
 do_rollback() {
     local cur target=""
+    local want_ver="${ROLLBACK_TO:-}"
     cur="$(current_version || true)"
     [[ -n "$cur" ]] || die "current 未指向任何版本，无法回滚"
 
-    local -a versions=()
-    mapfile -t versions < <(list_versions)
-    local v
-    for v in "${versions[@]}"; do
-        [[ "$v" == "$cur" ]] && continue
-        target="$v"
-        break
-    done
-    [[ -n "$target" ]] || die "没有可回滚的上一版本（当前 ${cur}）"
+    if [[ -n "$want_ver" ]]; then
+        # 指定版本回滚：必须存在于 releases/ 且不是当前版本
+        [[ "$want_ver" =~ ^[A-Za-z0-9._-]+$ ]] || die "非法版本号: $want_ver"
+        [[ -d "${RELEASES_DIR}/${want_ver}" ]] || die "目标版本不存在: ${RELEASES_DIR}/${want_ver}"
+        [[ "$want_ver" != "$cur" ]] || die "目标版本即当前版本（${cur}），无需回滚"
+        target="$want_ver"
+    else
+        local -a versions=()
+        mapfile -t versions < <(list_versions)
+        local v
+        for v in "${versions[@]}"; do
+            [[ "$v" == "$cur" ]] && continue
+            target="$v"
+            break
+        done
+        [[ -n "$target" ]] || die "没有可回滚的上一版本（当前 ${cur}）"
+    fi
 
     log "回滚：current ${cur} -> ${target}"
     switch_current "$target"
@@ -478,7 +492,9 @@ do_rollback() {
         if health_check; then
             log "回滚后健康检查通过"
         else
-            warn "回滚后健康检查未通过（请人工介入）"
+            # D14（2026-09-18 定案 I-31）：回滚后仍不健康必须非零退出——
+            # 调用方（OTA 更新器 / 运维）必须知道系统仍处于坏状态，不能假绿。
+            die "回滚后健康检查未通过（已切到 ${target}，请人工介入）"
         fi
     fi
 }
@@ -489,10 +505,17 @@ do_rollback() {
 main() {
     local cmd_rollback=0 activate_flag=0
     local ver="" payload=""
+    ROLLBACK_TO=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --activate) activate_flag=1; shift ;;
-            --rollback) cmd_rollback=1; shift ;;
+            --rollback)
+                cmd_rollback=1; shift
+                # D14：--rollback 可带可选版本参数（缺省回上一版本）
+                if [[ $# -ge 1 && "$1" != -* ]]; then
+                    ROLLBACK_TO="$1"; shift
+                fi
+                ;;
             --selftest-stall)
                 # 双条件锁：还需环境 TTBOX_RELEASE_SELFTEST=1，见文件头说明
                 if [[ "$SELFTEST_ENABLED" != "1" ]]; then
@@ -530,6 +553,14 @@ main() {
     log "前缀 TTBOX_PREFIX=${TTBOX_PREFIX}  ETC=${TTBOX_ETC}  RUN=${TTBOX_RUN}"
 
     mkdir -p -- "$RELEASES_DIR"
+    # OTA 特权通道任务目录（2026-09-18 定案 C-10）：root:ttbox 0770 ——
+    # web（User=ttbox）只往这里丢任务文件，root 更新器消费；权限面就这一个目录。
+    if have_systemd; then
+        mkdir -p -- /var/lib/ttbox/ota/jobs
+        chown root:ttbox /var/lib/ttbox/ota/jobs 2>/dev/null || true
+        chmod 0770 /var/lib/ttbox/ota/jobs 2>/dev/null || true
+        mkdir -p -- /opt/ttbox/state
+    fi
     local staging="${RELEASES_DIR}/${ver}.staging"
 
     validate_payload_manifest "$payload"

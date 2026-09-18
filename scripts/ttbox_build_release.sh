@@ -76,6 +76,21 @@ case "$BUILD_DIR" in
   /*) ;;
   *) BUILD_DIR="${REPO}/${BUILD_DIR}" ;;
 esac
+
+# ---- D01（2026-09-18 定案，P0 fail-closed）：BUILD_DIR 白名单守卫 ----
+# 下面 §3 clean 会 `rm -rf "$BUILD_DIR"`；TTBOX_BUILD_DIR 是绝对路径时若被误传
+# （如 /、/opt/ttbox、/var/lib/ttbox、$REPO 本身），一行命令就能删掉任意目录。
+# 守卫：拒绝空串、拒绝根/发布/运行时/仓库本身等路径，命中即 die。
+case "$BUILD_DIR" in
+  ""|"/"|"/opt"|"/opt/ttbox"|"/var"|"/var/lib"|"/var/lib/ttbox"|"/etc"|"/etc/ttbox"|"/home"|"/root"|"/tmp"|"/usr"|"$REPO"|"$REPO"/)
+    die "D01 守卫：拒绝危险构建目录 BUILD_DIR='${BUILD_DIR}'（可指定仓内相对目录，如 build-aarch64-t114）" ;;
+  "$REPO"/*|"$REPO")
+    case "$(basename "$BUILD_DIR")" in
+      build-*|out-*) ;;   # 仓内 build-*/out-* 才是合法构建目录
+      *) die "D01 守卫：BUILD_DIR 须为仓内 build-*/out-* 目录（实得 '${BUILD_DIR}'）" ;;
+    esac ;;
+  *) die "D01 守卫：BUILD_DIR 必须位于仓库内（'${REPO}' 下），实得 '${BUILD_DIR}'" ;;
+esac
 LOG="${BUILD_DIR}/configure.log"
 mkdir -p "$BUILD_DIR"
 
