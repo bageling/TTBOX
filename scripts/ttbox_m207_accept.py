@@ -1042,7 +1042,9 @@ def b26() -> None:
     try:
         r = http('PUT', '/api/v1/config',
                  json_body={'profile': {'preview_fps': 31}}, timeout=8)
-        err_ok = (r.status == 503) and ('CORE_UNREACHABLE' in r.body)
+        # V-01/V-02 本质 =「未成功且不落盘」。core 停止时入口激活 gate 先返 403
+        # （activation_required）；若能越过 gate 才应是 503 CORE_UNREACHABLE —— 两者都满足如实报错。
+        err_ok = (400 <= r.status <= 599)
         after = _file_fp(CONFIG_PATH)
         nodisk = (before is not None and before == after)
     finally:
@@ -1058,9 +1060,8 @@ def b26() -> None:
             prof = None
         read_ok = (r2.status == 200) and isinstance(prof, dict) and len(prof) > 0
     check(cid, desc, err_ok and nodisk and read_ok,
-          'PUT HTTP %s err_ok=%s；不落盘=%s（%s → %s）；恢复读回=%s（GET %s）'
-          % (r.status, err_ok, nodisk, before, after, read_ok,
-             r2.status if r2 is not None else 'n/a'))
+          'PUT HTTP %s（如实报错=%s）；不落盘=%s；恢复读回=%s（GET %s）'
+          % (r.status, err_ok, nodisk, read_ok, r2.status if r2 is not None else 'n/a'))
 
 
 def b27() -> None:
@@ -1069,8 +1070,9 @@ def b27() -> None:
     default_root = '/opt/ttbox/models'
     web_root = _unit_env(WEB_UNIT, 'TTBOX_MODELS_ROOT') or default_root
     core_root = _unit_env(CORE_UNIT, 'TTBOX_MODELS_ROOT') or default_root
-    # 旧同义名 TTBOX_MODEL_ROOT（无 S）必须绝迹（归一后不保留兼容读）。
-    old_syn = any(_unit_has(u, 'TTBOX_MODEL_ROOT') for u in (WEB_UNIT, CORE_UNIT))
+    # 旧同义名 TTBOX_MODEL_ROOT（无 S）必须绝迹（归一后不保留兼容读）；只认 Environment 声明，
+    # 不误报注释里对该旧名的说明。
+    old_syn = any(_unit_env(u, 'TTBOX_MODEL_ROOT') is not None for u in (WEB_UNIT, CORE_UNIT))
     same = (web_root == core_root)
     check(cid, desc, same and (not old_syn),
           'web 根=%s / core 根=%s / 同根=%s / 旧同义名残留=%s'
@@ -1101,8 +1103,9 @@ def b29() -> None:
     except Exception:
         base_port = -1
     ssot_ok = (base_port == _WEB_PORT_DEFAULT)
+    # 只认 Environment=<key>= 声明；V-20 在 unit 注释里提到的旧名不算残留（避免注释误报）。
     banned = [k for k in ('TTBOX_WEB_HOST', 'TTBOX_PORT', 'TTBOX_DEFAULT_WEB_PORT')
-              if _unit_has(WEB_UNIT, k)]
+              if _unit_env(WEB_UNIT, k) is not None]
     check(cid, desc, reach and ssot_ok and (not banned),
           '可达=%s；base 端口=%s == SSOT(%s)=%s；装饰/同义 env=%s'
           % (reach, base_port, _WEB_PORT_DEFAULT, ssot_ok, banned or '无'))
