@@ -503,6 +503,18 @@ fi
 # ---- 7) 留档 ${BUILD_DIR}/RELEASE_BUILD.md（T1.15 待补 ②；字段见 §10）+ §5 单行 ----
 BUILD_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 GIT_COMMIT="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
+# ★ F11②（2026-09-17）：可复现锚完整性护栏。`commit` 记录的是**构建时 HEAD**，其语义前提是
+#   "构建时无未提交的 core 源码改动"（见 §10 说明）。若 core 源码确有未提交改动，则记录的
+#   commit **不包含**本次实际编译的源码 ⇒ 由该 commit 重建**不会**得到本产物（复现锚不自洽；
+#   T4→T6 已各踩过一次）。此处显式告警（不阻断，避免误伤非 git / 特殊构建场景）。
+if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
+    _core_dirty="$(git -C "$REPO" status --porcelain -- core/src core/include 2>/dev/null || true)"
+    if [ -n "${_core_dirty}" ]; then
+        echo "  [!] 告警：core 源码存在**未提交**改动 ⇒ RELEASE_BUILD.md 的 commit=${GIT_COMMIT:0:7} 可能不含本次实际编译源码：" >&2
+        printf '%s\n' "${_core_dirty}" | sed 's/^/        /' >&2
+        echo "        （建议：先提交 core 源码再构建，使留档 commit 与实际源码自洽）" >&2
+    fi
+fi
 TOOLCHAIN_DESC="${CACHED_CXX} (GCC ${CXX_VER})"
 CXX_BANNER="$("${CACHED_CXX}" --version 2>/dev/null | head -1 || true)"
 if [ -n "${CXX_BANNER}" ]; then TOOLCHAIN_DESC="${TOOLCHAIN_DESC} — ${CXX_BANNER}"; fi

@@ -54,6 +54,6 @@
 
 ## 如何开始学习？
 
-1. 先看 `docs/小白教程/01-TTBOX是什么.md` 了解整体
+1. 先看 `docs/guide/小白教程/01-TTBOX是什么.md` 了解整体
 2. 再看 `modules/01-capture/README.md` 从第一层开始
 3. 每个模块 README 末尾都有"关键文件"，打开对应源码边看边学

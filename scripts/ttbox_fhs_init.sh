@@ -224,7 +224,22 @@ tcopy() {
 # 生成 RELEASE_MANIFEST.json（全量 sha256；T1.01 的 install 依赖它做完整性校验）。
 gen_manifest() {
     local root="$1" ver="$2" gitsha
-    gitsha="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo '')"
+    # ★ F11②（2026-09-17）：git_sha 解析分层。板端源码副本常**无 .git**（由部署驱动 pscp
+    #   推送，非 git clone），旧实现直接 `git rev-parse` ⇒ 恒回退成空串（QA 发现），
+    #   使 RELEASE_MANIFEST.git_sha 失去"可复现锚第二半"的作用。现按序回退：
+    #     ① 显式 env TTBOX_GIT_SHA —— 部署驱动从**构建机** `git rev-parse HEAD` 注入的唯一权威值；
+    #     ② 仓库根 @ .git —— 本机构建/测试场景；
+    #     ③ 仓库根 @ .git_sha 文件 —— 部署驱动随源码推送落盘的小文件（无 .git 时的兜底）。
+    gitsha="${TTBOX_GIT_SHA:-}"
+    if [ -z "${gitsha}" ]; then
+        gitsha="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo '')"
+    fi
+    if [ -z "${gitsha}" ] && [ -f "${REPO_ROOT}/.git_sha" ]; then
+        gitsha="$(tr -d '[:space:]' < "${REPO_ROOT}/.git_sha" 2>/dev/null || echo '')"
+    fi
+    if [ -z "${gitsha}" ]; then
+        echo "  [!] 警告：无法解析 git_sha（无 TTBOX_GIT_SHA / 无 .git / 无 .git_sha）—— manifest.git_sha 将为空" >&2
+    fi
     python3 - "$root" "$ver" "$gitsha" <<'PY'
 import datetime, hashlib, json, os, sys
 root, ver, gitsha = sys.argv[1], sys.argv[2], sys.argv[3]

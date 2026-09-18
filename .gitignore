@@ -211,3 +211,16 @@ tools/license/.testkeys/
 /_*.txt
 /_*.sh
 /_*.tgz
+
+# ---------- F11② 部署期产物：构建机注入的 git sha（板端落盘，不入库）----------
+# 由部署驱动从构建机 `git rev-parse HEAD` 写入板端源码副本根（配合 ttbox_fhs_init.sh
+# gen_manifest 的分层解析）；本地误落亦不入库。
+/.git_sha
+
+# ---------- 代码梳理（2026-09-17）：本机产物归档区（不入库）----------
+# 批次 0/1/4 依据 docs/handover/2026-09-17/代码梳理方案-2026-09-17.md §4.1：
+# 将判为「删除/出清」的本机产物（39 个根 _* 探针、陈旧 build 目录、空 models/、
+# __pycache__/.pytest_cache 缓存）**移入**本目录而非 rm，供业主复核后再决定是否真删。
+# 本目录名**以点号开头 + 固定日期**，与任何现有规则无交集；写在文件**末尾**（last-match-wins）。
+# 自检：`git check-ignore -v .archive-2026-09-17/README.md`（期望命中本行）
+/.archive-2026-09-17/

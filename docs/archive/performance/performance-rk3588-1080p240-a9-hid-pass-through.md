@@ -12,8 +12,8 @@
 
 ## 0. 交付物
 
-- [a9-hid-project-comparison.md](./a9-hid-project-comparison.md) — 四项目对照分析（含 License）
-- [a9-hid-architecture.md](./a9-hid-architecture.md) — 架构设计（含实测限制）
+- [a9-hid-project-comparison.md](../stages/a9-hid-project-comparison.md) — 四项目对照分析（含 License）
+- [a9-hid-architecture.md](../stages/a9-hid-architecture.md) — 架构设计（含实测限制）
 - 实现：`src/hid/`（HidTypes/SpscQueue/HidForwarder/HidParser）+ `scripts/a9_setup_hid_gadget.sh` 等
 - 测试：`ttbox-hid-test`、`test_hid_forward_hw`、`test_hid_loopback`、`test_hid_load_sim`、`test_hid.cpp`（单元）
 

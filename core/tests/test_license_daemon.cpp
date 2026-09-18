@@ -441,4 +441,151 @@ TEST(resolve_card_store_branch_guard_roundtrip) {
     }
     qa_wipe_store();
 }
+// ============================================================================
+// ★ F11（2026-09-17）：云激活态下，被拒的 ACTIVATE 不得污染授权态。
+//   面板免密（M2.07 需求①）⇒ 局域网任何人可 POST /api/license/activate。
+//   修前：parse 失败 / 降级 / 验签失败三条拒绝路径都会把云激活打掉
+//   （state→kInvalidCard、cloud_license_ 丢失）⇒ 一个空 body 或坏签名卡即可关 AI。
+//   契约：**调用前是云激活**时，任一被拒 ACTIVATE 后 status_ 逐字段不变、
+//   allow_run() 仍 true、license.json 不落盘；**调用前非云激活**时保持既有行为
+//   （把拒绝原因写进状态，F2 意图）；**合法离线卡仍必须能接管**。
+// ============================================================================
+
+// ---- F11 ①：云激活态下 parse 级 + 验签级拒绝 ⇒ 授权态逐字段不回退 ----
+TEST(activate_reject_preserves_cloud_state) {
+    qa_wipe_store();
+    QaRejectClient client;            // 验签级拒绝（bound elsewhere）
+    LicenseDaemon daemon(client);
+    std::string err;
+
+    // 云激活前置
+    CHECK(daemon.activate_cloud(now_unix_ms_now() + 30LL * 24 * 3600 * 1000,
+                                {"capture", "inference", "aim", "ota"},
+                                "subscription", "TTB-AAAA-BBBB", &err));
+    const LicenseStatus before = daemon.status_snapshot();
+    CHECK(before.state == LicenseState::kValid);
+    CHECK(daemon.allow_run());
+    const std::string doc_before = qa_read_doc();
+
+    // ① parse 级拒绝（空 body / 非 JSON）
+    CHECK(!daemon.activate("", &err));
+    {
+        const LicenseStatus st = daemon.status_snapshot();
+        CHECK(st.state == before.state);
+        CHECK_EQ(st.verified_at_ms, before.verified_at_ms);
+        CHECK_EQ(st.expire_unix_ms, before.expire_unix_ms);
+        CHECK(st.last_error == before.last_error);
+        CHECK(st.features == before.features);
+    }
+    CHECK(daemon.allow_run());
+    CHECK(qa_read_doc() == doc_before);          // 不落盘
+
+    // ② 验签级拒绝（badsig：结构过、客户端明确拒）
+    CHECK(!daemon.activate(qa_envelope("lic-f11-bad", 1750000000), &err));
+    {
+        const LicenseStatus st = daemon.status_snapshot();
+        CHECK(st.state == before.state);          // ★ 云态未被踩成 kInvalidCard
+        CHECK_EQ(st.verified_at_ms, before.verified_at_ms);
+        CHECK_EQ(st.expire_unix_ms, before.expire_unix_ms);
+        CHECK(st.last_error == before.last_error); // message 不被写成拒绝原因
+        CHECK(st.features == before.features);
+    }
+    CHECK(daemon.allow_run());
+    CHECK(qa_read_doc() == doc_before);
+
+    // 云态仍生效：verify_now_blocking() 走云短路（不回退到离线验签）⇒ 仍 true
+    CHECK(daemon.verify_now_blocking(&err));
+    CHECK(daemon.allow_run());
+    qa_wipe_store();
+}
+
+// ---- F11 ②：云激活态下防降级拒绝 ⇒ 授权态不回退 ----
+TEST(activate_downgrade_reject_preserves_cloud_state) {
+    qa_wipe_store();
+    QaValidClient client;            // 离线卡路径恒 kValid（仅用于建立基线）
+    LicenseDaemon daemon(client);
+    std::string err;
+
+    // ① 先建防回滚基线（合法离线激活，issued_at=T）
+    CHECK(daemon.activate(qa_envelope("lic-base", 1750000000), &err));
+    CHECK_EQ(LicenseStore().load().last_seen_issued_at, 1750000000LL);
+
+    // ② 转云激活
+    CHECK(daemon.activate_cloud(now_unix_ms_now() + 30LL * 24 * 3600 * 1000,
+                                {"capture", "inference", "aim", "ota"},
+                                "subscription", "TTB-CCCC-DDDD", &err));
+    const LicenseStatus before = daemon.status_snapshot();
+    const std::string doc_before = qa_read_doc();
+
+    // ③ 更旧卡 ⇒ 降级拒绝，且**不得**踩云态
+    CHECK(!daemon.activate(qa_envelope("lic-old", 1750000000 - 86400), &err));
+    CHECK(err.find("LICENSE_DOWNGRADE_REJECTED") != std::string::npos);
+    {
+        const LicenseStatus st = daemon.status_snapshot();
+        CHECK(st.state == before.state);
+        CHECK_EQ(st.verified_at_ms, before.verified_at_ms);
+        CHECK(st.last_error == before.last_error);
+    }
+    CHECK(daemon.allow_run());
+    CHECK(qa_read_doc() == doc_before);
+    qa_wipe_store();
+}
+
+// ---- F11 反向护栏 ①：非云激活态下的拒绝，既有"写拒绝原因"行为不得丢（F2 意图）----
+TEST(activate_reject_when_not_cloud_keeps_diagnostic_state) {
+    qa_wipe_store();
+    QaRejectClient client;
+    LicenseDaemon daemon(client);
+    std::string err;
+
+    // 验签级拒绝（未激活基线）：state 落为拒绝态 + last_error 可见
+    CHECK(!daemon.activate(qa_envelope("lic-f11-x", 1750000000), &err));
+    {
+        const LicenseStatus st = daemon.status_snapshot();
+        CHECK(st.state == LicenseState::kBoundElsewhere);
+        CHECK(st.last_error.find("bound to another device") != std::string::npos);
+    }
+    CHECK(!daemon.allow_run());
+
+    // parse 级拒绝：state=kInvalidCard + last_error 非空
+    CHECK(!daemon.activate("{ not json", &err));
+    {
+        const LicenseStatus st = daemon.status_snapshot();
+        CHECK(st.state == LicenseState::kInvalidCard);
+        CHECK(!st.last_error.empty());
+    }
+    qa_wipe_store();
+}
+
+// ---- F11 反向护栏 ②：合法离线卡仍必须能**接管**云态（cloud 关闭 + 落盘离线信封）----
+TEST(activate_valid_offline_card_takes_over_cloud) {
+    qa_wipe_store();
+    QaValidClient client;
+    LicenseDaemon daemon(client);
+    std::string err;
+
+    CHECK(daemon.activate_cloud(now_unix_ms_now() + 30LL * 24 * 3600 * 1000,
+                                {"capture", "inference", "aim", "ota"},
+                                "subscription", "TTB-EEEE-FFFF", &err));
+    CHECK(daemon.allow_run());
+
+    const std::string env = qa_envelope("lic-takeover", 1750000000);
+    CHECK(daemon.activate(env, &err));                 // 合法离线卡 ⇒ 接管
+    CHECK(daemon.status_snapshot().state == LicenseState::kValid);
+    {
+        const StoreLoadResult lr = LicenseStore().load();
+        CHECK(lr.doc_ok);
+        CHECK(lr.doc_json == env);                     // 落盘换成离线信封
+        CHECK(!lr.doc_is_cloud);                       // 已非云态
+    }
+
+    // 接管后 thread_loop 走离线卡路径，仍 kValid（cloud 已关，不再有云短路）
+    daemon.set_backoff_base_ms(20);
+    CHECK(daemon.start());
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    daemon.stop();
+    CHECK(daemon.allow_run());
+    qa_wipe_store();
+}
+
 #endif  // !_WIN32

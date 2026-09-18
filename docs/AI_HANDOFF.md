@@ -8,7 +8,7 @@ TTBOX 独立定义架构与产品能力，不依赖任何外部系统。
 
 ## 核心原则
 
-> **开发流程强制规则：本机开发 → 本机测试 → 本机修 Bug → 本机全部测试通过 → 交叉编译 → 打包 → 上板 → 最终真机验证。本机未全 PASS 禁止交叉编译和上板；禁止在板端直接修改源码；禁止假 PASS。完整流程见 `docs/RK3588开发流程.md`。**
+> **开发流程强制规则：本机开发 → 本机测试 → 本机修 Bug → 本机全部测试通过 → 交叉编译 → 打包 → 上板 → 最终真机验证。本机未全 PASS 禁止交叉编译和上板；禁止在板端直接修改源码；禁止假 PASS。完整流程见 `docs/ops/RK3588开发流程.md`。**
 
 1. **TTBOX 拥有自己的：**
    - Product Blueprint（产品蓝图）
@@ -57,5 +57,5 @@ TTBOX 参考资料以本仓库 `docs/` 自有文档为准：
 4. `docs/product/TTBOX_DOMAIN_MODEL.md`（领域模型）
 5. `docs/product/TTBOX_API_CONTRACT.md`（API 契约）
 6. `README.md`（项目概述）
-7. `docs/TTBOX_CODE_MAP_CN.md`（代码地图）
-8. `docs/RK3588开发流程.md`（RK3588 强制开发流程）
+7. `docs/archive/pre-refactor/TTBOX_CODE_MAP_CN.md`（代码地图·已归档，只读备查）
+8. `docs/ops/RK3588开发流程.md`（RK3588 强制开发流程）

@@ -122,6 +122,35 @@ bool LicenseDaemon::verify_now_blocking(std::string* err_message) {
 }
 
 bool LicenseDaemon::activate(const std::string& card_envelope, std::string* error) {
+    // ★ F11（2026-09-17）：入口快照完整授权态。面板**免密**（M2.07 需求①）⇒ 局域网内
+    //   任何人可 POST /api/license/activate。本函数三条拒绝路径（parse 失败 / 防降级 /
+    //   验签失败）都会改写内存授权态 —— 未修前，一个空/非法 body 或坏签名卡即可把**云激活**
+    //   打掉并关掉 AI（现场：before{activated,active,source=cloud} → POST card-badsig →
+    //   after{unactivated,kInvalidCard,'offline card: signature mismatch'}，直到重启 core
+    //   才由 restore_cloud_doc_locked() 恢复）。
+    //   行为级契约（修法）：**调用前为云激活时**，任一被拒 ACTIVATE 都必须把
+    //   cloud_license_ / status_ / card_plain_ **逐字段回滚**到调用前快照 ⇒ 调用后
+    //   /api/license 与管线放行结果与调用前一致（activated/state/source/features.capture 不变）。
+    //   反向护栏：**调用前非云激活时保持既有行为**（把拒绝原因写进状态，供现场排障 ——
+    //   F2 意图不得丢）；合法离线卡（kValid）仍照常"接管"（cloud_license_=false + 落盘）。
+    bool prev_cloud = false;
+    LicenseStatus prev_status;
+    std::string prev_card;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        prev_cloud = cloud_license_;
+        prev_status = status_;
+        prev_card = card_plain_;
+    }
+    auto rollback_cloud_guard = [&]() {
+        // 仅当调用前是云激活态才回滚；非云态一律保持既有"写拒绝原因"行为。
+        if (!prev_cloud) return;
+        std::lock_guard<std::mutex> lk(mu_);
+        cloud_license_ = true;
+        status_ = prev_status;
+        card_plain_ = prev_card;
+    };
+
     // ① 结构校验先行（fail-closed；不碰内存态）
     //    （parse 只做格式/闭集/字符集，不验签——验签在 ② 的 verify_once 里。）
     LicenseCard parsed;
@@ -134,6 +163,8 @@ bool LicenseDaemon::activate(const std::string& card_envelope, std::string* erro
             status_.state = LicenseState::kInvalidCard;
             status_.last_error = perr.empty() ? "offline card: parse rejected" : perr;
         }
+        // ★ F11：调用前为云激活 ⇒ 上述写入整体回滚（一个空/非法 body 不得关掉 AI）。
+        rollback_cloud_guard();
         if (error) *error = perr;
         return false;
     }
@@ -153,6 +184,8 @@ bool LicenseDaemon::activate(const std::string& card_envelope, std::string* erro
                 status_.state = LicenseState::kInvalidCard;
                 status_.last_error = why;
             }
+            // ★ F11：调用前为云激活 ⇒ 回滚（防降级拒绝亦不得踩云态）。
+            rollback_cloud_guard();
             TTBOX_LOG_WARN("[LicenseDaemon] " + why);
             if (error) *error = "LICENSE_DOWNGRADE_REJECTED";
             return false;
@@ -184,6 +217,9 @@ bool LicenseDaemon::activate(const std::string& card_envelope, std::string* erro
                                          : verr;
             }
         }
+        // ★ F11：调用前为云激活 ⇒ 整体回滚（含 cloud_license_/status_/card_plain_）；
+        //   否则云激活被打掉、status 被写成 kInvalidCard ⇒ AI 被关。
+        rollback_cloud_guard();
         if (error) {
             *error = st.last_error.empty()
                          ? (verr.empty() ? "激活被拒绝（state=" +

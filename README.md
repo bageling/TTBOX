@@ -148,6 +148,29 @@ TTBOX-Module-Edition/
 └── tests/              集成测试脚本
 ```
 
+各顶层目录的职责与「是否进 payload（release 树）」：
+
+| 目录 | 职责 | 是否进 payload |
+|---|---|:--:|
+| `core/` | C++ AI 核心唯一构建源树（采集→推理→瞄准→输出） | 仅 `bin/ttbox_core_main` |
+| `usbproxy/` | Raw Gadget 鼠标注入代理（含预编译 ELF） | ✅ 整包 |
+| `plugins/` | Python 插件包（web/preview/model/fan/wifi/network/monitor/log/system/upgrade） | ✅ 整包 |
+| `framework/` | 插件管理框架（web 运行期硬依赖） | ✅ 整包 |
+| `ttbox_motion/` | 运动校准/训练（web + core/tools 依赖） | ✅ 整包 |
+| `config/` | 开发侧配置模板（运行期真值在 `/opt/ttbox/config`、`/etc/ttbox`） | ❌ |
+| `deploy/` | 部署输入（systemd unit / toolchain / 出厂配置 / DEPENDENCIES） | 仅 `systemd/*` + `config/{00-factory,hardware_display}.json` |
+| `scripts/` | 构建/发布/运维脚本 + edid 工具链（★FHS 锚定，**不可移动**） | 仅 `edid/` + `wifi_manager.py` + `ttbox_ensure_services.sh` |
+| `tools/` | 离线开发工具（模型转换 / 许可/OTA 签发） | ❌ |
+| `tests/` | 板端集成/监控/API 验收脚本 | ❌ |
+| `docs/` | 唯一文档中心（分类见 [docs/CONVENTIONS.md](docs/CONVENTIONS.md)） | ❌ |
+| `lib/` | 库作用域裁决锚（README 即不变量） | ❌（真值来自构建机 sysroot） |
+| `modules/` | 模块化语义视图（纯 README，**旧层·待出清**） | ❌ |
+| `platform/` | V1 实验骨架（随包但代码级不可达，**待实测出清**） | ✅（当前随包） |
+| `third_party/`（根） | RKNN 头重复残留（CMake 不认根副本，**待出清**） | ❌ |
+
+> 「是否进 payload」= 是否被 `scripts/ttbox_fhs_init.sh` 的 `sync_tree` 收入 release 树；
+> 唯一真源以该脚本的白名单闭集为准。硬约束见 [docs/ops/release-constraints.md](docs/ops/release-constraints.md)。
+
 `core/src/` 里每个目录的职责：
 
 | 目录 | 干什么 |
@@ -232,7 +255,7 @@ PUT /api/config
 
 ## 七、开发者怎么编译
 
-> 强制流程：本机开发 → 本机测试 → 本机修 Bug → 本机全部测试通过 → 交叉编译 → 打包 → 上板 → 最终真机验证。本机未全 PASS 前不允许交叉编译，不允许上板；完整规则见 [docs/RK3588开发流程.md](docs/RK3588开发流程.md)。
+> 强制流程：本机开发 → 本机测试 → 本机修 Bug → 本机全部测试通过 → 交叉编译 → 打包 → 上板 → 最终真机验证。本机未全 PASS 前不允许交叉编译，不允许上板；完整规则见 [docs/ops/RK3588开发流程.md](docs/ops/RK3588开发流程.md)。
 
 ### Windows 本机（开发 + 单元测试）
 
@@ -322,11 +345,11 @@ python3 /opt/ttbox/src/core/tests/usbproxy_buttontest.py
 | 顺序 | 文档 | 内容 |
 |---|---|---|
 | 1 | [docs/README.md](docs/README.md) | 文档总入口 |
-| 2 | [docs/小白教程/01-TTBOX是什么.md](docs/小白教程/01-TTBOX是什么.md) | 用大白话讲 TTBOX |
-| 3 | [docs/小白教程/02-TTBOX怎么工作.md](docs/小白教程/02-TTBOX怎么工作.md) | 工作流程 |
-| 4 | [docs/架构/系统总览.md](docs/架构/系统总览.md) | 系统分层 |
-| 5 | [docs/架构/完整链路.md](docs/架构/完整链路.md) | 完整数据链路 |
-| 6 | [docs/问题排查.md](docs/问题排查.md) | 常见问题排查 |
+| 2 | [docs/guide/小白教程/01-TTBOX是什么.md](docs/guide/小白教程/01-TTBOX是什么.md) | 用大白话讲 TTBOX |
+| 3 | [docs/guide/小白教程/02-TTBOX怎么工作.md](docs/guide/小白教程/02-TTBOX怎么工作.md) | 工作流程 |
+| 4 | [docs/architecture/系统总览.md](docs/architecture/系统总览.md) | 系统分层 |
+| 5 | [docs/architecture/完整链路.md](docs/architecture/完整链路.md) | 完整数据链路 |
+| 6 | [docs/ops/问题排查.md](docs/ops/问题排查.md) | 常见问题排查 |
 | 7 | [docs/废弃代码清单.md](docs/废弃代码清单.md) | 已废弃/不再接线的代码清单 |
 
 ## 十一、常见问题

@@ -13,6 +13,7 @@
   · B21 到期锁定（PEND-LEAD 钩子）                 · B22 URL 可配 + 断网宽限
   · B23 存量兼容（离线卡路径保留）
   · B24 云态**纯重启**保持（D-D 回归锚）
+  · B25 拒绝的 ACTIVATE 不得清云激活态（F11 回归锚，2026-09-17）
 保留项（§5.1 "保留不动"，不删）：
   · B4 激活翻绿 · B5 重启保持 · B8 ui_brand 篡改拒 · B10 ui_brand 随卡 ·
     B11 卡号短码 · B6·ota 端点门控与验签
@@ -801,6 +802,72 @@ def b24() -> None:
 
 
 # ===========================================================================
+# B25 拒绝的 ACTIVATE 不得清云激活态（F11 回归锚，2026-09-17）
+# ===========================================================================
+def _lic_sig() -> tuple:
+    """云态授权签名（F11 契约字段）：activated / state / source / features.capture。"""
+    lic = lic_core()
+    cap = lic.get('capabilities') or {}
+    return (bool(lic.get('activated')), lic.get('state'),
+            lic_cloud().get('source'), bool(cap.get('capture')))
+
+
+def b25() -> None:
+    """F11：面板免密 ⇒ 局域网任何人可 POST /api/license/activate。修前，被拒的
+    ACTIVATE（非法 body / 坏签名卡）会把**云激活**打掉并关掉 AI。本锚断言：
+    云激活态下任一被拒 ACTIVATE 后 activated/state/source/features.capture **逐字段不变**，
+    且其后云心跳仍 online。"""
+    desc = ('B25 F11：云激活态下被拒 ACTIVATE（非法 body / 坏签名卡）不得清云态；'
+            'activated/state/source/features.capture 恒不变，且其后云心跳仍 online')
+    if not web_reachable():
+        skip('B25', desc, '板端 web 不可达')
+        return
+    if not activated_settled():
+        skip('B25', desc, '需已激活基线')
+        return
+    # 前置：必须为**云态**（source=cloud + store doc_is_cloud）；否则经文档化云端入口建立
+    if not (_store_doc_is_cloud() and lic_cloud().get('source') == 'cloud'):
+        http('POST', '/api/license/activate', json_body={'license_key': TEST_CARD}, timeout=25)
+        wait_until(lambda: _store_doc_is_cloud() and lic_cloud().get('source') == 'cloud', 30)
+    if not (_store_doc_is_cloud() and lic_cloud().get('source') == 'cloud'):
+        skip('B25', desc, '无法建立云激活前置（doc_is_cloud=%s source=%r）'
+             % (_store_doc_is_cloud(), lic_cloud().get('source')))
+        return
+
+    before = _lic_sig()
+
+    # ① 非法 body（`{` 起手但非 JSON）⇒ web 转 IPC ACTIVATE_LICENSE ⇒ core parse 拒绝
+    r1 = http('POST', '/api/license/activate',
+              json_body={'license_key': '{ this is not valid json'}, timeout=15)
+    sig1 = _lic_sig()
+
+    # ② 坏签名卡（结构过、Ed25519 验签拒）⇒ core 权威拒绝分支
+    badsig = read_card('card-badsig.json')
+    r2 = (http('POST', '/api/license/activate',
+               json_body={'license_key': badsig}, timeout=20) if badsig else None)
+    sig2 = _lic_sig()
+
+    # ③ 空 body（web 层 400，不触达 core；顺带确认不扰动）
+    r3 = http('POST', '/api/license/activate', json_str='', timeout=10)
+    sig3 = _lic_sig()
+
+    # ④ 其后云心跳仍 online（拒绝不扰动云态心跳）
+    online = wait_until(lambda: bool((lic_cloud().get('heartbeat') or {}).get('online')), 20)
+    hb = lic_cloud().get('heartbeat') or {}
+
+    ok = (before == sig1 == sig2 == sig3
+          and before[0] is True and before[1] == 'active'
+          and before[2] == 'cloud' and before[3] is True
+          and online)
+    check('B25', desc, ok,
+          'before=%s illegal_body=%s badsig=%s empty=%s ; '
+          'http(illegal=%s badsig=%s empty=%s) ; hb.online=%s hb.error=%r'
+          % (before, sig1, sig2, sig3,
+             getattr(r1, 'status', None), (r2.status if r2 else None),
+             getattr(r3, 'status', None), hb.get('online'), hb.get('error')))
+
+
+# ===========================================================================
 # 保留项（§5.1 保留不动）
 # ===========================================================================
 def retained_b4() -> None:
@@ -906,7 +973,7 @@ def retained_cards() -> None:
 def main() -> int:
     global WEB_BASE, CARDS_DIR, ALLOW_STATE_TOGGLE, NO_RESTORE, RESTORE_VALID, STRICT
 
-    ap = argparse.ArgumentParser(description='M2.07 板端验收（B15–B23 + 保留项）')
+    ap = argparse.ArgumentParser(description='M2.07 板端验收（B15–B25 + 保留项）')
     ap.add_argument('--base-url', default=os.environ.get('TTBOX_WEB', WEB_BASE),
                     help='web 基址（默认 %s）' % WEB_BASE)
     ap.add_argument('--cards-dir', default=os.environ.get('TTBOX_M2_CARDS', CARDS_DIR),
@@ -952,6 +1019,7 @@ def main() -> int:
     retained_b5()   # 在 b23 之后、b24 之前：此时 store 为**离线卡**文档 ⇒ 真覆盖"离线卡重启保持"
     retained_cards()
     b24()           # D-D 纯重启锚：自建云激活前置 → 纯重启 core → 纯观测仍 activated
+    b25()           # F11：拒绝的 ACTIVATE 不得清云激活态（回归锚）
 
     if RESTORE_VALID:
         code = http('POST', '/api/license/activate',
