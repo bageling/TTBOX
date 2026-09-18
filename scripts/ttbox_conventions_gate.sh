@@ -279,8 +279,11 @@ def check_env():
             elif name not in ENV_ALLOW:
                 bad("② 未登记 env %s @ %s（需登记 docs/protocols/config-path-env-registry.md）"
                     % (name, p))
-    # ③ 同义异名：全仓（含注释剥离后）不得再出现
+    # ③ 同义异名：全仓（含注释剥离后）不得再出现。
+    #   例外 = env_scan_excluded（测试/门禁脚本）——回归测试必须**点名**同义异名以断言其绝迹。
     for p in iter_files():
+        if env_scan_excluded(p):
+            continue
         ext = os.path.splitext(p)[1]
         text = read(p)
         for name in ENV_BANNED:

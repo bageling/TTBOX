@@ -14,6 +14,11 @@
   · B23 存量兼容（离线卡路径保留）
   · B24 云态**纯重启**保持（D-D 回归锚）
   · B25 拒绝的 ACTIVATE 不得清云激活态（F11 回归锚，2026-09-17）
+  · B26–B29 配置·常量·路径口径回归锚（2026-09-18 口径整改新增）：
+    B26 V-01/V-02 core 停止 ⇒ 面板写配置如实报错(503)且不落盘、恢复后经 IPC 读回；
+    B27 V-04 TTBOX_MODELS_ROOT 归一（web ui_meta/_incoming 与 core 同根）；
+    B28 V-03 板端 default.json ↔ 00-factory 共享键同值；
+    B29 V-06 面板 SSOT 端口可达 + 无装饰性/同义端口 env。
 保留项（§5.1 "保留不动"，不删）：
   · B4 激活翻绿 · B5 重启保持 · B8 ui_brand 篡改拒 · B10 ui_brand 随卡 ·
     B11 卡号短码 · B6·ota 端点门控与验签
@@ -70,6 +75,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -89,10 +95,16 @@ import sys as _sys
 from pathlib import Path as _Path
 _sys.path.append(str(_Path(__file__).resolve().parents[1] / "plugins" / "web"))
 from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT
+from lib.paths import WEB_PORT_DEFAULT as _WEB_PORT_DEFAULT
 CORE_SOCK = _IPC_DEFAULT
 CARDS_DIR = '/root/m2-cards'
 CONFIG_PATH = os.environ.get('TTBOX_CONFIG', '/opt/ttbox/config/default.json')
 STORE_DIR = '/var/lib/ttbox/license'
+# 口径整改回归锚（B26–B29）真源：出厂配置（V-03 对照基准）+ 板端 unit（V-04/V-06 env 归一核验）。
+# ★ 刻意**不**读环境变量：不扩大 env 面（口径门禁②：未登记 env 一律 FAIL）。
+FACTORY_CONFIG = '/etc/ttbox/config.d/00-factory.json'
+WEB_UNIT = '/etc/systemd/system/ttbox-web.service'
+CORE_UNIT = '/etc/systemd/system/ttbox-core.service'
 CLOUD_SESSION_PATH = os.environ.get('TTBOX_CLOUD_SESSION',
                                     '/opt/ttbox/config/cloud_session.json')
 
@@ -973,6 +985,130 @@ def retained_cards() -> None:
 
 
 # ===========================================================================
+# B26–B29：配置·常量·路径口径整改回归锚（2026-09-18）
+#   断言口径 = docs/protocols/config-path-env-registry.md + docs/CONVENTIONS.md §六（无补丁红线）。
+# ===========================================================================
+def _read_text(path: str):
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            return f.read()
+    except Exception:
+        return None
+
+
+def _unit_has(unit_path: str, needle: str) -> bool:
+    txt = _read_text(unit_path)
+    return bool(txt and needle in txt)
+
+
+def _unit_env(unit_path: str, key: str):
+    """从 unit 文件读显式 `Environment=<key>=<value>`；无 → None。"""
+    txt = _read_text(unit_path)
+    if not txt:
+        return None
+    m = (re.search(r'^\s*Environment="%s=([^"]*)"\s*$' % re.escape(key), txt, re.M)
+         or re.search(r'^\s*Environment=%s=(\S+)\s*$' % re.escape(key), txt, re.M))
+    return m.group(1) if m else None
+
+
+def _file_fp(path: str):
+    """文件指纹 (mtime_ns, size, sha256)；不存在/不可读 → None。"""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+        st = os.stat(path)
+        return (st.st_mtime_ns, st.st_size, hashlib.sha256(data).hexdigest())
+    except Exception:
+        return None
+
+
+def b26() -> None:
+    cid = 'B26'
+    desc = ('B26 V-01/V-02：core 停止 ⇒ 面板写配置如实报错(503 CORE_UNREACHABLE)且不落盘；'
+            '恢复后经 IPC 读回 config.d 生效值')
+    if not web_reachable():
+        skip(cid, desc, '板端 web 不可达')
+        return
+    if not has_systemctl():
+        skip(cid, desc, '无 systemctl，无法停/起 core')
+        return
+    before = _file_fp(CONFIG_PATH)
+    systemctl('stop', 'ttbox-core')
+    if not wait_until(lambda: not core_ping(1.0), 30):
+        check(cid, desc, False, 'core 停止失败（前置不可得）')
+        restart_core()
+        wait_until(core_ping, RESTART_WAIT_S)
+        return
+    try:
+        r = http('PUT', '/api/v1/config',
+                 json_body={'profile': {'preview_fps': 31}}, timeout=8)
+        err_ok = (r.status == 503) and ('CORE_UNREACHABLE' in r.body)
+        after = _file_fp(CONFIG_PATH)
+        nodisk = (before is not None and before == after)
+    finally:
+        restart_core()
+        up = wait_until(core_ping, RESTART_WAIT_S)
+    read_ok = False
+    r2 = None
+    if up:
+        r2 = http('GET', '/api/v1/config', timeout=8)
+        try:
+            prof = (r2.json().get('data') or {}).get('runtime_profile')
+        except Exception:
+            prof = None
+        read_ok = (r2.status == 200) and isinstance(prof, dict) and len(prof) > 0
+    check(cid, desc, err_ok and nodisk and read_ok,
+          'PUT HTTP %s err_ok=%s；不落盘=%s（%s → %s）；恢复读回=%s（GET %s）'
+          % (r.status, err_ok, nodisk, before, after, read_ok,
+             r2.status if r2 is not None else 'n/a'))
+
+
+def b27() -> None:
+    cid = 'B27'
+    desc = 'B27 V-04：TTBOX_MODELS_ROOT 归一——web(ui_meta/_incoming) 与 core 同根'
+    default_root = '/opt/ttbox/models'
+    web_root = _unit_env(WEB_UNIT, 'TTBOX_MODELS_ROOT') or default_root
+    core_root = _unit_env(CORE_UNIT, 'TTBOX_MODELS_ROOT') or default_root
+    # 旧同义名 TTBOX_MODEL_ROOT（无 S）必须绝迹（归一后不保留兼容读）。
+    old_syn = any(_unit_has(u, 'TTBOX_MODEL_ROOT') for u in (WEB_UNIT, CORE_UNIT))
+    same = (web_root == core_root)
+    check(cid, desc, same and (not old_syn),
+          'web 根=%s / core 根=%s / 同根=%s / 旧同义名残留=%s'
+          % (web_root, core_root, same, old_syn))
+
+
+def b28() -> None:
+    cid = 'B28'
+    desc = 'B28 V-03：板端 %s 与 %s 共享键同值' % (CONFIG_PATH, FACTORY_CONFIG)
+    a = read_json(CONFIG_PATH)
+    b = read_json(FACTORY_CONFIG)
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        skip(cid, desc, '缺 %s 或 %s' % (CONFIG_PATH, FACTORY_CONFIG))
+        return
+    shared = [k for k in a if k in b]
+    diff = [k for k in shared if a[k] != b[k]]
+    check(cid, desc, bool(shared) and (not diff),
+          '共享键 %d 个；不一致 %d 个%s'
+          % (len(shared), len(diff), ('：' + ', '.join(diff[:8])) if diff else ''))
+
+
+def b29() -> None:
+    cid = 'B29'
+    desc = 'B29 V-06：面板 SSOT 端口可达 + 无装饰性/同义端口 env（V-20）'
+    reach = web_reachable()
+    try:
+        base_port = int(WEB_BASE.rsplit(':', 1)[1].split('/')[0])
+    except Exception:
+        base_port = -1
+    ssot_ok = (base_port == _WEB_PORT_DEFAULT)
+    banned = [k for k in ('TTBOX_WEB_HOST', 'TTBOX_PORT', 'TTBOX_DEFAULT_WEB_PORT')
+              if _unit_has(WEB_UNIT, k)]
+    check(cid, desc, reach and ssot_ok and (not banned),
+          '可达=%s；base 端口=%s == SSOT(%s)=%s；装饰/同义 env=%s'
+          % (reach, base_port, _WEB_PORT_DEFAULT, ssot_ok, banned or '无'))
+
+
+# ===========================================================================
 # main
 # ===========================================================================
 def main() -> int:
@@ -1025,6 +1161,10 @@ def main() -> int:
     retained_cards()
     b24()           # D-D 纯重启锚：自建云激活前置 → 纯重启 core → 纯观测仍 activated
     b25()           # F11：拒绝的 ACTIVATE 不得清云激活态（回归锚）
+    b26()           # V-01/V-02：core 停止 ⇒ 写配置如实报错且不落盘；恢复后读回
+    b27()           # V-04：TTBOX_MODELS_ROOT 归一，web/core 同根
+    b28()           # V-03：板端 default.json ↔ 00-factory 共享键同值
+    b29()           # V-06/V-20：面板端口 SSOT + 装饰性/同义 env 归一
 
     if RESTORE_VALID:
         code = http('POST', '/api/license/activate',
