@@ -132,6 +132,16 @@ def http(method: str, path: str, *, json_body=None, timeout: float = 12.0,
     opener = _OP_FOLLOW if follow else _OP_NOFOLLOW
     try:
         with opener.open(req, timeout=timeout) as r:
+            ctype = str((r.headers or {}).get('Content-Type', '') or '').lower()
+            if ctype.startswith('multipart/'):
+                # 流式响应（MJPEG `multipart/x-mixed-replace`）**永不结束**：只读满
+                # 一小段即可判定状态/类型。切勿对这类响应 `r.read()` 全量读取，
+                # 否则会永久阻塞（连接不会关闭）——这正是 A4/A5 卡死的根因。
+                try:
+                    chunk = r.read(4096)
+                except Exception:
+                    chunk = b''
+                return Resp(int(r.status), dict(r.headers), chunk.decode('utf-8', 'replace'))
             return Resp(int(r.status), dict(r.headers), r.read().decode('utf-8', 'replace'))
     except urllib.error.HTTPError as e:
         body = ''
