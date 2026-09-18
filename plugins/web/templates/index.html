@@ -185,7 +185,8 @@ html[data-theme="light"] .button-link.is-disabled {
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   gap: 24px;
-  width: min(1660px, calc(100vw - 36px));
+  width: 1660px;
+  min-width: 1660px;
   min-height: 100vh;
   margin: 0 auto;
   padding: 22px 0 42px;
@@ -3934,7 +3935,7 @@ html[data-theme="light"] .toast {
   display: none;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 0px) { /* TTBOX 定死布局：上游 1180px 断点停用 */
   .app-shell {
     grid-template-columns: 240px minmax(0, 1fr);
     gap: 18px;
@@ -4016,7 +4017,7 @@ html[data-theme="light"] .toast {
   }
 }
 
-@media (max-width: 920px) {
+@media (max-width: 0px) { /* TTBOX 定死布局：上游 920px 断点停用 */
   html,
   body {
     max-width: 100%;
@@ -4855,7 +4856,7 @@ html[data-theme="light"] .toast {
   }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 0px) { /* TTBOX 定死布局：上游 480px 断点停用 */
   .app-shell {
     width: min(100vw - 12px, 100%);
   }
@@ -4951,7 +4952,7 @@ html[data-theme="light"] .toast {
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 0px) { /* TTBOX 定死布局：上游 560px 断点停用 */
   .class-offset-open {
     z-index: 120;
   }

@@ -16,11 +16,31 @@ import re
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TEMPLATE = REPO_ROOT / 'plugins' / 'web' / 'templates' / 'index.html'
 
-# 参照物 12 页签的 section id（顺序即侧栏 01..12）
+# 参照物 12 页签的 section id（DOM 内 section 出现顺序）
 EXPECTED_PAGES = [
     'home', 'profiles', 'control', 'assist', 'model', 'wifi',
     'hardware', 'hailo', 'kmbox', 'preset', 'license', 'fan',
 ]
+
+# [布局冻结] 侧栏页签顺序 = 模板中 data-page-target 的出现顺序 = 01..12 展示顺序
+EXPECTED_TAB_TARGETS = [
+    'home-page', 'profiles-page', 'control-page', 'assist-page', 'model-page',
+    'hardware-page', 'hailo-page', 'kmbox-page', 'wifi-page', 'preset-page',
+    'license-page', 'fan-page',
+]
+
+# [布局冻结] 侧栏页签文案（编号 + 名称），逐字锁死
+EXPECTED_TAB_LABELS = [
+    '01总览', '02热键控制', '03移动控制', '04辅助功能', '05模型库', '06显示与鼠标',
+    '07Hailo-8加速', '08键鼠盒子', '09网络配置', '10预设参数', '11系统状态', '12风扇控制',
+]
+
+# [布局冻结] .app-shell 固定宽度基线（px）；停用的上游响应式断点共 4 个
+FROZEN_APP_SHELL_WIDTH = 1660
+FROZEN_DISABLED_BREAKPOINTS = (1180, 920, 480, 560)
+LAYOUT_FREEZE_DOC = (
+    REPO_ROOT / 'docs' / 'handover' / '2026-09-17' / '控制台布局冻结基线-2026-09-18.md'
+)
 
 
 def _src() -> str:
@@ -82,3 +102,78 @@ def test_no_jinja_delimiter_leak_beyond_slots():
     assert '{{' not in stripped
     assert '{%' not in stripped
     assert '{#' not in stripped
+
+
+# ===================================================================
+# [布局冻结] 现阶段定死该控制台布局（2026-09-18）
+#   · 视觉：.app-shell 固定宽度 1660px，不再随窗口自适应；
+#   · 基线：12 页签「顺序 + 文案」冻结，4 个上游响应式断点全部停用。
+#   任何一处漂移 ⇒ 本段断言失败（= 改布局即测试失败）。
+#   依据文档：docs/handover/2026-09-17/控制台布局冻结基线-2026-09-18.md
+# ===================================================================
+
+
+def _nav_block() -> str:
+    """侧栏导航 <nav class="module-tabs">…</nav> 片段（页签顺序/文案的唯一来源）。"""
+    m = re.search(r'<nav class="module-tabs".*?</nav>', _src(), re.S)
+    assert m, '侧栏导航 <nav class="module-tabs"> 缺失'
+    return m.group(0)
+
+
+def test_nav_tab_order_is_frozen():
+    """[布局冻结] 侧栏页签顺序锁死：data-page-target 出现顺序必须与基线完全一致。"""
+    targets = re.findall(r'data-page-target="([a-z0-9\-]+)"', _nav_block())
+    assert targets == EXPECTED_TAB_TARGETS, f'页签顺序漂移: {targets}'
+
+
+def test_nav_tab_labels_are_frozen():
+    """[布局冻结] 侧栏页签文案锁死：编号 + 名称必须逐字与基线一致。"""
+    pairs = re.findall(r'<span>(\d{2})</span>([^<\n]+)', _nav_block())
+    labels = [num + name.strip() for num, name in pairs]
+    assert labels == EXPECTED_TAB_LABELS, f'页签文案漂移: {labels}'
+
+
+def test_section_ids_match_tab_targets():
+    """[布局冻结] 12 个 section id=*-page 的集合必须与页签契约一一对应（不多不少）。"""
+    ids = re.findall(r'<section id="([a-z0-9\-]+)-page"', _src())
+    expected_ids = {t[: -len('-page')] for t in EXPECTED_TAB_TARGETS}
+    assert len(ids) == 12, f'期望 12 个 section.*-page，实际 {len(ids)}: {ids}'
+    assert set(ids) == expected_ids, f'section id 集合与页签契约不一致: {sorted(set(ids))}'
+
+
+def test_layout_width_is_frozen():
+    """[布局冻结] .app-shell 固定宽度 1660px（含 min-width），不再随窗口自适应。"""
+    m = re.search(r'\.app-shell\s*\{([^}]*)\}', _src())
+    assert m, '.app-shell 基础规则缺失'
+    block = m.group(1)
+    assert f'width: {FROZEN_APP_SHELL_WIDTH}px;' in block, block
+    assert f'min-width: {FROZEN_APP_SHELL_WIDTH}px;' in block, block
+    # 旧的自适应写法必须绝迹（否则窄窗口会重新计算宽度）
+    assert 'min(1660px' not in _src(), '不得残留 min(1660px, ...) 自适应宽度'
+
+
+def test_responsive_breakpoints_disabled():
+    """[布局冻结] 所有 @media 断点条件必须为 max-width: 0px（永不匹配）。
+
+    上游 1180/920/480/560 四个响应式断点已停用；若有人复活任一数值宽度断点，
+    小屏折叠规则会重新裁掉固定宽度布局（尤其 920px 段的 html,body{overflow-x:hidden}）
+    —— 本断言即失败（= 改布局即测试失败）。
+    """
+    src = _src()
+    conditions = re.findall(r'@media\s*\(([^)]*)\)', src)
+    assert len(conditions) == len(FROZEN_DISABLED_BREAKPOINTS), (
+        f'期望 {len(FROZEN_DISABLED_BREAKPOINTS)} 个 @media，实际 {len(conditions)}: {conditions}'
+    )
+    for cond in conditions:
+        assert cond.replace(' ', '') == 'max-width:0px', f'存在未停用的断点: {cond!r}'
+    # 数值宽度的 max-width 断点 / 任意 min-width 断点均不许存在
+    assert re.search(r'@media\s*\(max-width:\s*(?!0px)\d', src) is None, '存在数值宽度 @media 断点'
+    assert re.search(r'@media\s*\(min-width', src) is None, '不得使用 min-width 断点'
+
+
+def test_layout_freeze_doc_exists():
+    """[布局冻结] 基线文档固化（改布局须与文档同步）。"""
+    assert LAYOUT_FREEZE_DOC.is_file(), f'布局冻结基线文档缺失: {LAYOUT_FREEZE_DOC}'
+    text = LAYOUT_FREEZE_DOC.read_text(encoding='utf-8')
+    assert '1660' in text
+    assert 'max-width: 0px' in text, '文档须记录断点停用写法 max-width: 0px'
