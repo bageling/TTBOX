@@ -223,7 +223,7 @@ stage_payload() {
     rm -rf -- "$staging"
     mkdir -p -- "$staging"
     log "step2：tar 管道 payload -> ${staging}"
-    tar -C "$payload" "${TAR_EXCLUDES[@]}" -cf - . | tar -C "$staging" -xf -
+    tar -C "$payload" "${TAR_EXCLUDES[@]}" -cf - . | tar -C "$staging" --no-same-owner -xf -
     # 2026-09-17 板端实测订正：payload 根目录多来自 mktemp -d（0700），tar 会把 "." 条目的
     # 0700 模式还原到 staging ⇒ mv 后 release 根 = 0700 root，User=ttbox 的服务 200/CHDIR。
     # release 根必须全局可遍历——显式 chmod，不依赖源目录模式。

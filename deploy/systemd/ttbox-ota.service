@@ -7,7 +7,6 @@
 
 [Unit]
 Description=TTBOX OTA updater (consume job files as root)
-Documentation=file:/opt/ttbox/current/docs/交付前更新功能定案-2026-09-18.md
 # 升级过程会重启 ttbox-web 自身，绝不能与 web 同生共死
 After=network-online.target
 Wants=network-online.target

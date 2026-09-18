@@ -6,7 +6,7 @@
   ② 下载到**临时目录**（非正式目录）
   ③ sha256 比对（下载物 vs 签名记录的 `sha256`）
   ④ Ed25519 验签（对 canonical JSON）
-  ⑤ 展开到 `releases/<ver>.staging/`
+  ⑤ 展开到 `releases/<ver>.ota.staging/`（勿与 release_install 的 <ver>.staging 同名）
   ⑥ 全量 sha256 复验（RELEASE_MANIFEST.json）
   ⑥b 降级拒绝：新包版本必须**高于**当前版本，否则 `downgrade_rejected`
      （例外：⑦b 健康检查失败后的自动回滚不受此限——那是保命路径，不是"装包"）
@@ -137,6 +137,26 @@ def default_install(staging: str, version: str) -> int:
     return subprocess.call([INSTALL_SCRIPT, version, staging, "--activate"])
 
 
+def normalize_staging_perms(staging: str) -> None:
+    """浇筑前规范化 staging 权限（2026-09-18 板端实测：Windows/msys 打的包会把
+    ELF 记成 0644、属主还原成打包机 uid —— 两者都会让 unit 断言/服务运行失败）。
+    发布树口径：目录 0755；bin/ 段下文件（含 plugins/*/bin 的 wrapper）、scripts/ 下
+    文件与 *.sh 0755；其余文件 0644。"""
+    for root, dirs, files in os.walk(staging):
+        for d in dirs:
+            os.chmod(os.path.join(root, d), 0o755)
+        for f in files:
+            p = os.path.join(root, f)
+            rel = os.path.relpath(p, staging).replace(os.sep, "/")
+            seg = rel.split("/")
+            if (rel.endswith(".sh") or "scripts" in seg or "bin" in seg
+                    or rel == "usbproxy/usb-proxy"):
+                mode = 0o755
+            else:
+                mode = 0o644
+            os.chmod(p, mode)
+
+
 def default_rollback() -> int:
     return subprocess.call([INSTALL_SCRIPT, "--rollback"])
 
@@ -162,8 +182,18 @@ def _ipc_get_status() -> dict:
         with _s.socket(_s.AF_UNIX, _s.SOCK_STREAM) as c:
             c.settimeout(2.0)
             c.connect(sock_path)
-            c.sendall(b'{"type":"GET_STATUS"}')
-            raw = c.recv(65536)
+            # NDJSON 行协议（lib/ipc.py 契约）：必须以 \n 结尾，core 只读一行即回；
+            # 2026-09-18 板端实测：漏 \n 时 core 永远不响应 ⇒ 健康检查恒失败。
+            c.sendall(b'{"type":"GET_STATUS"}\n')
+            chunks = []
+            while True:
+                chunk = c.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if chunk.rstrip(b"\r\n").endswith(b"}"):
+                    break
+            raw = b"".join(chunks)
         d = json.loads(raw.decode("utf-8", "replace"))
         return d.get("data", {}) if isinstance(d, dict) else {}
     except Exception:
@@ -319,7 +349,10 @@ class OtaUpdater:
             ver = str(version or signs.get("version") or "").strip()
             if not ver:
                 return self._fail("version_missing", "签名记录缺 version")
-            staging = os.path.join(self.releases_dir, f"{ver}.staging")
+            # 命名注意（2026-09-18 板端实测）：release_install 的浇筑目标也是
+            # releases/<ver>.staging —— 两者绝不能同名（否则其 tar 管道自拷自，
+            # RELEASE_MANIFEST.json 会在拷贝中消失）。故本目录用 <ver>.ota.staging。
+            staging = os.path.join(self.releases_dir, f"{ver}.ota.staging")
 
             # ⑤ 展开（仅双因子都过之后）
             try:
@@ -337,7 +370,8 @@ class OtaUpdater:
                 shutil.rmtree(staging, ignore_errors=True)
                 return self._fail("downgrade_rejected",
                                   f"包版本 {ver} 不高于当前版本 {cur or '<未知>'}（禁止降级）")
-            # ⑦ 原子发布
+            # ⑦ 原子发布（先规范化权限：打包机的 mode/uid 不可信，见函数 docstring）
+            normalize_staging_perms(staging)
             rc = self.install(staging, ver)
             if rc != 0:
                 shutil.rmtree(staging, ignore_errors=True)
