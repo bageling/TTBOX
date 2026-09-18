@@ -12,7 +12,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# A-PATH-5 单点真源：IPC socket 字面量只存于 plugins/web/lib/paths.py（跨语言同值，门禁断言）。
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "web"))
 from preview_contract import PreviewConfig, PreviewFrame, PreviewStatus, PixelFormat, now_us
+from lib.paths import IPC_SOCKET_DEFAULT as _IPC_SOCKET_DEFAULT
 
 class MemoryFrameSource:
     """测试和进程边界使用的 latest-frame 源；覆盖旧帧，不形成队列。"""
