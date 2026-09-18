@@ -59,7 +59,7 @@ def models_root() -> str:
     """模型库根（V-04）：TTBOX_MODELS_ROOT > <prefix>/models。
 
     单一真源：web 的模型元数据（installed/<id>/ui_meta.json）、转换产物落点
-    （`_incoming`）、上传落点一律经此派生，杜绝散写 ``/opt/ttbox/models/...``。
+    （`_incoming`）、上传落点一律经此派生，杜绝散写绝对路径。
     原同义异名（无尾 ``s`` 的变体）已删除，**不保留兼容读**；门禁③扫描生产代码时亦须绝迹。
     """
     return os.environ.get("TTBOX_MODELS_ROOT", ttbox_prefix() + "/models")

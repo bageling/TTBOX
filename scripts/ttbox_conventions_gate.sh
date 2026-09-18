@@ -85,7 +85,7 @@ def st_bad(msg):
 # ---------------------------------------------------------------------------
 INCLUDE_EXT = {".cpp", ".hpp", ".h", ".py", ".sh", ".js", ".service", ".json"}
 SKIP_TOP = {"docs", "third_party", ".git", "__pycache__",
-            ".archive-2026-09-17", "node_modules", ".mypy_cache"}
+            ".archive-2026-09-17", ".archive-2026-09-18", "node_modules", ".mypy_cache"}
 # 门禁脚本自身含字面量样例，必须排除，否则自检自恰失败。
 SKIP_FILES = {"scripts/ttbox_conventions_gate.sh"}
 
