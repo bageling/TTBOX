@@ -51,8 +51,12 @@ try:
     from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT       # type: ignore
     from lib.paths import WEB_PORT_DEFAULT as _WEB_PORT_DEFAULT    # type: ignore
     CORE_SOCK = _IPC_DEFAULT
-except Exception:            # 板端 release 树可能未带 lib/paths.py ⇒ 退回默认
-    CORE_SOCK = '/run/ttbox/core.sock'
+except Exception as _exc:    # 取不到真源时只接受已登记 RUNTIME 覆盖；静默兜底硬编码 = 造第二个真源
+    _ov = os.environ.get('TTBOX_IPC_SOCKET')
+    if not _ov:
+        raise SystemExit('FATAL: 无法导入 lib/paths.py 取 IPC socket 真源，且未设 TTBOX_IPC_SOCKET：%r'
+                         % (_exc,))
+    CORE_SOCK = _ov
     _WEB_PORT_DEFAULT = 8000
 
 STORE_DIR = '/var/lib/ttbox/license'

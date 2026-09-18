@@ -242,6 +242,14 @@ ENV_PATS = [
 ]
 
 
+# D-ENV-1 TEST 域验收脚本（登记表 §2.5）：显式点名，不做通配豁免；新增须刻意加入。
+TEST_DOMAIN_SCRIPTS = {
+    "scripts/ttbox_m207_accept.py",
+    "scripts/ttbox_m207_b21_expire.py",
+    "scripts/ttbox_m2xx_console_accept.py",
+}
+
+
 def env_scan_excluded(p):
     """测试/自测/门禁脚本不在 RUNTIME 扫描域（D-ENV-1 TEST 域）。"""
     parts = p.split("/")
@@ -250,7 +258,7 @@ def env_scan_excluded(p):
     base = os.path.basename(p)
     if base.startswith("test_"):
         return True
-    if re.match(r"scripts/ttbox_m207", p):
+    if p in TEST_DOMAIN_SCRIPTS:
         return True
     if base in ("ttbox_release_verify.sh", "ttbox_conventions_gate.sh"):
         return True
@@ -282,7 +290,7 @@ def check_env():
                 bad("② 未登记 env %s @ %s（需登记 docs/protocols/config-path-env-registry.md）"
                     % (name, p))
     # ③ 同义异名：**生产代码**（含注释剥离后）不得再出现。
-    #   carve-out = env_scan_excluded（**仅 TEST 域**：tests/、test_*.py、scripts/ttbox_m207*、
+    #   carve-out = env_scan_excluded（**仅 TEST 域**：tests/、test_*.py、TEST_DOMAIN_SCRIPTS 点名的验收脚本、
     #   *_verify.sh / *_selftest.sh）。唯一理由：回归/验收脚本必须**点名**同义异名，才能断言其
     #   "绝迹"（B27 断言 TTBOX_MODEL_ROOT 残留=False、B29 断言 TTBOX_WEB_HOST/PORT 无残留）。
     #   范围严格限定 TEST 域 —— 生产源码（core/src、core/include、plugins/web/bin、scripts/*.py
