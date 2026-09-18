@@ -136,8 +136,8 @@
 | 客户端模式 | wifiClientActivateButton | POST /api/network/wifi/client/activate | ✅ | nmcli | ✅ | REAL |
 | 主机名 | lanHostnameInput | PUT /api/system/hostname | ✅ | hostnamectl | ✅ | REAL |
 | Web 端口 | webPortInput | PUT /api/system/web-port | ✅ | ✅ | ✅ | VERIFY |
-| 局域网屏蔽 | lanBlock* | /api/system/lan-blocklist/* | ✅ | ✅ | ✅ | REAL |
-| 网络访问限制 | applyNetworkAccessButton | /api/system/lan-blocklist | ✅ | ✅ | ✅ | REAL |
+| 局域网屏蔽 | lanBlock* | /api/system/lan-blocklist/* | ❌ | ❌ | ❌ | REMOVED（D04：fail-open 整块下线） |
+| 网络访问限制 | applyNetworkAccessButton | /api/system（hostname/web-port 段保留） | ✅ | ✅ | ✅ | REAL |
 
 ---
 

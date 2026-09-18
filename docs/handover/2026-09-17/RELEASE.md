@@ -232,10 +232,12 @@ Web 侧 scheme 初筛只是**提前提示**，权威判据在 updater（`scripts
 ## 8. 变更与回滚
 
 - **升级**：`ttbox_release_install.sh` 浇筑新 release，`current` 软链切换；保留上一版 `releases/<ver>` 作回退点。
-- **回滚**：把 `current` 指回上一版目录并重启服务：
+- **回滚**：统一走脚本（D14，2026-09-18 定案），不要手工 `ln -sfn`：
   ```sh
-  ln -sfn /opt/ttbox/releases/<prev> /opt/ttbox/current && systemctl restart ttbox-core ttbox-web
+  ttbox_release_install.sh --rollback          # 回上一版本
+  ttbox_release_install.sh --rollback <ver>    # 回指定版本
   ```
+  脚本会切指针、重启服务并做健康检查；回滚后仍不健康 ⇒ 非零退出（不假绿）。
 - **授权不受发布回滚影响**：卡在 `/var/lib/ttbox/license/`（数据目录），与 release 树解耦。
 
 ---

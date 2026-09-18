@@ -105,7 +105,7 @@ TTBOX Update Engine (C++/Python)                  ← ⛔ 同上
 | PUT | `/api/system/hostname` | 修改主机名 | 🟢 |
 | POST | `/api/system/reboot` | 重启系统 | 🟢 |
 | POST | `/api/system/poweroff` | 关机 | 🟢 |
-| POST | `/api/system/lan-blocklist/scan` | 扫描局域网设备 | 🟢 |
+| POST | `/api/system/lan-blocklist/scan` | ~~扫描局域网设备~~ 已随 D04（2026-09-18 定案 §2.5）整块下线（fail-open 判死），端点 404 | ⚫ 已删 |
 | GET | `/api/settings/auto-start` | 获取自启设置 | 🟢 |
 | PUT | `/api/settings/auto-start` | 更新自启设置 | 🟢 |
 

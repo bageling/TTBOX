@@ -103,6 +103,8 @@
 | `TTBOX_EDID_REHANDSHAKE_ATTEMPTS` | 整数 | **12**（单一真源，V-09） | `scripts/edid/edid_apply.sh` | RUNTIME |
 | `TTBOX_EDID_HPD_SETTLE_SEC` | 秒 | `0.5` | `scripts/edid/edid_apply.sh` | RUNTIME |
 | `TTBOX_EDID_LOCK_TIMEOUT_SEC` | 秒 | `14` | `scripts/edid/edid_apply.sh` | RUNTIME |
+| `TTBOX_CURRENT` | 路径 | `/opt/ttbox/current` | `scripts/ttbox.sh` | 覆盖 current 软链根（运维入口/doctor 定位 scripts 与 web） | RUNTIME |
+| `TTBOX_STATE` | 路径 | `/opt/ttbox/state` | `scripts/ttbox.sh` | 覆盖状态目录（version 留档等） | RUNTIME |
 
 ### 2.5 显式登记为 TEST 域（不进 RUNTIME allowlist）
 
@@ -113,6 +115,7 @@
 | `CLOUD_PORT = 10015` | `scripts/ttbox_m207_b21_expire.py:35` | TEST | **云端回调端口常量**（验收脚本夹具），非产品端口，**登记即可、不改值** |
 | `TTBOX_RESTART_UNITS` / `TTBOX_HEALTH_TIMEOUT` / `TTBOX_RELEASE_SELFTEST` / `TTBOX_RELEASE_VERIFY_REPRO` / `TTBOX_RELEASE_VERIFY_USBPROXY_REBUILD` / `TTBOX_REAL_CORE_MAIN` | `scripts/*_selftest.sh` / `*_verify.sh` | TEST | 自测/体检脚本开关 |
 | `TTBOX_WEB` | `scripts/ttbox_m207_accept.py`、`scripts/ttbox_m2xx_console_accept.py` 的 `--base-url` 默认值 | TEST | 验收脚本覆盖 web 基址（默认 http://127.0.0.1:8000）；非产品变量，不进 RUNTIME allowlist |
+| `TTBOX_OTA_PRIV_PASSWORD` | `tools/ota/fake_ota_server.py` | TEST | 本地联调夹具注入签名私钥口令（正式签名口令只走本机 `C:\ttbox-ota-keys\PASSPHRASE.txt` / 运维手工输入，永不进环境或代码） |
 
 > **§6-5 裁定**：`10015` 属 **TEST** 域（验收脚本常量），登记后**不改值**。
 
