@@ -142,12 +142,23 @@ def test_section_ids_match_tab_targets():
 
 
 def test_layout_width_is_frozen():
-    """[布局冻结] .app-shell 固定宽度 1660px（含 min-width），不再随窗口自适应。"""
+    """[布局冻结] .app-shell 固定宽度 1660px（width 与 min-width 各自锁死）。
+
+    ★ 逐属性**行首锚定**匹配，规避子串"掩蔽"盲区：`'width: 1660px;' in block`
+      会被 `min-width: 1660px;` 命中，导致仅改 `width`（如 1660→1661）时护栏**漏报**。
+      锚定 `^\\s*width:` 后，`  min-width:` 行不再误配（其行首为 `m` 而非 `w`）。
+    """
     m = re.search(r'\.app-shell\s*\{([^}]*)\}', _src())
     assert m, '.app-shell 基础规则缺失'
     block = m.group(1)
-    assert f'width: {FROZEN_APP_SHELL_WIDTH}px;' in block, block
-    assert f'min-width: {FROZEN_APP_SHELL_WIDTH}px;' in block, block
+    width_m = re.search(r'(?m)^\s*width:\s*([0-9]+px)\s*;\s*$', block)
+    minw_m = re.search(r'(?m)^\s*min-width:\s*([0-9]+px)\s*;\s*$', block)
+    assert width_m, f'.app-shell 缺少 width 声明: {block!r}'
+    assert minw_m, f'.app-shell 缺少 min-width 声明: {block!r}'
+    assert width_m.group(1) == f'{FROZEN_APP_SHELL_WIDTH}px', \
+        f'.app-shell width 漂移: {width_m.group(1)} (期望 {FROZEN_APP_SHELL_WIDTH}px)'
+    assert minw_m.group(1) == f'{FROZEN_APP_SHELL_WIDTH}px', \
+        f'.app-shell min-width 漂移: {minw_m.group(1)} (期望 {FROZEN_APP_SHELL_WIDTH}px)'
     # 旧的自适应写法必须绝迹（否则窄窗口会重新计算宽度）
     assert 'min(1660px' not in _src(), '不得残留 min(1660px, ...) 自适应宽度'
 
