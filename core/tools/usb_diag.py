@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 import socket, struct, os, sys, subprocess, json
+# 路径默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py，禁止在此散写 socket 字面量。
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "web"))
+from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT, MOUSE_CMD_SOCK_DEFAULT as _MOUSE_CMD_DEFAULT
 
 # 1. cmd.sock test
 print("=== cmd.sock SEQPACKET test ===")
 s = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
 try:
-    s.connect("/run/ttbox-mouse-passthrough/cmd.sock")
+    s.connect(_MOUSE_CMD_DEFAULT)
     print("  connect OK")
     hdr = struct.pack("<HBB I", 0x4F50, 1, 1, 1)
     s.send(hdr)
@@ -23,7 +26,7 @@ print()
 print("=== ttbox_core GET_STATUS (IPC socket) ===")
 s2 = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 try:
-    s2.connect(os.environ.get("TTBOX_IPC_SOCKET", "/run/ttbox/core.sock"))
+    s2.connect(os.environ.get("TTBOX_IPC_SOCKET", _IPC_DEFAULT))
     msg = json.dumps({"type": "GET_STATUS"}).encode()
     s2.send(msg)
     s2.settimeout(3)

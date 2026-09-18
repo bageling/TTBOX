@@ -1,9 +1,12 @@
 # 板端诊断：打印 GET_STATUS 原始结构
-import json, socket, os
+import json, socket, os, sys
+# IPC socket 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py。
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "web"))
+from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT
 
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.settimeout(2.0)
-s.connect(os.environ.get('TTBOX_IPC_SOCKET', '/run/ttbox/core.sock'))
+s.connect(os.environ.get('TTBOX_IPC_SOCKET', _IPC_DEFAULT))
 s.sendall(json.dumps({'type': 'GET_STATUS'}).encode() + b'\n')
 data = b''
 while True:

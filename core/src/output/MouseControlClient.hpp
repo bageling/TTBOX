@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "common/Paths.hpp"   // A-PATH-5：mouse cmd.sock 默认单点真源
+
 namespace ttbox::core::output {
 
 struct MouseControlTelemetry {
@@ -22,7 +24,7 @@ struct MouseControlTelemetry {
 
 class MouseControlClient {
 public:
-    explicit MouseControlClient(std::string socket_path = "/run/ttbox-mouse-passthrough/cmd.sock")
+    explicit MouseControlClient(std::string socket_path = paths::kMouseCmdSocketDefault)
         : socket_path_(std::move(socket_path)) {}
     ~MouseControlClient();
 

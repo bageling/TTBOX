@@ -8,6 +8,7 @@
 
 #include "auth/LicenseDaemon.hpp"        // 提供 ILicenseClient（成员 unique_ptr 只需接口声明）
 #include "common/Metrics.hpp"
+#include "common/Paths.hpp"            // A-PATH-5：IPC socket 默认单点真源
 #include "config/ConfigManager.hpp"
 #include "ipc/IpcServer.hpp"
 #include "model/ModelManagement.hpp"
@@ -126,7 +127,7 @@ private:
     // IPC socket 路径优先级链（T01）：--ipc 参数 > TTBOX_IPC_SOCKET 环境变量 > 此默认值。
     // 默认迁入 /run/ttbox/（FHS tmpfs）：/tmp 为 1777 全局可写，任意本地用户可抢先
     // 创建同名 socket 劫持控制通道；/run/ttbox 由 systemd RuntimeDirectory 建管。
-    std::string ipc_path_ = "/run/ttbox/core.sock";
+    std::string ipc_path_ = paths::kIpcSocketDefault;
     std::string config_path_;
     std::atomic<bool> running_{false};
     double start_time_ms_ = 0.0;

@@ -19,6 +19,10 @@
 #include <string>
 #include <vector>
 
+// B-CONST-4：心跳间隔/超时单点真源（kHeartbeatIntervalSecDefault /
+// kHeartbeatTimeoutSecDefault），本头及各授权单元一律引用，不再各写 60/180。
+#include "auth/LicenseConstants.hpp"
+
 namespace ttbox::core::auth {
 
 // 授权状态枚举（原定义于 LicenseDaemon.hpp，语义与取值完全保持）

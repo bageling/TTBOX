@@ -25,7 +25,7 @@ class MemoryFrameSource:
 
 class CoreIpcFrameSource:
     """通过既有 GET_PREVIEW IPC 获取 JPEG；不暴露 DMA-BUF 或 Core buffer。"""
-    def __init__(self, socket_path=None): self.socket_path=socket_path or os.environ.get("TTBOX_IPC_SOCKET", "/run/ttbox/core.sock")
+    def __init__(self, socket_path=None): self.socket_path=socket_path or os.environ.get("TTBOX_IPC_SOCKET", _IPC_SOCKET_DEFAULT)
     def latest(self):
         if self.socket_path.startswith("tcp:"): return None
         try:

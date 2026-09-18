@@ -158,8 +158,14 @@ def apply_real_monitor_to_config(config):
     return config
 
 
-def load_config(config_path="/opt/ttbox/config/hardware_display.json"):
-    """读取并校验配置（白名单校验）。"""
+def load_config(config_path=None):
+    """读取并校验配置（白名单校验）。config_path 缺省 = TTBOX_DISPLAY_CONFIG > <TTBOX_PREFIX>/config/hardware_display.json。"""
+    if config_path is None:
+        import os
+        config_path = os.environ.get(
+            "TTBOX_DISPLAY_CONFIG",
+            os.environ.get("TTBOX_PREFIX", "/opt/ttbox") + "/config/hardware_display.json",
+        )
     import json
     config = {}
     try:

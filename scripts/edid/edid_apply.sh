@@ -6,15 +6,20 @@
 # 用法：sudo bash /opt/ttbox/scripts/edid/edid_apply.sh [device]  默认 /dev/video0
 set -euo pipefail
 
-CONFIG="${TTBOX_DISPLAY_CONFIG:-/opt/ttbox/config/hardware_display.json}"
-EDID_DIR="/opt/ttbox/runtime/edid"
+# 根前缀参数化（A-PATH-4）：板端默认 /opt/ttbox；联调可用 TTBOX_PREFIX 覆盖。
+TTBOX_PREFIX="${TTBOX_PREFIX:-/opt/ttbox}"
+CONFIG="${TTBOX_DISPLAY_CONFIG:-${TTBOX_PREFIX}/config/hardware_display.json}"
+EDID_DIR="${TTBOX_PREFIX}/runtime/edid"
+# B-CONST-4 / V-09：HPD 重协商重试次数默认**单一真源 = 12**（Web 不再覆写；运维可经
+# TTBOX_EDID_REHANDSHAKE_ATTEMPTS 覆盖）。登记见 docs/protocols/config-path-env-registry.md §三。
+ATTEMPTS_DEFAULT=12
 EDID_OUTPUT="${EDID_OUTPUT:-$EDID_DIR/current.bin}"
 VIDEO_DEV="${1:-/dev/video0}"
 if [ "$VIDEO_DEV" != "/dev/video0" ]; then
   echo "错误的 HDMI-RX 设备 $VIDEO_DEV：EDID 注入必须使用 /dev/video0；/dev/dri/card0 仅用于 loopout" >&2
   exit 2
 fi
-export PY_ROOT="${PY_ROOT:-/opt/ttbox/scripts}"
+export PY_ROOT="${PY_ROOT:-${TTBOX_PREFIX}/scripts}"
 # 默认按标准流程重协商；明确指定 0 才退回纯注入。
 REHANDSHAKE="${TTBOX_EDID_REHANDSHAKE:-1}"
 HPD_STATUS=""
@@ -153,8 +158,8 @@ fi
 if [ "$REHANDSHAKE" = "1" ]; then
   APPLIED=0
   LOCKED=0
-  ATTEMPTS="${TTBOX_EDID_REHANDSHAKE_ATTEMPTS:-12}"
-  case "$ATTEMPTS" in ''|*[!0-9]*) ATTEMPTS=12 ;; esac
+  ATTEMPTS="${TTBOX_EDID_REHANDSHAKE_ATTEMPTS:-$ATTEMPTS_DEFAULT}"
+  case "$ATTEMPTS" in ''|*[!0-9]*) ATTEMPTS=$ATTEMPTS_DEFAULT ;; esac
   [ "$ATTEMPTS" -gt 0 ] || ATTEMPTS=1
   attempt=1
   while [ "$attempt" -le "$ATTEMPTS" ]; do

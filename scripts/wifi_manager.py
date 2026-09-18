@@ -21,7 +21,10 @@ DEFAULT_CONNECTION_PREFIX = os.environ.get("TTBOX_WIFI_DEFAULT_CONNECTION_PREFIX
 USER_CONNECTION_PREFIX = os.environ.get("TTBOX_WIFI_USER_CONNECTION_PREFIX", "ttbox-wifi-")
 AP_CONNECTION = os.environ.get("TTBOX_WIFI_AP_CONNECTION", "ttbox-ap-hotspot")
 WIFI_BOOTSTRAP_SERVICE = os.environ.get("TTBOX_WIFI_BOOTSTRAP_SERVICE", "ttbox-wifi-bootstrap.service")
-DEFAULT_WEB_PORT = int(os.environ.get("TTBOX_DEFAULT_WEB_PORT", "8000"))
+# 面板端口默认（B-CONST-1 / V-06）：跨语言同值真源 = plugins/web/lib/paths.py::WEB_PORT_DEFAULT，
+# 门禁 scripts/ttbox_conventions_gate.sh 断言本值与之一致。运行时覆盖名 = TTBOX_WEB_PORT（**唯一名**；
+# 旧 TTBOX_DEFAULT_WEB_PORT / TTBOX_PORT 属同义异名，已删除，不保留兼容读 —— D-ENV-3/D-ENV-5）。
+WEB_PORT_DEFAULT = 8000
 
 
 # ---- M2.04：品牌表 ↔ 广播 SSID 一致性自检钩子（诊断用；不抛异常、不改状态）----
@@ -76,11 +79,12 @@ def _nmcli_path() -> str | None:
 
 
 def _web_port() -> int:
+    """面板端口：TTBOX_WEB_PORT（唯一名，D-ENV-3）> WEB_PORT_DEFAULT。"""
     try:
-        port = int(os.environ.get("TTBOX_PORT", "") or DEFAULT_WEB_PORT)
+        port = int(os.environ.get("TTBOX_WEB_PORT", "") or WEB_PORT_DEFAULT)
     except (TypeError, ValueError):
-        return DEFAULT_WEB_PORT
-    return port if 1 <= port <= 65535 else DEFAULT_WEB_PORT
+        return WEB_PORT_DEFAULT
+    return port if 1 <= port <= 65535 else WEB_PORT_DEFAULT
 
 
 def _web_url(host: str) -> str:

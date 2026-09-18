@@ -45,7 +45,7 @@ class IpcServer {
 public:
     ~IpcServer();
 
-    // 启动监听。socket_path: Unix 下为文件路径（默认 /run/ttbox/core.sock，
+    // 启动监听。socket_path: Unix 下为文件路径（默认 common/Paths.hpp::kIpcSocketDefault，
     // 可用 --ipc 参数或 TTBOX_IPC_SOCKET 环境变量覆盖）；Windows 下为 "tcp:<port>"。
     bool start(const std::string& socket_path, std::string* error = nullptr);
     void stop();

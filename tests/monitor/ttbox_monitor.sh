@@ -26,7 +26,7 @@ while [ "$(date +%s)" -lt "$END" ]; do
 import socket, json
 try:
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(3)
-    s.connect(__import__('os').environ.get('TTBOX_IPC_SOCKET', '/run/ttbox/core.sock'))
+    s.connect(__import__('os').environ['TTBOX_IPC_SOCKET'])
     s.sendall(json.dumps({'type':'GET_STATUS'}).encode()+b'\n')
     buf=b''
     while b'\n' not in buf: buf += s.recv(65536)

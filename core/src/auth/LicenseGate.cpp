@@ -6,6 +6,7 @@
 //     kExpired 仅宽限窗口内允许；其余一律不允许（ai_allowed=false）。
 //   · 未激活（kUnknown）/ 未验证（kChecking）→ fail-closed（不允许），但**不阻断**透传/Web 管理。
 #include "auth/LicenseGate.hpp"
+#include "auth/LicenseConstants.hpp"   // B-CONST-4：心跳 60/180 单点真源（直接引用）
 
 #include <utility>
 
@@ -68,7 +69,8 @@ LicenseSnapshot to_snapshot(const LicenseStatus& s, const StoreLoadResult& lr, i
     snap.state = s.state;
     snap.is_pro = s.is_pro;
     snap.last_error = s.last_error;
-    snap.heartbeat_interval_s = (s.heartbeat_interval > 0) ? s.heartbeat_interval : 60;
+    snap.heartbeat_interval_s = (s.heartbeat_interval > 0) ? s.heartbeat_interval
+                                                           : kHeartbeatIntervalSecDefault;
     snap.expire_unix_ms = s.expire_unix_ms;
 
     // grace：仅 kExpired 且 now < grace 时保留（fail-closed，除非宽限内）。

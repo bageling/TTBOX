@@ -58,7 +58,7 @@ bool PhysicalMouseReader::open_event_socket(std::string* error) {
 #if defined(_WIN32)
  (void)error; return false;
 #else
- if(event_socket_path_.empty()) event_socket_path_="/run/ttbox-mouse-passthrough/event.sock";
+ if(event_socket_path_.empty()) event_socket_path_=paths::kMouseEventSocketDefault;
  if(event_fd_>=0){::close(event_fd_);event_fd_=-1;}
  event_fd_ = ::socket(AF_UNIX, SOCK_SEQPACKET, 0);
  if (event_fd_ < 0) { if(error)*error="创建 usb-proxy event socket 失败"; return false; }

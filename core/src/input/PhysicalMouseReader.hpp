@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 #include <thread>
+#include "common/Paths.hpp"   // A-PATH-5：mouse event.sock 默认单点真源
 namespace ttbox::core::input {
 class PhysicalMouseReader {
 public:
@@ -27,7 +28,7 @@ private:
     bool open_event_socket(std::string* error);
     bool start_event_socket(std::string* error);
     std::string device_;
-    std::string event_socket_path_="/run/ttbox-mouse-passthrough/event.sock";
+    std::string event_socket_path_=paths::kMouseEventSocketDefault;
     int fd_=-1; int event_fd_=-1; std::atomic<bool> running_{false}; std::thread thread_; std::thread event_thread_;
     std::atomic<uint16_t> buttons_{0};
  std::atomic<int32_t> rel_x_{0},rel_y_{0};

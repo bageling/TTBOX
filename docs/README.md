@@ -28,6 +28,7 @@
 | 目录结构 | [`architecture/目录结构.md`](architecture/目录结构.md) | 顶层树 + 是否进 payload |
 | IPC 协议 | [`protocols/ipc-protocol.md`](protocols/ipc-protocol.md) | 网页↔核心通信（真值以源码为准） |
 | 母版规格 | [`protocols/image-spec.md`](protocols/image-spec.md) | Ubuntu RK3588 母版规格 |
+| **口径登记表** | [`protocols/config-path-env-registry.md`](protocols/config-path-env-registry.md) | 配置·常量·路径唯一真源：RUNTIME env allowlist + 跨语言同值常量（门禁 `scripts/ttbox_conventions_gate.sh` 断言） |
 | RK3588 开发流程（强制） | [`ops/RK3588开发流程.md`](ops/RK3588开发流程.md) | 本机→交叉→上板强制流程 |
 | 测试说明 | [`ops/测试说明.md`](ops/测试说明.md) | 怎么编译、怎么测试 |
 | 修改指南 | [`ops/修改指南.md`](ops/修改指南.md) | 改代码前必读（"我要改 X 看哪里"） |

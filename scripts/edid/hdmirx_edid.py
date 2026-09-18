@@ -6,9 +6,10 @@ import struct
 import subprocess
 import sys
 
-sys.path.insert(0, "/opt/ttbox/scripts")
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# A-PATH-3：自身位置相对派生（原硬编码 "/opt/ttbox/scripts" 已删；且用 append 防遮蔽 stdlib）。
+# 本文件在 <root>/scripts/edid/ ⇒ 父目录 = scripts/（edid 包所在），再上 = <root>。
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from edid.timing_db import TIMING_MAP
@@ -121,7 +122,7 @@ def cmd_build(profile, native, added, name, vendor, product_id, serial, device, 
     import json
     from edid.builder import build_from_config
     from edid.mode_builder import load_config
-    cfg = load_config("/opt/ttbox/config/hardware_display.json")
+    cfg = load_config()  # A-PATH-4：路径经 TTBOX_DISPLAY_CONFIG / TTBOX_PREFIX 派生
     if profile:
         cfg["profile"] = profile
         if not native and profile in PROFILES:

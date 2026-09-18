@@ -4,8 +4,10 @@ import json
 import subprocess
 import sys
 import time
+from pathlib import Path
 
-sys.path.insert(0, "/opt/ttbox/scripts")
+# A-PATH-3：scripts 目录相对派生（原硬编码 "/opt/ttbox/scripts" 已删；append 防遮蔽 stdlib）。
+sys.path.append(str(Path(__file__).resolve().parents[2] / "scripts"))
 from edid.builder import EdidBuilder
 
 HPD = "/sys/devices/platform/fdee0000.hdmirx-controller/hdmirx/hdmirx/status"

@@ -64,7 +64,7 @@
 用法（板端 root @ 192.168.0.104）：
     python3 scripts/ttbox_m207_accept.py [--base-url URL] [--cards-dir DIR]
         [--allow-state-toggle] [--no-restore] [--restore-valid] [--strict]
-依赖板端：python3、web :8000、AF_UNIX /run/ttbox/core.sock、systemctl。
+依赖板端：python3、web :8000、AF_UNIX core IPC socket（默认见 core/src/common/Paths.hpp）、systemctl。
 退出码：0 = 无 FAIL（含全 SKIP/PEND）；1 = 有 FAIL；--strict 时 SKIP/PEND 亦计为失败。
 """
 from __future__ import annotations
@@ -84,7 +84,12 @@ import urllib.request
 # 配置（板端默认；可用命令行/环境变量覆盖）
 # ===========================================================================
 WEB_BASE = 'http://127.0.0.1:8000'
-CORE_SOCK = '/run/ttbox/core.sock'
+# IPC socket 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py，不散写字面量。
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.append(str(_Path(__file__).resolve().parents[1] / "plugins" / "web"))
+from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT
+CORE_SOCK = _IPC_DEFAULT
 CARDS_DIR = '/root/m2-cards'
 CONFIG_PATH = os.environ.get('TTBOX_CONFIG', '/opt/ttbox/config/default.json')
 STORE_DIR = '/var/lib/ttbox/license'

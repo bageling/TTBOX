@@ -1,4 +1,5 @@
 #include "auth/TtboxLicenseClient.hpp"
+#include "auth/LicenseConstants.hpp"   // B-CONST-4：心跳 60/180 单点真源
 
 #include "auth/TtboxCanonical.hpp"   // T1.07：canonical 纯函数（末尾无换行，M2.07 修复）
 #include "common/Json.hpp"
@@ -527,8 +528,8 @@ std::pair<int, int> TtboxLicenseClient::fetch_app_info() {
     const auto& first = data->as_array()[0];
     const auto* hi = first.find("heartbeatInterval");
     const auto* ht = first.find("heartbeatTimeout");
-    if (hi) hb_interval = static_cast<int>(hi->as_number(60));
-    if (ht) hb_timeout = static_cast<int>(ht->as_number(180));
+    if (hi) hb_interval = static_cast<int>(hi->as_number(kHeartbeatIntervalSecDefault));
+    if (ht) hb_timeout = static_cast<int>(ht->as_number(kHeartbeatTimeoutSecDefault));
     return {hb_interval, hb_timeout};
 }
 

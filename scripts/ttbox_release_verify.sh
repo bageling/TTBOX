@@ -376,6 +376,27 @@ check_transitional_links() {
 check_transitional_links
 
 # ---------------------------------------------------------------------------
+# 8. 口径门禁：配置 · 常量 · 路径「无补丁」回归（Task #2 / T-E）
+# ---------------------------------------------------------------------------
+# 定性：口径门禁是**源码树级**检查（需 core/src、plugins/web/lib 等源码在场以断言
+#   单点真源）。本 verify 也常跑在板端 release 树（只有 bin/ + plugins/ 打包态），
+#   故仅在**源码树在场**时执行；否则跳过（不影响"换指针回滚"体检）。
+#   跳过开关：TTBOX_SKIP_CONVENTIONS_GATE=1。详见 scripts/ttbox_conventions_gate.sh。
+GATE_SH="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/ttbox_conventions_gate.sh"
+if [[ "${TTBOX_SKIP_CONVENTIONS_GATE:-0}" == "1" ]]; then
+    warn "口径门禁已按 TTBOX_SKIP_CONVENTIONS_GATE=1 跳过"
+elif [[ -f "$GATE_SH" && -f "$(dirname -- "$GATE_SH")/../core/src/common/Paths.hpp" ]]; then
+    if gate_out="$(bash "$GATE_SH" 2>&1)"; then
+        ok "口径门禁 PASS（scripts/ttbox_conventions_gate.sh）"
+    else
+        fail "口径门禁 FAIL（scripts/ttbox_conventions_gate.sh）"
+        printf '%s\n' "$gate_out" | sed 's/^/    /'
+    fi
+else
+    info "口径门禁跳过（源码树不在场 —— 板端 release 树的正常情形）"
+fi
+
+# ---------------------------------------------------------------------------
 # 结论
 # ---------------------------------------------------------------------------
 echo "------------------------------------------------------------"

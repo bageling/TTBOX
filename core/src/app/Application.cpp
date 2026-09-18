@@ -25,6 +25,8 @@
 
 #include "common/Logger.hpp"
 #include "common/CpuAffinity.hpp"
+#include "common/Paths.hpp"        // A-PATH-5：运行期路径字面量单点真源
+#include "common/ConfigDefaults.hpp"  // C-CFG-4：出厂默认值镜像（== deploy/config/00-factory.json）
 #include "model/ModelManagement.hpp"
 #include "model/ModelAdapter.hpp"
 #ifdef TTBOX_CORE_HAS_RKNN
@@ -50,7 +52,8 @@ std::atomic<bool>& shutdown_flag() { return g_shutdown_requested; }
 #define TTBOX_PROJECT_ROOT "."
 #endif
 const char* kDefaultConfigPath = TTBOX_PROJECT_ROOT "/config/default.json";
-const char* kSystemLicenseFile = "/etc/ttbox/license.key";
+// 系统 license 文件路径**唯一真源** = common/Paths.hpp::kSystemLicenseFile（A-PATH-5）；
+// 本文件不再另写 "/etc/ttbox/license.key" 字面量。
 // ★ M2.03：受限预览帧率封顶常量 kRestrictedPreviewFps 定义在 runtime/CoreRuntime.hpp
 //   （Application 与 CoreRuntime 共用同一取值，避免两处各写一个 5）。
 
@@ -83,7 +86,7 @@ int parse_color_order(const std::string& s) {
 }
 
 std::vector<int> parse_worker_cores(const std::string& s) {
-    if (s.empty()) return {1, 2, 4};
+    if (s.empty()) return cfg::default_worker_cores();
 
     std::vector<int> result;
     std::istringstream iss(s);
@@ -110,7 +113,7 @@ std::vector<int> parse_worker_cores(const std::string& s) {
     }
     // 配置中出现非法/重叠 mask 时回退到稳定的独占组合，避免把错误
     // 参数直接传给 RKNN 后出现吞吐下降或不同版本驱动行为不一致。
-    return result.empty() ? std::vector<int>{1, 2, 4} : result;
+    return result.empty() ? cfg::default_worker_cores() : result;
 }
 
 std::string strip(const std::string& s) {
@@ -134,7 +137,7 @@ std::string Application::resolve_license_card(const std::string& cli_license) co
 
     // 系统路径 /etc/ttbox/license.key：与原 aibox /etc/aibox/ 1:1 对齐语义
     {
-        std::ifstream f(kSystemLicenseFile);
+        std::ifstream f(paths::kSystemLicenseFile);
         if (f) {
             std::string s;
             std::getline(f, s);
@@ -205,7 +208,7 @@ std::string Application::gate_missing_summary() const {
 void Application::apply_preview_degrade(CoreRuntime::Params* params,
                                         const CoreRuntime::FeatureGates& gates) const {
     if (params == nullptr) return;
-    const int cfg_fps = static_cast<int>(config_.get_int("preview_fps", 60));
+    const int cfg_fps = static_cast<int>(config_.get_int("preview_fps", cfg::kPreviewFpsDefault));
     const bool full = gates.capture && gates.inference && gates.aim;
     params->preview.watermark = !full;
     params->preview.fps = full
@@ -353,7 +356,7 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         output::OutputBackend::Params bp;
         bp.kind = output_kind;
         bp.hidg_path = config_.get_string("output_hidg_path", "/dev/hidg0");
-        bp.proxy_socket_path = config_.get_string("output_proxy_socket", "/run/ttbox-mouse-passthrough/cmd.sock");
+        bp.proxy_socket_path = config_.get_string("output_proxy_socket", paths::kMouseCmdSocketDefault);
         bp.enabled = enabled;
         bp.runtime_config = &runtime_config_;
         // button_source 由 Application::start 阶段绑定（见 add_hid_button_source 处）
@@ -378,7 +381,7 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
     out_params.output = hid_output_;
     out_params.runtime_config = &runtime_config_;
     out_params.mouse_event_socket =
-        config_.get_string("input_event_socket", "/run/ttbox-mouse-passthrough/event.sock");
+        config_.get_string("input_event_socket", paths::kMouseEventSocketDefault);
     return true;
 }
 
@@ -442,7 +445,7 @@ int Application::initialize(int argc, char** argv) {
 
     Logger::instance().add_sink(std::make_shared<ConsoleSink>());
     TTBOX_LOG_INFO("=== " + std::string(kAppName) + " v" +
-                   std::string(kVersion) + " 启动 ===");
+                   std::string(kCoreVersion) + " 启动 ===");
 
     // ---- 风扇满转（fan_control min_pwm=100）：防热节流拖慢 NPU ----
     {
@@ -469,7 +472,7 @@ int Application::initialize(int argc, char** argv) {
         const std::string env_ipc = env_or_empty("TTBOX_IPC_SOCKET");
         if (!env_ipc.empty()) ipc_path_ = env_ipc;
     }
-    if (ipc_path_.empty()) ipc_path_ = "/run/ttbox/core.sock";
+    if (ipc_path_.empty()) ipc_path_ = paths::kIpcSocketDefault;
     std::string cfg_error;
     if (!config_.load(config_path_, &cfg_error)) {
         TTBOX_LOG_ERROR(cfg_error);
@@ -489,7 +492,7 @@ int Application::initialize(int argc, char** argv) {
                 if (!g.good()) TTBOX_LOG_WARN(std::string("governor 切换失败: ") + pol);
             }
         }
-        const int pct = static_cast<int>(config_.get_int("cpu_min_freq_percent", 50));
+        const int pct = static_cast<int>(config_.get_int("cpu_min_freq_percent", cfg::kCpuMinFreqPercentDefault));
         auto fr = CpuAffinity::lock_min_freq_percent(pct);
         if (fr.freq_ok) {
             TTBOX_LOG_INFO("CPU 调频策略完成（schedutil+min" + std::to_string(pct) + "%）: " + fr.detail);
@@ -863,7 +866,7 @@ void Application::run() {
     //   与 initialize() 的构建同源（同一张卡 ⇒ 同一组 gates），此处再读一次以覆盖启动前的授权变化。
     if (core_runtime_) {
         core_runtime_->set_feature_gates(current_feature_gates(), brand_upper(),
-                                         static_cast<int>(config_.get_int("preview_fps", 60)));
+                                         static_cast<int>(config_.get_int("preview_fps", cfg::kPreviewFpsDefault)));
     }
 
     // ---- 自动启动 AI 流水线 ----
@@ -1138,7 +1141,7 @@ SystemStatus Application::status_provider() const {
     SystemStatus st;
     st.running = running_.load();
     st.app_name = kAppName;
-    st.version = kVersion;
+    st.version = kCoreVersion;
     if (start_time_ms_ > 0.0) st.uptime_ms = now_ms() - start_time_ms_;
     st.ipc_socket = ipc_.socket_path();
     st.config_file = config_.path();
@@ -1757,7 +1760,7 @@ bool Application::try_resume_from_degraded(std::string* error) {
     }
     // ★ M2.03：重建后同步 gate + 预览降级（initialize 已按同一 gates 构建，这里保证 gates_ 成员一致）。
     core_runtime_->set_feature_gates(current_feature_gates(), brand_upper(),
-                                     static_cast<int>(config_.get_int("preview_fps", 60)));
+                                     static_cast<int>(config_.get_int("preview_fps", cfg::kPreviewFpsDefault)));
     runtime_waiting_config_ = false;
     degraded_reason_.clear();
     TTBOX_LOG_INFO("待配置状态已恢复：CoreRuntime 参数重建成功");
@@ -1817,7 +1820,7 @@ bool Application::switch_active_model_runtime(const std::string& new_model_id,
     }
     // ★ M2.03：切换后同步 gate + 预览降级（与当前卡态一致；受限态保持封顶帧率与水印）。
     core_runtime_->set_feature_gates(current_feature_gates(), brand_upper(),
-                                     static_cast<int>(config_.get_int("preview_fps", 60)));
+                                     static_cast<int>(config_.get_int("preview_fps", cfg::kPreviewFpsDefault)));
     // T02 死锁修复：runtime 已用有效模型完成初始化，清除"待配置"降级标志。
     runtime_waiting_config_ = false;
     degraded_reason_.clear();

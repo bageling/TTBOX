@@ -420,7 +420,7 @@ activate() {
             if [[ -n "$PREV_VERSION" ]]; then
                 switch_current "$PREV_VERSION"
                 reload_and_restart
-                die "激活失败：已回切到 ${PREV_VERSION}（请检查 /run/ttbox/core.sock 与 web:${WEB_PORT}）"
+                die "激活失败：已回切到 ${PREV_VERSION}（请检查 core IPC socket 与 web:${WEB_PORT}）"
             else
                 die "激活失败且无上一版本可回切（首次部署）"
             fi

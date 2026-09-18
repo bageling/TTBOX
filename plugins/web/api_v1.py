@@ -8,7 +8,7 @@
   3. **能力清单 /api/v1/capabilities 是唯一真源**，前端的"未实现"角标由它渲染。
 
 Core IPC 契约（以 core/src/ipc/IpcServer.cpp 为准，docs/ipc-protocol.md 已过时）：
-  - 传输：Unix socket（TTBOX_IPC_SOCKET，缺省 /run/ttbox/core.sock），NDJSON 行协议。
+  - 传输：Unix socket（TTBOX_IPC_SOCKET；默认路径见 plugins/web/lib/paths.py::IPC_SOCKET_DEFAULT），NDJSON 行协议。
   - **一连接一请求**：Core 的 handle_connection() 只读一行、回一行就关闭 fd，
     所以本模块每次调用都 connect → send(json+"\\n") → recv 一行 → close，
     绝不复用连接、绝不流水线（复用只会拿到对端已关闭的空响应）。
@@ -42,8 +42,10 @@ api_v1 = Blueprint('api_v1', __name__, url_prefix='/api/v1')
 # ====================================================================
 # IPC 传输层
 # ====================================================================
-# IPC socket 唯一真源：TTBOX_IPC_SOCKET > /run/ttbox/core.sock（与 ttbox-web.py 一致）。
-IPC_SOCKET = os.environ.get('TTBOX_IPC_SOCKET', '/run/ttbox/core.sock')
+# IPC socket 唯一真源（A-PATH-5）：TTBOX_IPC_SOCKET > lib/paths.py 默认（与 ttbox-web.py 一致）。
+from lib import paths as _ttbox_paths
+
+IPC_SOCKET = _ttbox_paths.ipc_socket()
 # Windows 本机开发用：TTBOX_IPC_TCP=127.0.0.1:9100（协议与 Unix socket 完全一致）。
 IPC_TCP = os.environ.get('TTBOX_IPC_TCP', '')
 

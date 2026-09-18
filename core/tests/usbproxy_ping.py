@@ -1,7 +1,10 @@
-import socket,struct,time
+import socket,struct,time,os,sys
+# mouse cmd.sock 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py。
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "plugins", "web"))
+from lib.paths import MOUSE_CMD_SOCK_DEFAULT as _CMD
 def rpc(typ,rid,payload=b""):
     s=socket.socket(socket.AF_UNIX,socket.SOCK_SEQPACKET)
-    s.connect("/run/ttbox-mouse-passthrough/cmd.sock")
+    s.connect(_CMD)
     s.settimeout(3)
     hdr=struct.pack("<HBBI",0x4F50,1,typ,rid)
     s.sendall(hdr+payload)

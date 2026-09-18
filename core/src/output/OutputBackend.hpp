@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 
+#include "common/Paths.hpp"   // A-PATH-5：mouse cmd.sock 默认单点真源
 #include "output/IHidOutput.hpp"
 
 namespace ttbox::core { class RuntimeConfig; }
@@ -110,7 +111,7 @@ public:
     struct Params {
         std::string kind = "local_hid";   // local_hid
         std::string hidg_path = "/dev/hidg1";
-        std::string proxy_socket_path = "/run/ttbox-mouse-passthrough/cmd.sock";
+        std::string proxy_socket_path = paths::kMouseCmdSocketDefault;
         // Gate / 运行时
         RuntimeConfig* runtime_config = nullptr;
         std::atomic<uint16_t>* button_source = nullptr;

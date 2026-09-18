@@ -32,5 +32,8 @@
 
 ## 其它样例
 
-- `hardware_display.json` / `hdmirx_edid_identity.json`：显示与 EDID 身份配置。
+- `hdmirx_edid_identity.json`：EDID 身份配置样例。
+- 显示身份配置 `hardware_display.json` **单点**在 `deploy/config/hardware_display.json`
+  （出厂基线；`scripts/ttbox_fhs_init.sh` 首启播种到 `<TTBOX_PREFIX>/config/`）。
+  本目录**不再**保留副本（V-19：曾与 deploy 版逐字节相同 ⇒ 双份维护必漂移）。
 - `yolo261n-rk3588.json`：RKNN 模型描述样例。

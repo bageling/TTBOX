@@ -18,6 +18,10 @@ std::string injection_file = "injection.json";
 Json::Value injection_config;
 
 // ── mouse_control（自研通讯层）──
+// ★ 跨进程同值（A-PATH-5）：本进程独立于 core，无法 include core/src/common/Paths.hpp。
+//   这两个默认值 = usbproxy 侧的**唯一定义**，必须与 core 的
+//   Paths.hpp::kMouseCmdSocketDefault / kMouseEventSocketDefault（及 web paths.py）逐字符相等；
+//   由 scripts/ttbox_conventions_gate.sh 同值断言防漂移（登记表见 docs/protocols/config-path-env-registry.md）。
 bool enable_mouse_control = false;
 bool synthetic_mode = false;
 std::string mouse_cmd_socket = "/run/ttbox-mouse-passthrough/cmd.sock";

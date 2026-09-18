@@ -93,7 +93,12 @@ def _is_active(unit: str) -> bool:
 
 def _ipc_get_status() -> dict:
     """读 core IPC（unix socket）拿业务能力；失败返回 {}（= 业务不可用）。"""
-    sock_path = os.environ.get("TTBOX_IPC_SOCKET", "/run/ttbox/core.sock")
+    # IPC socket 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py。
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.append(str(_Path(__file__).resolve().parents[1] / "plugins" / "web"))
+    from lib.paths import IPC_SOCKET_DEFAULT as _IPC_DEFAULT
+    sock_path = os.environ.get("TTBOX_IPC_SOCKET", _IPC_DEFAULT)
     try:
         import socket as _s
         with _s.socket(_s.AF_UNIX, _s.SOCK_STREAM) as c:

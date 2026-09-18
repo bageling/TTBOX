@@ -1,8 +1,12 @@
 """tune_check.py — derive_pid_params 全场景稳定性验证（紧凑版）"""
 import sys
 import random
-sys.path.insert(0, r"C:\Users\Administrator\Desktop\TTBOX-Module-Edition\core\tools\pid_sim")
-sys.path.insert(0, r"C:\Users\Administrator\Desktop\TTBOX-Module-Edition")
+from pathlib import Path
+# 相对派生（A-PATH-3）：不再硬编码某台机器的绝对路径（原 C:\Users\...\TTBOX-Module-Edition）。
+_HERE = Path(__file__).resolve().parent          # core/tools/pid_sim
+_ROOT = _HERE.parents[2]                          # 仓库根
+sys.path.insert(0, str(_HERE))                    # pid1.py 与本文件同目录
+sys.path.append(str(_ROOT))                        # ttbox_motion 领域包（append 防遮蔽 stdlib）
 from pid1 import Pid1
 from ttbox_motion.calibration import derive_pid_params
 

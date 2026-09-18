@@ -2,8 +2,10 @@
 """板端验证：usbproxy BUTTON_CMD -> event.sock STATE_SNAPSHOT 按钮掩码链路。"""
 import socket, struct, sys, time
 
-CMD_SOCK = "/run/ttbox-mouse-passthrough/cmd.sock"
-EVENT_SOCK = "/run/ttbox-mouse-passthrough/event.sock"
+# mouse cmd/event sock 默认单点真源（A-PATH-5）：复用同仓 plugins/web/lib/paths.py。
+import os as _os, sys as _sys
+_sys.path.append(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "plugins", "web"))
+from lib.paths import MOUSE_CMD_SOCK_DEFAULT as CMD_SOCK, MOUSE_EVENT_SOCK_DEFAULT as EVENT_SOCK
 
 
 def hdr(typ, rid):

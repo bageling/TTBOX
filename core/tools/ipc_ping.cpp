@@ -1,17 +1,18 @@
 // ipc_ping.cpp — IPC 命令行测试工具
 //
 // 用法: ipc_ping [--socket <path>] [--type PING|GET_STATUS|GET_CONFIG] [--json <raw>]
-// 默认: PING，socket 取 TTBOX_IPC_SOCKET 环境变量，未设则为 /run/ttbox/core.sock
+// 默认: PING，socket 取 TTBOX_IPC_SOCKET 环境变量，未设则取 common/Paths.hpp 单点默认
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 
 #include "common/Logger.hpp"
+#include "common/Paths.hpp"   // A-PATH-5：IPC socket 默认单点真源
 #include "ipc/IpcServer.hpp"
 
 int main(int argc, char** argv) {
-    // socket 唯一真源：--socket 参数 > TTBOX_IPC_SOCKET 环境变量 > /run/ttbox/core.sock
-    std::string socket_path = "/run/ttbox/core.sock";
+    // socket 唯一真源：--socket 参数 > TTBOX_IPC_SOCKET 环境变量 > common/Paths.hpp::kIpcSocketDefault
+    std::string socket_path = ttbox::core::paths::kIpcSocketDefault;
     if (const char* env_ipc = std::getenv("TTBOX_IPC_SOCKET")) {
         if (*env_ipc) socket_path = env_ipc;
     }

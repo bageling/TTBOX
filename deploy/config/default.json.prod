@@ -97,5 +97,6 @@
   "capture_width": 1920,
   "capture_height": 1080,
   "capture_buffers": 8,
+  "cpu_min_freq_percent": 50,
   "worker_cores": "1,2,4"
 }

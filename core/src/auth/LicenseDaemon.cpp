@@ -1,4 +1,5 @@
 #include "auth/LicenseDaemon.hpp"
+#include "auth/LicenseConstants.hpp"  // B-CONST-4：心跳 60/180 单点真源
 
 #include <chrono>
 #include <thread>
@@ -312,8 +313,8 @@ bool LicenseDaemon::activate_cloud(int64_t expire_unix_ms,
         status_.features = feats;
         status_.plan = pl;
         status_.ui_brand = sanitize_ui_brand(default_ui_brand());
-        status_.heartbeat_interval = 60;
-        status_.heartbeat_timeout = 180;
+        status_.heartbeat_interval = kHeartbeatIntervalSecDefault;
+        status_.heartbeat_timeout = kHeartbeatTimeoutSecDefault;
         status_.next_check_ms = now + 365LL * 24 * 3600 * 1000;  // 云态无 daemon 验卡
         status_.card = card_mask;                                 // 展示短码
         status_.license_id.clear();
@@ -381,8 +382,8 @@ void LicenseDaemon::restore_cloud_doc_locked() {
     status_.features = normalize_features(feats);
     status_.plan = pl.empty() ? std::string("none") : pl;
     status_.ui_brand = sanitize_ui_brand(default_ui_brand());
-    status_.heartbeat_interval = 60;
-    status_.heartbeat_timeout = 180;
+    status_.heartbeat_interval = kHeartbeatIntervalSecDefault;
+    status_.heartbeat_timeout = kHeartbeatTimeoutSecDefault;
     status_.next_check_ms = now + 365LL * 24 * 3600 * 1000;
     status_.card = mask;
     cloud_license_ = true;   // ★ M2.07：磁盘 cloud 形文档 ⇒ 云授权来源

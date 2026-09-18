@@ -1,0 +1,497 @@
+#!/usr/bin/env bash
+# ttbox_conventions_gate.sh — TTBOX「配置 · 常量 · 路径」口径门禁（Task #2 / T-E 交付）
+#
+# 目的：把 docs/handover/2026-09-17/配置常量路径口径-基线与整改方案-2026-09-17.md §1 的
+#   口径规则落成**一条命令可判定**的门禁，防「同一事实多份字面量/多份默认值」的漂移回归
+#   （即 §4「补丁式痕迹」专章的 9 类模式）。
+#
+# 断言（任一 FAIL 即退出非 0）：
+#   ① 路径字面量单点化：/run/ttbox/core.sock、/run/ttbox-mouse-passthrough/{cmd,event}.sock、
+#      /etc/ttbox/license.key 只允许出现在真源文件（Paths.hpp / paths.py / usb-proxy.cpp / systemd / deploy config）
+#   ② 无未登记 RUNTIME/BUILD 环境变量（allowlist = docs/protocols/config-path-env-registry.md §二/§三）
+#   ③ 无同义异名 env：TTBOX_CONFIG_PATH / TTBOX_MODEL_ROOT / TTBOX_DEFAULT_WEB_PORT / TTBOX_PORT / TTBOX_WEB_HOST
+#   ④ V-03 共享键同值：config/default.json 与 deploy/config/default.json.prod ↔ deploy/config/00-factory.json
+#   ⑤ 跨语言同值常量：socket / web 端口 / EDID attempts / 心跳 60·180 逐值相等（B-CONST-2）
+#   ⑥ 版本：core/include/ttbox/core/version.hpp::kCoreVersion == core/CMakeLists.txt project VERSION
+#   ⑦ 无补丁残迹：hardware_display.json 单点（V-19）；systemd_units.py / runner.py / test_systemd_units.py 已删（V-15/16）
+#
+# 用法：
+#   bash scripts/ttbox_conventions_gate.sh              # 执行门禁
+#   bash scripts/ttbox_conventions_gate.sh --selftest   # 门禁 + 负向控制（证明检测器真能捕获篡改）
+# 退出码：0 = PASS；1 = 有 FAIL；2 = 环境错误（缺 python3 / 非仓库根）。
+
+set -uo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "[gate][ERROR] 需要 python3" >&2
+    exit 2
+fi
+if [[ ! -f "${REPO_ROOT}/deploy/config/00-factory.json" ]]; then
+    echo "[gate][ERROR] 未在仓库根运行（缺 deploy/config/00-factory.json）: ${REPO_ROOT}" >&2
+    exit 2
+fi
+
+python3 - "$REPO_ROOT" "$@" <<'PY'
+# -*- coding: utf-8 -*-
+"""口径门禁核心（内联于 ttbox_conventions_gate.sh）。
+
+只读检查：遍历源码树（排除 docs/third_party/build-*/legacy/tests），断言 7 组口径。
+所有判定函数保持**纯函数**形态，便于 --selftest 用篡改输入做负向控制。
+"""
+import os
+import re
+import sys
+import json
+import glob
+
+ROOT = sys.argv[1]
+SELFTEST = "--selftest" in sys.argv[2:] or "--selftest" in sys.argv[1:]
+try:
+    os.chdir(ROOT)
+except OSError:
+    # 兼容 Windows Git Bash（/c/... → C:/...）下用 Windows Python 直接跑；
+    # 板端/WSL 走 try 分支，不受影响。
+    _m = re.match(r'^/([a-zA-Z])/(.*)$', ROOT)
+    if not _m:
+        raise
+    os.chdir(_m.group(1).upper() + ":/" + _m.group(2))
+
+# 统一以 cwd 为根，规避盘符/挂载路径差异（os.walk 用相对根，跨平台一致）。
+ROOT = "."
+
+_ok = []
+_bad = []
+_selftest_err = []
+
+
+def ok(msg):
+    _ok.append(msg)
+
+
+def bad(msg):
+    _bad.append(msg)
+
+
+def st_bad(msg):
+    _selftest_err.append(msg)
+
+
+# ---------------------------------------------------------------------------
+# 文件发现 / 注释剥离
+# ---------------------------------------------------------------------------
+INCLUDE_EXT = {".cpp", ".hpp", ".h", ".py", ".sh", ".js", ".service", ".json"}
+SKIP_TOP = {"docs", "third_party", ".git", "__pycache__",
+            ".archive-2026-09-17", "node_modules", ".mypy_cache"}
+# 门禁脚本自身含字面量样例，必须排除，否则自检自恰失败。
+SKIP_FILES = {"scripts/ttbox_conventions_gate.sh"}
+
+
+def iter_files():
+    for dp, dn, fn in os.walk(ROOT):
+        dn[:] = [d for d in dn
+                 if d not in SKIP_TOP and not d.startswith("build-")]
+        for f in fn:
+            if os.path.splitext(f)[1] not in INCLUDE_EXT:
+                continue
+            p = os.path.relpath(os.path.join(dp, f), ROOT).replace("\\", "/")
+            if p in SKIP_FILES or p.startswith("scripts/legacy/"):
+                continue
+            yield p
+
+
+def read(p):
+    try:
+        with open(p, encoding="utf-8", errors="ignore") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def strip_comment(line, ext):
+    """剥去行内注释（python/shell/systemd 用 #，C/C++/JS 用 //）。json 无注释。"""
+    if ext in (".py", ".sh", ".service"):
+        i = line.find("#")
+        return line[:i] if i >= 0 else line
+    if ext in (".cpp", ".hpp", ".h", ".js"):
+        i = line.find("//")
+        return line[:i] if i >= 0 else line
+    return line
+
+
+# ---------------------------------------------------------------------------
+# ① 路径字面量单点化（A-PATH-5）
+# ---------------------------------------------------------------------------
+LIT_ALLOW = {
+    "/run/ttbox/core.sock": {
+        "core/src/common/Paths.hpp",
+        "plugins/web/lib/paths.py",
+        "deploy/systemd/ttbox-core.service",
+        "deploy/systemd/ttbox-preview.service",
+        "deploy/systemd/ttbox-web.service",
+    },
+    "/run/ttbox-mouse-passthrough/cmd.sock": {
+        "core/src/common/Paths.hpp",
+        "plugins/web/lib/paths.py",
+        "usbproxy/usb-proxy.cpp",
+        "deploy/config/10-device.json",
+        "deploy/config/default.json.prod",
+    },
+    "/run/ttbox-mouse-passthrough/event.sock": {
+        "core/src/common/Paths.hpp",
+        "plugins/web/lib/paths.py",
+        "usbproxy/usb-proxy.cpp",
+        "deploy/config/10-device.json",
+        "deploy/config/default.json.prod",
+    },
+    "/etc/ttbox/license.key": {
+        "core/src/common/Paths.hpp",
+    },
+}
+# 每个字面量必须在其 SSOT 文件里被真正定义（防「一刀切删除」把真源也删了）
+LIT_SSOT = {
+    "/run/ttbox/core.sock": ["core/src/common/Paths.hpp", "plugins/web/lib/paths.py"],
+    "/run/ttbox-mouse-passthrough/cmd.sock": ["core/src/common/Paths.hpp", "plugins/web/lib/paths.py"],
+    "/run/ttbox-mouse-passthrough/event.sock": ["core/src/common/Paths.hpp", "plugins/web/lib/paths.py"],
+    "/etc/ttbox/license.key": ["core/src/common/Paths.hpp"],
+}
+
+
+def literal_in_code(text, lit, ext):
+    """在剥离注释后的代码里判断字面量是否出现（纯函数，供 selftest 复用）。"""
+    for line in text.splitlines():
+        if lit in strip_comment(line, ext):
+            return True
+    return False
+
+
+def check_literals():
+    for lit, allowed in LIT_ALLOW.items():
+        hits = {}
+        for p in iter_files():
+            ext = os.path.splitext(p)[1]
+            for n, line in enumerate(read(p).splitlines(), 1):
+                if lit in strip_comment(line, ext):
+                    hits.setdefault(p, []).append(n)
+        stray = {p: v for p, v in hits.items() if p not in allowed}
+        for p, v in sorted(stray.items()):
+            bad("① 散落路径字面量 %s 出现于非真源文件 %s（行 %s）"
+                % (lit, p, ",".join(map(str, v[:5]))))
+        for req in LIT_SSOT[lit]:
+            if req not in hits:
+                bad("① SSOT 文件 %s 未定义字面量 %s（真源丢失）" % (req, lit))
+        if not stray and all(r in hits for r in LIT_SSOT[lit]):
+            ok("① 路径字面量单点化：%s 仅出现于 %s"
+               % (lit, sorted(p for p in hits)))
+
+
+# ---------------------------------------------------------------------------
+# ② 环境变量 allowlist（D-ENV-2）
+# ---------------------------------------------------------------------------
+ENV_ALLOW = {
+    # ---- Core (C++) ----
+    "TTBOX_CONFIG", "TTBOX_IPC_SOCKET", "TTBOX_MODELS_ROOT", "TTBOX_HID_ROOT",
+    "TTBOX_LICENSE_SERVER", "TTBOX_APP_KEY", "TTBOX_CLIENT_SECRET",
+    # ---- Web / preview (Python) ----
+    "TTBOX_ROOT", "TTBOX_PREFIX", "TTBOX_SCRIPTS_DIR", "TTBOX_PRESETS_DIR",
+    "TTBOX_HDMIRX_EDID", "TTBOX_MOTION_PROFILES_DIR", "TTBOX_CONFIG_DIR",
+    "TTBOX_WEB_CREDENTIALS", "TTBOX_PLUGINS_ROOT", "TTBOX_PLUGIN_REPOSITORY_ROOT",
+    "TTBOX_ENABLE_DESIGNER", "TTBOX_DISPLAY_CONFIG", "TTBOX_IPC_TCP",
+    "TTBOX_UI_CUSTOM_CSS", "TTBOX_CONVERT_WORKDIR", "TTBOX_CONVERTER_SCRIPT",
+    "TTBOX_CONVERTER_PYTHON", "TTBOX_CONVERT_CALIB_DIR", "TTBOX_ALLOW_ONNX",
+    "TTBOX_CLOUD_SESSION", "TTBOX_WEB_PORT",
+    "TTBOX_PREVIEW_HOST", "TTBOX_PREVIEW_PORT", "TTBOX_PREVIEW_URL",
+    # ---- shell 运维 / 发布 ----
+    "TTBOX_ETC", "TTBOX_RUN", "TTBOX_REPO", "TTBOX_KEEP_VERSIONS",
+    "TTBOX_EDID_REHANDSHAKE", "TTBOX_EDID_REHANDSHAKE_ATTEMPTS",
+    "TTBOX_EDID_HPD_SETTLE_SEC", "TTBOX_EDID_LOCK_TIMEOUT_SEC",
+    "TTBOX_SYSTEMD", "TTBOX_UNIT_DIR", "TTBOX_RELEASE_VERSION",
+    "TTBOX_RELEASE_SELFTEST", "TTBOX_RESTART_UNITS", "TTBOX_HEALTH_TIMEOUT",
+    "TTBOX_REAL_CORE_MAIN",
+    # ---- BUILD（编译期/门禁；不得进运行期业务路径）----
+    "TTBOX_BUILD_DIR", "TTBOX_PROJECT_ROOT", "TTBOX_GIT_SHA", "TTBOX_RKNNRT_SO",
+    "TTBOX_USBPROXY_INCLUDE", "TTBOX_USBPROXY_LIBDIR",
+    "TTBOX_RELEASE_VERIFY_REPRO", "TTBOX_RELEASE_VERIFY_USBPROXY_REBUILD",
+    "TTBOX_DEVICE_LIBS", "TTBOX_SKIP_CONVENTIONS_GATE",
+    # ---- WiFi 引导 ----
+    "TTBOX_WIFI_DEFAULT_PASSWORD", "TTBOX_WIFI_DEFAULT_SSIDS", "TTBOX_WIFI_DEFAULT_SSID",
+    "TTBOX_WIFI_DEFAULT_CONNECTION", "TTBOX_WIFI_DEFAULT_CONNECTION_PREFIX",
+    "TTBOX_WIFI_USER_CONNECTION_PREFIX", "TTBOX_WIFI_AP_CONNECTION",
+    "TTBOX_WIFI_BOOTSTRAP_SERVICE",
+    # ---- usbproxy（历史 USB_PROXY_ 前缀例外，§四）----
+    "USB_PROXY_DEVICE", "USB_PROXY_DRIVER", "USB_PROXY_MODE",
+    "USB_PROXY_SOCKET_DIR", "USB_PROXY_WAIT_SECONDS", "USB_PROXY_BIN",
+    "USB_PROXY_EXTRA_ARGS", "USB_PROXY_GADGET_CONFIG_FILE",
+}
+# 已删除 / 禁止复活的同义异名（D-ENV-3 / D-ENV-5）
+ENV_BANNED = [
+    "TTBOX_CONFIG_PATH", "TTBOX_MODEL_ROOT", "TTBOX_DEFAULT_WEB_PORT",
+    "TTBOX_PORT", "TTBOX_WEB_HOST",
+]
+ENV_PATS = [
+    re.compile(r'os\.environ(?:\.get\(|\[)\s*[\'"]([A-Z][A-Z0-9_]+)[\'"]'),
+    re.compile(r'os\.getenv\(\s*[\'"]([A-Z][A-Z0-9_]+)[\'"]'),
+    re.compile(r'getenv\(\s*"([A-Z][A-Z0-9_]+)"'),
+    re.compile(r'\$\{([A-Z][A-Z0-9_]+)'),
+    re.compile(r'\$([A-Z][A-Z0-9_]+)'),
+    re.compile(r'^\s*Environment=([A-Z][A-Z0-9_]+)=', re.M),
+    re.compile(r'\bexport\s+([A-Z][A-Z0-9_]+)='),
+]
+
+
+def env_scan_excluded(p):
+    """测试/自测/门禁脚本不在 RUNTIME 扫描域（D-ENV-1 TEST 域）。"""
+    parts = p.split("/")
+    if p.startswith("tests/") or any(s in ("tests",) for s in parts[:-1]):
+        return True
+    base = os.path.basename(p)
+    if base.startswith("test_"):
+        return True
+    if re.match(r"scripts/ttbox_m207", p):
+        return True
+    if base in ("ttbox_release_verify.sh", "ttbox_conventions_gate.sh"):
+        return True
+    if base.endswith("_selftest.sh") or base.endswith("_verify.sh"):
+        return True
+    return False
+
+
+def scan_env_names(text, ext):
+    names = set()
+    for line in text.splitlines():
+        code = strip_comment(line, ext)
+        for pat in ENV_PATS:
+            for m in pat.findall(code):
+                if m.startswith(("TTBOX_", "USB_PROXY_")):
+                    names.add(m)
+    return names
+
+
+def check_env():
+    for p in iter_files():
+        if env_scan_excluded(p):
+            continue
+        ext = os.path.splitext(p)[1]
+        for name in sorted(scan_env_names(read(p), ext)):
+            if name in ENV_BANNED:
+                bad("③ 使用了已删除的同义异名 env %s @ %s（D-ENV-3/D-ENV-5）" % (name, p))
+            elif name not in ENV_ALLOW:
+                bad("② 未登记 env %s @ %s（需登记 docs/protocols/config-path-env-registry.md）"
+                    % (name, p))
+    # ③ 同义异名：全仓（含注释剥离后）不得再出现
+    for p in iter_files():
+        ext = os.path.splitext(p)[1]
+        text = read(p)
+        for name in ENV_BANNED:
+            for n, line in enumerate(text.splitlines(), 1):
+                if name in strip_comment(line, ext):
+                    bad("③ 同义异名 env 残留 %s @ %s:%d" % (name, p, n))
+    if not _bad:
+        ok("② /③ 环境变量：RUNTIME/BUILD 全部已登记，无同义异名残留")
+
+
+# ---------------------------------------------------------------------------
+# ④ V-03 共享键同值
+# ---------------------------------------------------------------------------
+def load_json(p):
+    with open(p, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def shared_key_mismatches(cand, factory, skip=frozenset({"_comment"})):
+    out = []
+    for k in sorted(set(cand) & set(factory)):
+        if k in skip:
+            continue
+        if cand[k] != factory[k]:
+            out.append((k, cand[k], factory[k]))
+    return out
+
+
+def check_shared_keys(factory):
+    for cand_path in ("config/default.json", "deploy/config/default.json.prod"):
+        cand = load_json(cand_path)
+        mm = shared_key_mismatches(cand, factory)
+        for k, cv, fv in mm:
+            bad("④ V-03 共享键异值：%s[%s]=%r != 00-factory %r" % (cand_path, k, cv, fv))
+        if not mm:
+            shared = len(set(cand) & set(factory)) - 1
+            ok("④ V-03 共享键同值：%s ↔ 00-factory（%d 个共享键）" % (cand_path, shared))
+
+
+# ---------------------------------------------------------------------------
+# ⑤ 跨语言同值常量（B-CONST-2）
+# ---------------------------------------------------------------------------
+def hpp_const(text, name):
+    m = re.search(r'\b' + re.escape(name) + r'\s*=\s*"([^"]*)"', text)
+    return m.group(1) if m else None
+
+
+def py_const(text, name):
+    m = re.search(r'(?m)^' + re.escape(name) + r'\s*=\s*"([^"]*)"', text)
+    return m.group(1) if m else None
+
+
+def int_const(text, name):
+    m = re.search(r'(?m)^' + re.escape(name) + r'\s*=\s*(\d+)', text)
+    return int(m.group(1)) if m else None
+
+
+def check_crosslang():
+    hpp = read("core/src/common/Paths.hpp")
+    py = read("plugins/web/lib/paths.py")
+    usb = read("usbproxy/usb-proxy.cpp")
+    for hn, pn in (("kIpcSocketDefault", "IPC_SOCKET_DEFAULT"),
+                   ("kMouseCmdSocketDefault", "MOUSE_CMD_SOCK_DEFAULT"),
+                   ("kMouseEventSocketDefault", "MOUSE_EVENT_SOCK_DEFAULT")):
+        hv, pv = hpp_const(hpp, hn), py_const(py, pn)
+        if hv is None or pv is None:
+            bad("⑤ 跨语言常量缺定义：%s=%r / %s=%r" % (hn, hv, pn, pv))
+        elif hv != pv:
+            bad("⑤ 跨语言常量异值：%s=%r != %s=%r" % (hn, hv, pn, pv))
+    # usb-proxy.cpp 与 Paths.hpp 逐字符相等
+    m1 = re.search(r'std::string\s+mouse_cmd_socket\s*=\s*"([^"]*)"', usb)
+    m2 = re.search(r'std::string\s+mouse_event_socket\s*=\s*"([^"]*)"', usb)
+    if not m1 or m1.group(1) != hpp_const(hpp, "kMouseCmdSocketDefault"):
+        bad("⑤ usb-proxy.cpp mouse_cmd_socket 与 Paths.hpp::kMouseCmdSocketDefault 不一致")
+    if not m2 or m2.group(1) != hpp_const(hpp, "kMouseEventSocketDefault"):
+        bad("⑤ usb-proxy.cpp mouse_event_socket 与 Paths.hpp::kMouseEventSocketDefault 不一致")
+
+    # web 端口：paths.py / wifi_manager.py / release_install.sh 三镜像同值，且 LISTEN_PORT 派生自真源
+    port_py = int_const(py, "WEB_PORT_DEFAULT")
+    port_wifi = int_const(read("scripts/wifi_manager.py"), "WEB_PORT_DEFAULT")
+    m = re.search(r'WEB_PORT="\$\{TTBOX_WEB_PORT:-(\d+)\}"', read("scripts/ttbox_release_install.sh"))
+    port_inst = int(m.group(1)) if m else None
+    web_py = read("plugins/web/bin/ttbox-web.py")
+    if port_py is None or port_wifi != port_py or port_inst != port_py:
+        bad("⑤ web 端口跨语言异值：paths.py=%r wifi_manager.py=%r release_install.sh=%r"
+            % (port_py, port_wifi, port_inst))
+    if "LISTEN_PORT = ttbox_paths.WEB_PORT_DEFAULT" not in web_py:
+        bad("⑤ ttbox-web.py::LISTEN_PORT 未派生自 paths.py::WEB_PORT_DEFAULT（端口真源漂移）")
+    if port_py is not None and port_py == port_wifi == port_inst \
+            and "LISTEN_PORT = ttbox_paths.WEB_PORT_DEFAULT" in web_py:
+        ok("⑤ 跨语言同值：socket×3 / web 端口 %d / usb-proxy socket 全部一致" % port_py)
+
+    # EDID 重协商 attempts：单一真源 12；web 不得覆写（V-09）
+    edid = read("scripts/edid/edid_apply.sh")
+    if int_const(edid, "ATTEMPTS_DEFAULT") != 12:
+        bad("⑤ EDID ATTEMPTS_DEFAULT 非 12（V-09 单一真源被破坏）")
+    for n, line in enumerate(web_py.splitlines(), 1):
+        if "TTBOX_EDID_REHANDSHAKE_ATTEMPTS" in strip_comment(line, ".py"):
+            bad("⑤ ttbox-web.py:%d 仍覆写 TTBOX_EDID_REHANDSHAKE_ATTEMPTS（V-09 回归）" % n)
+
+    # 心跳 60/180：唯一定义在 LicenseConstants.hpp，其余引用
+    lc = read("core/src/auth/LicenseConstants.hpp")
+    if not re.search(r'kHeartbeatIntervalSecDefault\s*=\s*60', lc):
+        bad("⑤ 心跳间隔默认 60 未单点定义于 LicenseConstants.hpp")
+    if not re.search(r'kHeartbeatTimeoutSecDefault\s*=\s*180', lc):
+        bad("⑤ 心跳超时默认 180 未单点定义于 LicenseConstants.hpp")
+    for f in ("core/src/auth/LicenseDaemon.cpp", "core/src/auth/LicenseGate.cpp",
+              "core/src/auth/LicenseGate.hpp", "core/src/auth/LicenseStateMachine.hpp",
+              "core/src/auth/TtboxLicenseClient.cpp"):
+        if "kHeartbeatIntervalSecDefault" not in read(f):
+            bad("⑤ %s 未引用心跳单点常量 kHeartbeatIntervalSecDefault" % f)
+
+
+# ---------------------------------------------------------------------------
+# ⑥ 版本同值（B-CONST-3）
+# ---------------------------------------------------------------------------
+def check_version():
+    vh = read("core/include/ttbox/core/version.hpp")
+    cm = read("core/CMakeLists.txt")
+    m1 = re.search(r'kCoreVersion\s*=\s*"([^"]*)"', vh)
+    m2 = re.search(r'project\(ttbox_core VERSION ([\d.]+)', cm)
+    if not m1 or not m2:
+        bad("⑥ 版本真源缺失：version.hpp::kCoreVersion 或 CMakeLists project VERSION 未找到")
+    elif m1.group(1) != m2.group(1):
+        bad("⑥ 版本异值：kCoreVersion=%r != CMake project VERSION=%r" % (m1.group(1), m2.group(1)))
+    else:
+        ok("⑥ 版本同值：core %s（version.hpp == CMakeLists）" % m1.group(1))
+
+
+# ---------------------------------------------------------------------------
+# ⑦ 无补丁残迹
+# ---------------------------------------------------------------------------
+def check_no_patch():
+    hd = [p.replace("\\", "/") for p in glob.glob("**/hardware_display.json", recursive=True)
+          if not p.replace("\\", "/").startswith(("docs/", "third_party/"))]
+    if hd != ["deploy/config/hardware_display.json"]:
+        bad("⑦ V-19 hardware_display.json 非单点：实际 %s（应仅 deploy/config/hardware_display.json）" % hd)
+    else:
+        ok("⑦ hardware_display.json 单点 = deploy/config/hardware_display.json")
+    for p in ("platform/supervisor/systemd_units.py", "platform/supervisor/runner.py",
+              "platform/tests/test_systemd_units.py", "config/hardware_display.json"):
+        if os.path.exists(p):
+            bad("⑦ 补丁残迹未删除：%s（V-15/V-16/V-19）" % p)
+    # config/default.json 不得再自带鼠标透传 socket（单点化）
+    try:
+        cand = load_json("config/default.json")
+        for k in ("output_proxy_socket", "input_event_socket"):
+            if k in cand:
+                bad("⑦ config/default.json 仍自带 %s（应回落到 Paths.hpp 默认，A-PATH-5）" % k)
+    except (OSError, ValueError) as exc:
+        bad("⑦ config/default.json 读取失败：%s" % exc)
+
+
+# ---------------------------------------------------------------------------
+# --selftest 负向控制（证明检测器真能捕获篡改）
+# ---------------------------------------------------------------------------
+def run_selftest(factory):
+    # 1) V-03：篡改 factory 的 conf ⇒ 必然报异值
+    tampered = dict(factory)
+    tampered["conf"] = 0.123456
+    if not shared_key_mismatches(load_json("config/default.json"), tampered):
+        st_bad("V-03 检测器失效：共享键 conf 篡改未被捕获")
+    # 2) 字面量：散写一行 ⇒ 必被捕获
+    if not literal_in_code('x = "/run/ttbox/core.sock"', "/run/ttbox/core.sock", ".py"):
+        st_bad("字面量检测器失效：代码散写未被捕获")
+    # 3) 字面量：注释行 ⇒ 不得误报
+    if literal_in_code('# 参见 /run/ttbox/core.sock', "/run/ttbox/core.sock", ".py"):
+        st_bad("字面量检测器误报：注释行被当成散落")
+    # 4) env：禁用名残留 ⇒ 必被捕获
+    if "TTBOX_MODEL_ROOT" not in scan_env_names("os.environ.get('TTBOX_MODEL_ROOT')", ".py"):
+        st_bad("env 扫描器失效：禁用名未被捕获")
+    # 5) 版本：异值必被捕获
+    if hpp_const('inline constexpr const char* kCoreVersion = "9.9.9";', "kCoreVersion") == \
+            re.search(r'project\(ttbox_core VERSION ([\d.]+)', read("core/CMakeLists.txt")).group(1):
+        st_bad("版本检测器失效：异值未被捕获")
+    if not _selftest_err:
+        print("[gate][ OK ] --selftest 负向控制全部命中（篡改必被捕获、注释不误报）")
+
+
+# ---------------------------------------------------------------------------
+# 主流程
+# ---------------------------------------------------------------------------
+def main():
+    check_literals()
+    check_env()
+    factory = load_json("deploy/config/00-factory.json")
+    check_shared_keys(factory)
+    check_crosslang()
+    check_version()
+    check_no_patch()
+    if SELFTEST:
+        run_selftest(factory)
+
+    for m in _ok:
+        print("[gate][ OK ] " + m)
+    for m in _bad:
+        print("[gate][FAIL] " + m)
+    for m in _selftest_err:
+        print("[gate][FAIL][selftest] " + m)
+    return 0 if (not _bad and not _selftest_err) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+PY
+rc=$?
+
+echo "------------------------------------------------------------"
+if (( rc == 0 )); then
+    echo "[gate] RESULT: PASS"
+else
+    echo "[gate] RESULT: FAIL"
+fi
+exit "$rc"

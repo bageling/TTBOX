@@ -127,3 +127,26 @@ python docs/check_links.py
 | **删除** | 直接移除（本轮梳理**一律不删**，改归档） |
 
 > 本轮纪律：**判「删除」的一律改为「归档」**，供业主复核后再决定。本机产物归档区 = 仓库根 `.archive-2026-09-17/`（已在 `.gitignore`）。
+
+---
+
+## 六、配置 · 常量 · 路径口径基线（**无补丁红线**）
+
+> **归属**：软件团队·工程师（寇豆码），Task #2。全量基线见
+> [`handover/2026-09-17/配置常量路径口径-基线与整改方案-2026-09-17.md`](handover/2026-09-17/配置常量路径口径-基线与整改方案-2026-09-17.md)；
+> **机器可校验登记表**（RUNTIME env allowlist + 跨语言同值常量）见
+> [`protocols/config-path-env-registry.md`](protocols/config-path-env-registry.md)。
+> **一条命令判定**：`bash scripts/ttbox_conventions_gate.sh`（退出码 0 = PASS；`--selftest` 含负向控制）。
+
+四个维度、**单一真源（SSOT）** 原则：**一处定义，处处引用/派生**；跨语言（C++/Py/shell）打不通 include 时，
+以**登记表 + 门禁同值断言**保证不漂移。**禁止**以注释/兼容读/双份默认值等"补丁"手法续命。
+
+| 维度 | 真源 | 逐条规则（摘要） |
+|---|---|---|
+| **A·路径** | C++ `core/src/common/Paths.hpp`；Python `plugins/web/lib/paths.py`；shell 头部 `TTBOX_PREFIX` | `A-PATH-1` C++ 运行根唯一 = 编译期 `-DTTBOX_PROJECT_ROOT`；`A-PATH-2` 取值链 CLI > env > 头文件默认；`A-PATH-3` Python 用 `Path(__file__).parents[N]` 相对派生 + `append`（禁 `insert(0)`）；`A-PATH-4` shell 前缀参数化；`A-PATH-5` 同一路径字面量全仓单点定义；`A-PATH-6` 禁"注释声称仍生效"与构建机绝对路径进产物 |
+| **B·常量** | 模块头/顶层常量 | `B-CONST-1` 单点定义；`B-CONST-2` 跨语言同值常量 = 唯一 C++ 头 + Py/shell 镜像 + 登记 + 门禁；`B-CONST-3` 版本三名分离（`kCoreVersion` / `kAppVersion` / `TTBOX_RELEASE_VERSION`）；`B-CONST-4` 时间/阈值单点；`B-CONST-5` 禁 `x or DEFAULT` / 吞错兜底 / 复制粘贴常量 |
+| **C·配置** | 运行期真源 = 板端 `/etc/ttbox/config.d/`（`00-factory.json` ← `10-device.json` 深合并） | `C-CFG-1` 运行期配置真源唯一；写回目标唯一 = `config.d/10-device.json`；`C-CFG-2` 读取链 `--config` > `TTBOX_CONFIG` > 编译期默认；`C-CFG-3` **单一写入者 = Core**（Web 禁直读直写配置，一律走 IPC）；`C-CFG-4` 默认值唯一真源 = `deploy/config/00-factory.json`；`C-CFG-5` `config/default.json` 仅"本机开发样例"，其共享键必须与 00-factory **同值**（门禁断言） |
+| **D·env** | `docs/protocols/config-path-env-registry.md` | `D-ENV-1` 前缀 `TTBOX_`，按 BUILD/RUNTIME/TEST 分类；`D-ENV-2` RUNTIME 必须登记 allowlist；`D-ENV-3` 同义异名归一（保留 1 名）；`D-ENV-4` 启动期归一为内部变量；`D-ENV-5` 禁 `X or Y` 双名兼容读 |
+
+**新增/改动的硬性要求**：新增路径/常量/配置键/env **先登记**（`protocols/config-path-env-registry.md`）**再改码**；
+`bash scripts/ttbox_conventions_gate.sh` 必须仍 PASS（`scripts/ttbox_release_verify.sh` 已接入）。

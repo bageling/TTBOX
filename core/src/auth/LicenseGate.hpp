@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "auth/LicenseConstants.hpp"     // B-CONST-4：心跳 60/180 单点真源
 #include "auth/LicenseStateMachine.hpp"  // LicenseState / LicenseStatus（纯头）
 #include "auth/LicenseStore.hpp"         // StoreLoadResult
 
@@ -44,7 +45,7 @@ struct LicenseSnapshot {
     int64_t      expire_unix_ms = 0;     // 0 = 无期限/未知
     int64_t      grace_until_ms = 0;     // 会话宽限到期（仅 kExpired 且窗口内 > 0）
     std::string  last_error;             // 仅诊断
-    int          heartbeat_interval_s = 60;
+    int          heartbeat_interval_s = kHeartbeatIntervalSecDefault;
 
     // 决策函数（§A9.3 等价表 M1 子集）：kValid/kFallback → true；kExpired → 仅 grace 内 true；其余 false。
     bool ai_allowed() const;

@@ -55,7 +55,7 @@ class WebPluginTests(unittest.TestCase):
         self.assertEqual(state["state"]["selected_model_id"], "ttbox-model")
         self.assertEqual(state["config"]["mouse_output"]["mode"], "full_passthrough")
         self.assertEqual(state["state"]["mouse_output"]["mode"], "full_passthrough")
-        self.assertEqual(license_data["app_version"], module.TTBOX_APP_VERSION)
+        self.assertEqual(license_data["app_version"], module.kAppVersion)
         self.assertEqual(license_data["ui"]["brand_name"], "TTBOX")
         self.assertEqual(license_data["ui"]["ui_brand"], "ttbox")
         self.assertEqual(license_data["ui_brand"], "ttbox")

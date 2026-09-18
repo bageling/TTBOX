@@ -3,9 +3,7 @@
 只做路由适配：所有插件安装/升级仍进入 PluginManager；系统能力由既有适配器提供。
 """
 from __future__ import annotations
-import json
 import os
-import socket
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from flask import jsonify, request
@@ -14,38 +12,20 @@ from framework.plugin_manager import InstallRequest, InstallSource, LocalReposit
 from framework.plugin_manager.models import PluginHealth, PluginState
 from plugins.system_host import SystemPluginHost
 
-# IPC socket 唯一真源：TTBOX_IPC_SOCKET 环境变量 > /run/ttbox/core.sock（FHS tmpfs）
-CORE_IPC_SOCKET = os.environ.get("TTBOX_IPC_SOCKET", "/run/ttbox/core.sock")
+# IPC socket 唯一真源（A-PATH-5）：TTBOX_IPC_SOCKET 环境变量 > lib/paths.py 默认。
+# 本文件不再硬编码 "/run/ttbox/core.sock"（单一 Python 真源 = plugins/web/lib/paths.py）。
+from lib import paths as _ttbox_paths
+
+CORE_IPC_SOCKET = _ttbox_paths.ipc_socket()
+
+
+# V-13：IPC 客户端**唯一实现** = lib/ipc.py（本处不再重复实现，避免超时/错误码/返回结构漂移）。
+from lib import ipc as _ttbox_ipc
 
 
 def _ipc_request(req_type: str, params: dict | None = None, timeout: float = 5) -> dict:
-    """向 TTBOX Core IPC 发送请求（JSON + '\\n' 行协议）。"""
-    payload = {"type": req_type}
-    if params is not None:
-        payload["params"] = params
-    try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    except (AttributeError, OSError):
-        return {"status": 3, "error": "当前环境不支持 Unix socket（板端专用）"}
-    s.settimeout(timeout)
-    try:
-        s.connect(CORE_IPC_SOCKET)
-        s.sendall(json.dumps(payload).encode() + b"\n")
-        buf = b""
-        while b"\n" not in buf:
-            chunk = s.recv(65536)
-            if not chunk:
-                break
-            buf += chunk
-        if not buf:
-            return {"status": 3, "error": "IPC 无响应（Core 未运行?）"}
-        return json.loads(buf.decode())
-    except (FileNotFoundError, ConnectionRefusedError, AttributeError, OSError):
-        return {"status": 3, "error": "无法连接 Core IPC"}
-    except socket.timeout:
-        return {"status": 3, "error": "IPC 响应超时"}
-    finally:
-        s.close()
+    """向 TTBOX Core IPC 发送请求（薄封装 → lib/ipc.py::request；socket = CORE_IPC_SOCKET）。"""
+    return _ttbox_ipc.request(req_type, params, timeout, socket_path=CORE_IPC_SOCKET)
 
 
 def _jsonable(value):
@@ -73,7 +53,8 @@ def install_framework_api(app):
         # 用 HTTP 探活（进程级 is_running 只认自身 Popen，识别不了 systemd 托管进程）。
         import urllib.request
         _live = {}
-        for plugin_id, probe in (("web", "http://127.0.0.1:8000/api/health/frontend"),
+        # 端口真源单点（V-06）：web 端口 = lib/paths.py::WEB_PORT_DEFAULT（跨语言同值）。
+        for plugin_id, probe in (("web", f"http://127.0.0.1:{_ttbox_paths.WEB_PORT_DEFAULT}/api/health/frontend"),
                                  ("preview", "http://127.0.0.1:8001/api/preview/status")):
             try:
                 with urllib.request.urlopen(probe, timeout=2) as resp:

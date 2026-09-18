@@ -31,12 +31,13 @@ Environment=TTBOX_ROOT=/opt/ttbox/current/plugins/web
 # TTBOX 根目录（现为 current/，含 framework/ ttbox_motion/ platform/）由
 # ttbox-web.py 内部 sys.path.append() 补进末尾（stdlib 优先）。
 Environment=PYTHONPATH=/opt/ttbox/current/plugins/web
-# IPC socket 唯一真源（T01）：与 Core 的 --ipc 及默认值保持一致
+# IPC socket 唯一真源（A-PATH-5）：与 Core 的 --ipc 及 core/src/common/Paths.hpp::kIpcSocketDefault
+# 保持一致（值 = /run/ttbox/core.sock；跨语言同值由 scripts/ttbox_conventions_gate.sh 断言）。
 Environment=TTBOX_IPC_SOCKET=/run/ttbox/core.sock
-# 注意：Web 控制台端口已在源码 plugins/web/bin/ttbox-web.py 中定死为 8000
-# （LISTEN_HOST / LISTEN_PORT 常量），下面两行仅作说明，改它们不会生效。
-Environment=TTBOX_WEB_HOST=0.0.0.0
-Environment=TTBOX_WEB_PORT=8000
+# ★ V-20 根治式删除：原 `Environment=TTBOX_WEB_HOST/PORT` 是**装饰性 env**——web 控制台
+# 监听地址/端口在源码 plugins/web/bin/ttbox-web.py（LISTEN_HOST/LISTEN_PORT）里定死，
+# 改这两行**不会生效**，只会在排障时误导。故删除（不是注释保留）。
+# 端口真源 = plugins/web/lib/paths.py::WEB_PORT_DEFAULT（改端口 = 改源码后重部署）。
 Environment=TTBOX_PREVIEW_URL=http://127.0.0.1:8001
 Restart=always
 RestartSec=2

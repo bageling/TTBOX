@@ -37,6 +37,11 @@ from flask import Flask, Response, jsonify, redirect, render_template, request, 
 # 放到末尾后：stdlib 优先，platform 正常；framework / ttbox_motion 无同名冲突，照样可加载。
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+# 运行期路径单点真源（A-PATH-5 / B-CONST-2）：本插件所有路径默认值一律引用它，
+# 不再散写 "/opt/ttbox/..."。跨语言同值由 docs/protocols/config-path-env-registry.md
+# 登记 + scripts/ttbox_conventions_gate.sh 断言。
+from lib import paths as ttbox_paths
+
 from framework_api import install_framework_api
 
 # 板端 /opt/ttbox/web 运行时同样加载 TTBOX 根目录领域包。
@@ -50,11 +55,11 @@ from ttbox_motion.calibration import (
     fit_axis_measurements,
 )
 
-try:
-    sys.path.insert(0, '/opt/ttbox/scripts')
-    import wifi_manager
-except ImportError:
-    wifi_manager = None
+# scripts 目录经 A-PATH-3 相对派生（<root>/scripts；开发机=仓库根、板端=release 树），
+# 用 append 而非 insert(0)（防遮蔽 stdlib，见上方 platform 冲突说明）。
+# 不设 try/except 兜底：wifi_manager 仅用标准库，导入失败 = 真实部署错误，必须暴露。
+sys.path.append(ttbox_paths.scripts_dir())
+import wifi_manager
 
 # ====================================================================
 # 配置
@@ -63,29 +68,27 @@ ROOT_DIR = Path(os.environ.get('TTBOX_ROOT', Path(__file__).resolve().parents[1]
 WEB_DIR = ROOT_DIR
 STATIC_DIR = WEB_DIR / 'static'
 TEMPLATE_DIR = WEB_DIR / 'templates'
-# IPC socket 唯一真源：TTBOX_IPC_SOCKET 环境变量 > /run/ttbox/core.sock（FHS tmpfs）
-IPC_SOCKET = os.environ.get('TTBOX_IPC_SOCKET', '/run/ttbox/core.sock')
-# Web 控制台监听地址与端口：**在源码里定死**，不再读取 TTBOX_WEB_HOST / TTBOX_WEB_PORT。
-# 原因：面板是这个设备唯一的入口，端口一旦能被环境变量或界面改动，现场就会出现
-# "面板打不开 / 书签失效"，而且 systemd drop-in 里的值和代码里的默认值不一致时
-# 极难排查。改动方式只有一个：改下面这两个常量后重新部署。
+# IPC socket 唯一真源（A-PATH-5）：TTBOX_IPC_SOCKET 环境变量 > paths.py 默认。
+IPC_SOCKET = ttbox_paths.ipc_socket()
+# Web 控制台监听地址与端口（V-06/V-20）：**在源码里定死**，不读任何 env。
+# 端口真源 = plugins/web/lib/paths.py::WEB_PORT_DEFAULT（跨语言同值，门禁断言）；
+# 面板是设备唯一入口，端口若能被子系统/界面改动，现场就会出现"面板打不开/书签失效"。
 LISTEN_HOST = '0.0.0.0'
-LISTEN_PORT = 8000
+LISTEN_PORT = ttbox_paths.WEB_PORT_DEFAULT
 
-PRESETS_DIR = '/opt/ttbox/presets'
-MOTION_PROFILES_DIR = Path(os.environ.get('TTBOX_MOTION_PROFILES_DIR', '/opt/ttbox/config/motion-profiles'))
+PRESETS_DIR = ttbox_paths.presets_dir()
+MOTION_PROFILES_DIR = Path(ttbox_paths.motion_profiles_dir())
 MOTION_STORE = MotionProfileStore(MOTION_PROFILES_DIR)
 
 # TTBOX 自己的 EDID 工具（完全独立于板端其它 EDID 工具）
-TTBOX_HDMIRX_EDID = os.environ.get(
-    'TTBOX_HDMIRX_EDID', '/opt/ttbox/scripts/edid/hdmirx_edid.py')
+TTBOX_HDMIRX_EDID = ttbox_paths.hdmirx_edid_tool()
 
 # ★ T1.07b：授权面**不设本地常量**（原"恒激活"伪造常量块已删，其名字亦不再出现 ——
 #   否则「grep 该名 ⇒ 0」这条门禁会被自己的注释命中而失效）。
 # Web 不再持有任何授权真相，只投影 core IPC `GET_STATUS.license`（单一真相源，
 # 见 t1.07b-impl-spec.md §0.1 / §3；wire 字段以 t1.09-t1.10-impl-spec.md §3 为准）。
 
-TTBOX_APP_VERSION = '2026.08.03.1'
+kAppVersion = '2026.08.03.1'  # 面板对外版本（B-CONST-3：与 core kCoreVersion / release 版本三名分离）
 
 
 # ====================================================================
@@ -266,106 +269,77 @@ def collect_network_summary() -> dict:
 
 
 # ====================================================================
-# IPC 通信
+# IPC 通信（V-13：唯一实现 = plugins/web/lib/ipc.py，本处仅薄封装）
 # ====================================================================
-# IPC 通信
-# ====================================================================
+from lib import ipc as _ttbox_ipc  # noqa: E402  IPC 客户端单点实现（B-CONST-1）
+
+
 def ipc_request(req_type: str, params: dict | None = None, timeout: float = 5) -> dict:
-    """向 TTBOX Core IPC 发送请求，返回解析后的响应。
+    """向 TTBOX Core IPC 发送请求（薄封装 → lib/ipc.py::request）。
 
-    传输层（按 IPC_SOCKET 形态自动选择，协议一致）：
-      - /path/to.sock  → Unix domain socket（板端）
-      - tcp://host:port / host:port → TCP（Windows 本地 win_core_main）
+    保留本模块级函数名 ipc_request：所有调用点与测试（monkeypatch module.ipc_request）
+    都依赖它。socket 取本模块 IPC_SOCKET（= lib.paths.ipc_socket()，A-PATH-5）；
+    传输形态（Unix/TCP）与错误语义统一由 lib/ipc.py 维护（V-13 根治重复实现）。
     """
-    payload = {'type': req_type}
-    if params is not None:
-        payload['params'] = params
-    sock_spec = os.environ.get('TTBOX_IPC_TCP', '')
-    use_tcp = IPC_SOCKET.startswith('tcp:') or sock_spec
+    return _ttbox_ipc.request(req_type, params, timeout, socket_path=IPC_SOCKET)
+
+
+class CoreUnavailableError(RuntimeError):
+    """Core IPC 不可达（运行期配置/状态无法读取）。
+
+    由模块级 Flask errorhandler 统一转 503 + {core_offline:true}，使前端能明示
+    「Core 离线」——这是**有意**的 fail-loud（V-01/V-02 修复）：宁可报错，也不静默
+    返回空配置或磁盘旧值（否则「读失败」与「配置为空」不可区分）。
+    """
+
+
+# ====================================================================
+# 云端凭据（web 拥有的**部署凭据文件**）—— 与「运行期配置」严格区分（C-CFG-3）
+# ====================================================================
+# 为什么仍有一个读文件函数（C-CFG-3 的边界）：
+#   · 「运行期配置」（runtime_profile 等）唯一真源 = Core，web **禁止**读写（一律 IPC）。
+#   · 「云端凭据」（cloud.app_secret / cloud.license_base_url）**不在** Core 的 config.d
+#     分层内（00-factory.json 无 cloud 键）⇒ 它是 web 自己拥有、由部署/验收脚本写入的
+#     凭据文件，不是第二配置真源。web 取 HMAC 签名密钥只能读它，无法经 Core IPC。
+#   · 历史上此文件曾被误当「配置唯一真相」（旧 _config_file_path 的假声明）——已删除该
+#     声明；它**不是** Core --config 指定的文件（Core 读 /etc/ttbox/config.d/）。
+WEB_CREDENTIALS_FILE = ttbox_paths.web_credentials_file()
+
+
+def _load_cloud_credentials() -> dict:
+    """读取 web 云端凭据文件（仅取 cloud.* 段供签名/URL）。
+
+    文件不存在 ⇒ 空 dict（开箱未配云端是合法状态）；文件存在但损坏 / 非法 ⇒ 上抛
+    （fail-loud，绝不把"读失败"静默当"空凭据"）。
+    """
+    path = WEB_CREDENTIALS_FILE
     try:
-        if use_tcp:
-            spec = sock_spec or IPC_SOCKET.removeprefix('tcp:')
-            host, _, port = spec.rpartition(':')
-            if not host:
-                host = '127.0.0.1'
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            target = (host, int(port))
-        else:
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            target = IPC_SOCKET
-    except (AttributeError, OSError) as e:
-        return {'status': 3, 'error': f'IPC socket 创建失败（{use_tcp and "TCP" or "Unix"}）: {e}'}
-    s.settimeout(timeout)
-    try:
-        s.connect(target if use_tcp else IPC_SOCKET)
-        s.sendall(json.dumps(payload).encode() + b'\n')
-        buf = b''
-        while b'\n' not in buf:
-            chunk = s.recv(65536)
-            if not chunk:
-                break
-            buf += chunk
-        if not buf:
-            return {'status': 3, 'error': 'IPC 无响应（Core 未运行?）'}
-        return json.loads(buf.decode())
-    except (FileNotFoundError, ConnectionRefusedError, AttributeError, OSError):
-        return {'status': 3, 'error': '无法连接 Core IPC'}
-    except socket.timeout:
-        return {'status': 3, 'error': 'IPC 响应超时'}
-    finally:
-        s.close()
-
-
-def _config_file_path() -> str:
-    """TTBOX 配置唯一真相：/opt/ttbox/config/default.json（Core --config 指定路径）。"""
-    return os.environ.get('TTBOX_CONFIG', '/opt/ttbox/config/default.json')
-
-
-def _load_config_file() -> dict:
-    try:
-        with open(_config_file_path(), 'r', encoding='utf-8') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             cfg = json.load(f)
-        return cfg if isinstance(cfg, dict) else {}
-    except Exception:
+    except FileNotFoundError:
         return {}
-
-
-def _runtime_profile_from_file() -> dict:
-    """从配置文件读取 runtime_profile 段（与 Core SET_CONFIG 落盘格式一致）。"""
-    prof = _load_config_file().get('runtime_profile') or {}
-    if isinstance(prof, str):
-        try:
-            prof = json.loads(prof)
-        except Exception:
-            prof = {}
-    return prof or {}
-
-
-def _save_runtime_profile_to_file(profile: dict) -> bool:
-    """保存 runtime_profile 段到配置文件（Core 启动时 config_.root().find('runtime_profile') 读取）。
-    仅替换 runtime_profile 键，其余顶层键原样保留（与 Application::handle_config_update 落盘语义一致）。"""
-    try:
-        cfg = _load_config_file()
-        cfg['runtime_profile'] = profile
-        with open(_config_file_path(), 'w', encoding='utf-8') as f:
-            json.dump(cfg, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception:
-        return False
+    if not isinstance(cfg, dict):
+        raise RuntimeError(f'云端凭据文件格式非法（非 JSON 对象）: {path}')
+    return cfg
 
 
 def _get_runtime_profile() -> dict:
-    """获取当前 RuntimeProfile：优先 Core IPC（内存热更新真源）；
-    Core 不可达时回退配置文件 runtime_profile 段（磁盘真源，保证 Web 层不返回空配置）。"""
+    """获取当前 RuntimeProfile —— **唯一来源 = Core IPC（GET_CONFIG）**（C-CFG-3）。
+
+    Web 不再直读磁盘配置文件：Core 是运行期配置的唯一真相源与唯一写入者。
+    Core 不可达时**如实报错（fail-loud）**，绝不返回 {} 或磁盘内容——否则会把
+    "读失败"与"配置为空"混为一谈（M2.07.1 F11 同族纪律：禁止静默回落）。
+    """
     r = ipc_request('GET_CONFIG')
     if r.get('status') != 0:
-        return _runtime_profile_from_file()
+        raise CoreUnavailableError(
+            'Core 离线，无法读取运行期配置（' + str(r.get('error') or 'unknown') + '）')
     prof = r.get('data', {}).get('runtime_profile', {})
     if isinstance(prof, str):
         try:
             prof = json.loads(prof)
-        except Exception:
-            prof = {}
+        except (TypeError, ValueError) as exc:
+            raise CoreUnavailableError(f'Core 返回的 runtime_profile 非合法 JSON: {exc}')
     return prof or {}
 
 
@@ -1202,8 +1176,8 @@ def collect_web_state() -> dict:
     return {
         'ok': True,
         'data': {
-            'app_version': str(st.get('version', TTBOX_APP_VERSION)) or TTBOX_APP_VERSION,
-            'version': str(st.get('version', TTBOX_APP_VERSION)) or TTBOX_APP_VERSION,
+            'app_version': str(st.get('version', kAppVersion)) or kAppVersion,
+            'version': str(st.get('version', kAppVersion)) or kAppVersion,
             'config': config_web,
             'auto_start': _auto_start_payload(),
             # 预览流健康：前端据此在服务重启/断线后自动重建 MJPEG 连接（防卡框冻结）
@@ -1381,6 +1355,16 @@ app = Flask(
 )
 
 
+@app.errorhandler(CoreUnavailableError)
+def _handle_core_unavailable(exc: CoreUnavailableError):
+    """Core IPC 不可达 ⇒ 503 + core_offline 标志（前端据此明示\"Core 离线\"）。
+
+    V-01/V-02 修复的一部分：Web 配置/状态唯一来源 = Core IPC；Core 不可达时
+    **如实报错**，绝不返回 {} 或磁盘内容（禁止静默回落）。
+    """
+    return jsonify({'ok': False, 'error': str(exc), 'core_offline': True}), 503
+
+
 # ====================================================================
 # M2.07 免密化 + 激活 gate（D1/D9/D10 裁决）
 # ====================================================================
@@ -1541,11 +1525,11 @@ from lib.cloud_session import (CloudSessionStore, card_mask, device_serial,
 from lib.heartbeat_worker import HeartbeatWorker
 
 # 云端会话态（D8）：card_key 明文落盘是自动重登前提（0600 原子写，风险已登记 §8-2）
-CLOUD_SESSION_PATH = os.environ.get('TTBOX_CLOUD_SESSION',
-                                    '/opt/ttbox/config/cloud_session.json')
+CLOUD_SESSION_PATH = os.environ.get(
+    'TTBOX_CLOUD_SESSION', ttbox_paths.config_dir() + '/cloud_session.json')
 _CLOUD_SESSION = CloudSessionStore(CLOUD_SESSION_PATH)
-# 配置热读：每请求重读 default.json 的 cloud 段（B15-8：改 URL 即时生效）
-_CLOUD_CLIENT = CloudLicenseClient(_load_config_file)
+# 配置热读：每请求重读云端凭据文件的 cloud 段（B15-8：改 URL 即时生效）
+_CLOUD_CLIENT = CloudLicenseClient(_load_cloud_credentials)
 # 激活并发锁：防同机并发触发两次云激活
 _ACTIVATION_LOCK = threading.Lock()
 _HEARTBEAT: HeartbeatWorker | None = None
@@ -1590,7 +1574,7 @@ def _ensure_heartbeat_worker() -> None:
         _HEARTBEAT = HeartbeatWorker(
             _CLOUD_CLIENT, _CLOUD_SESSION,
             on_expired=_cloud_deactivate_callback,
-            client_version=TTBOX_APP_VERSION,
+            client_version=kAppVersion,
             machine_code=_machine_code,
         )
         _HEARTBEAT.start()
@@ -1761,7 +1745,7 @@ def get_system_version():
         'ok': True,
         'data': {
             'product': 'TTBOX',
-            'version': '0.1.0',
+            'version': kAppVersion,
             'build': '2026.09.01.2',
             'hardware': 'RK3588',
             'channel': 'stable'
@@ -2086,11 +2070,8 @@ def update_config():
         body = {}
     if body is None:
         body = {}
-    # 保持 Web 契约：空 body 也返回当前完整配置（不依赖 Core IPC）
-    try:
-        prof = _get_runtime_profile()
-    except Exception:
-        prof = {}
+    # 读当前配置：唯一来源 = Core IPC（Core 离线 ⇒ CoreUnavailableError → 503 fail-loud）
+    prof = _get_runtime_profile()
     if not isinstance(body, dict) or not body:
         return jsonify({'ok': True, 'data': profile_to_web(prof)})
     translated = web_body_to_profile(body)
@@ -2103,12 +2084,9 @@ def update_config():
     merged = _deep_merge_profile(base, translated)
     r = ipc_request('SET_CONFIG', {'profile': merged})
     if r.get('status') != 0:
-        # Core 不可达：保存到配置文件 runtime_profile 键（与 Core SET_CONFIG 落盘格式一致，
-        # Core 下次启动会加载），并返回保存后的真实配置（不返回空结构）。
-        if _save_runtime_profile_to_file(merged):
-            saved = _runtime_profile_from_file()
-            return jsonify({'ok': True, 'data': profile_to_web(saved), 'persisted': True})
-        return jsonify({'ok': False, 'error': 'Core 未运行且配置保存失败'}), 500
+        # Core 不可达：**不落盘**（web 非配置写入者，C-CFG-3），如实报错（fail-loud）。
+        return jsonify({'ok': False,
+                        'error': 'Core 未运行，配置未保存（请先启动 ttbox-core）'}), 503
     rr = _get_runtime_profile()
     return jsonify({'ok': True, 'data': profile_to_web(rr)})
 
@@ -2272,7 +2250,8 @@ _MODEL_UI_META_KEYS = ('game_profile', 'preset_name', 'hailo_pipeline_depth',
 
 
 def _model_ui_meta_path(model_id: str) -> Path:
-    return Path(os.environ.get('TTBOX_MODEL_ROOT', '/opt/ttbox/models')) / 'installed' / model_id / 'ui_meta.json'
+    # V-04：模型库 env 归一为 TTBOX_MODELS_ROOT（原 TTBOX_MODEL_ROOT 已删除，不保留兼容读）
+    return Path(os.environ.get('TTBOX_MODELS_ROOT', ttbox_paths.ttbox_prefix() + '/models')) / 'installed' / model_id / 'ui_meta.json'
 
 
 def _read_model_ui_meta(model_id: str) -> dict:
@@ -2314,11 +2293,14 @@ def _merge_model_ui_meta(model: dict) -> dict:
 
 def _effective_rknn_concurrency(record: dict) -> int:
     """界面显示的并发 = Core 实际 worker 数。
-    manifest 显式配置了 worker_cores 就用它；否则回退全局 config 默认。"""
+    manifest 显式配置了 worker_cores 就用它；否则取 Core 生效的全局默认（经 IPC，
+    C-CFG-3：web 不直读磁盘）。Core 离线 ⇒ fail-loud。"""
     wc = str(record.get('worker_cores') or '').strip()
     if not wc:
-        cfg = _load_config_file()
-        wc = str((cfg or {}).get('worker_cores') or '').strip()
+        r = ipc_request('GET_CONFIG')
+        if r.get('status') != 0:
+            raise CoreUnavailableError('Core 离线，无法读取全局 worker_cores')
+        wc = str(r.get('data', {}).get('worker_cores') or '').strip()
     tokens = [t.strip() for t in wc.split(',') if t.strip() in ('1', '2', '4')]
     count = len(tokens)
     return count if 1 <= count <= 3 else 3
@@ -2704,7 +2686,7 @@ def import_model():
     model_id = re.sub(r'[^A-Za-z0-9_\-]', '_', stem)[:64].strip('_') or 'model'
     # label 保留原始文件名主干（含中文），供前端显示；model_id 是净化后的内部标识
     label = stem.strip() or model_id
-    incoming = Path(os.environ.get('TTBOX_MODEL_ROOT', '/opt/ttbox/models')) / '_incoming'
+    incoming = Path(os.environ.get('TTBOX_MODELS_ROOT', ttbox_paths.ttbox_prefix() + '/models')) / '_incoming'
     incoming.mkdir(parents=True, exist_ok=True)
     src_ext = '.onnx' if lower.endswith('.onnx') else '.rknn'
     dst = incoming / f'{model_id}{src_ext}'
@@ -2959,10 +2941,9 @@ def load_preset():
     prof = _deep_merge_profile(_get_runtime_profile(), translated)
     r = ipc_request('SET_CONFIG', {'profile': prof})
     if r.get('status') != 0:
-        # Core 不可达时落盘（保证下次启动恢复）
-        if _save_runtime_profile_to_file(prof):
-            return jsonify({'ok': True, 'data': {'message': '已加载（已保存，Core 启动后生效）'}})
-        return jsonify({'ok': False, 'error': r.get('error', '应用失败')})
+        # Core 不可达：不落盘（web 非配置写入者），如实报错（fail-loud）。
+        return jsonify({'ok': False,
+                        'error': 'Core 未运行，配置未应用（请先启动 ttbox-core）'}), 503
     return jsonify({'ok': True, 'data': {'message': '已加载'}})
 
 
@@ -3674,23 +3655,15 @@ def get_events():
 
 
 # -- 硬件 --
-def _save_mouse_profile(mouse: dict) -> tuple[bool, str]:
-    """Core 不可达时把 mouse 段保存到配置文件 runtime_profile 键（与 Core 落盘格式一致）。"""
-    try:
-        prof = _runtime_profile_from_file()
-        prof.setdefault('mouse', {}).update(mouse)
-        ok = _save_runtime_profile_to_file(prof)
-        return ok, ('已保存到本地配置' if ok else '配置保存失败')
-    except Exception as exc:
-        return False, f'配置保存失败: {exc}'
-
-
 def _mouse_save_or_ipc(prof: dict, mouse: dict) -> tuple[bool, str]:
-    """统一写 mouse 配置：优先 Core SET_CONFIG 热更新；Core 不可达时落盘并诚实告知。"""
+    """写 mouse 配置 —— 唯一写入者 = Core（SET_CONFIG 热更新，C-CFG-3）。
+
+    Core 不可达 ⇒ 如实失败（fail-loud），**不落盘**（web 不再直写配置文件，否则会
+    制造与 Core persist 相冲的第三份配置）。
+    """
     r = ipc_request('SET_CONFIG', {'profile': prof})
     if r.get('status') != 0:
-        ok, detail = _save_mouse_profile(mouse)
-        return ok, f'Core 未运行，{detail}'
+        return False, 'Core 未运行，无法保存配置（请先启动 ttbox-core）'
     return True, ''
 
 
@@ -3974,7 +3947,7 @@ def get_display_hardware():
         pass
     # Web 兼容结构：前端 populateDisplayHardware 消费 available/config/display_mode
     cfg_disp = {}
-    cpath = '/opt/ttbox/config/hardware_display.json'
+    cpath = ttbox_paths.config_dir() + '/hardware_display.json'
     try:
         if os.path.exists(cpath):
             cfg_disp = json.load(open(cpath))
@@ -4107,7 +4080,7 @@ def update_display_hardware():
     apply_now = bool(body.get('apply'))
     if not cfg_in:
         return jsonify({'ok': False, 'error': '缺少 config'})
-    cpath = '/opt/ttbox/config/hardware_display.json'
+    cpath = ttbox_paths.config_dir() + '/hardware_display.json'
     try:
         cur = json.load(open(cpath)) if os.path.exists(cpath) else {}
     except Exception:
@@ -4123,7 +4096,7 @@ def update_display_hardware():
                 v = str(cfg_in[k] or '').strip()
                 if v and v != 'auto':
                     try:
-                        sys.path.insert(0, '/opt/ttbox/scripts')
+                        # edid 包随 scripts 目录在标题头已 append 进 sys.path（A-PATH-3）
                         from edid.timing_db import mode_info
                         if mode_info(v) is None:
                             continue  # 非法 token，拒绝覆盖
@@ -4145,8 +4118,9 @@ def update_display_hardware():
     if apply_now:
         apply_env = dict(os.environ)
         apply_env['TTBOX_EDID_REHANDSHAKE'] = '1'
-        apply_env['TTBOX_EDID_REHANDSHAKE_ATTEMPTS'] = '6'
-        r = subprocess.run(['bash', '/opt/ttbox/scripts/edid/edid_apply.sh'],
+        # V-09：不再覆写 TTBOX_EDID_REHANDSHAKE_ATTEMPTS —— 重试次数单一真源在
+        # edid_apply.sh（默认 12），Web 与手动路径必须同值（原 Web 私自设 6 ⇒ 行为不可预期）。
+        r = subprocess.run(['bash', ttbox_paths.scripts_dir() + '/edid/edid_apply.sh'],
                            capture_output=True, text=True, timeout=60, env=apply_env)
         result = {'exit': r.returncode, 'output': (r.stdout + r.stderr).strip()[-500:]}
         if r.returncode != 0:
@@ -4154,8 +4128,8 @@ def update_display_hardware():
         # 内核持久化（前端 patch_boot_image=true 时执行）
         if body.get('patch_boot_image'):
             pr = subprocess.run(
-                ['bash', '/opt/ttbox/scripts/edid/edid_patch_boot_image.sh',
-                 '/opt/ttbox/runtime/edid/current.bin'],
+                ['bash', ttbox_paths.scripts_dir() + '/edid/edid_patch_boot_image.sh',
+                 ttbox_paths.ttbox_prefix() + '/runtime/edid/current.bin'],
                 capture_output=True, text=True, timeout=60)
             result['patch_boot_image'] = {
                 'exit': pr.returncode,
@@ -4183,15 +4157,11 @@ def update_display_hardware():
 # -- 网络/WiFi --
 @app.get('/api/network/wifi')
 def get_wifi_status():
-    if wifi_manager is None:
-        return jsonify({'ok': True, 'data': {'available': False, 'error': 'wifi_manager 未部署'}})
     return jsonify({'ok': True, 'data': wifi_manager.wifi_status(force_scan=False)})
 
 
 @app.post('/api/network/wifi/scan')
 def scan_wifi_networks():
-    if wifi_manager is None:
-        return jsonify({'ok': True, 'data': {'available': False, 'networks': [], 'error': 'wifi_manager 未部署'}})
     return jsonify({'ok': True, 'data': wifi_manager.wifi_status(force_scan=True)})
 
 
@@ -4202,8 +4172,6 @@ def connect_wifi_network():
     password = body.get('password', '')
     if not ssid:
         return jsonify({'ok': False, 'error': '缺少 SSID'})
-    if wifi_manager is None:
-        return jsonify({'ok': False, 'error': 'wifi_manager 未部署'})
     try:
         return jsonify({'ok': True, 'data': wifi_manager.connect_wifi(ssid, password)})
     except wifi_manager.WifiError as exc:
@@ -4212,8 +4180,6 @@ def connect_wifi_network():
 
 @app.post('/api/network/wifi/fallback')
 def fallback_wifi_network():
-    if wifi_manager is None:
-        return jsonify({'ok': False, 'error': 'wifi_manager 未部署'})
     try:
         return jsonify({'ok': True, 'data': wifi_manager.reset_to_default_wifi()})
     except wifi_manager.WifiError as exc:
@@ -4223,8 +4189,6 @@ def fallback_wifi_network():
 @app.post('/api/network/wifi/ap/apply')
 def apply_wifi_ap_hotspot():
     body = request.get_json(silent=True) or {}
-    if wifi_manager is None:
-        return jsonify({'ok': False, 'error': 'wifi_manager 未部署'})
     try:
         return jsonify({'ok': True, 'data': wifi_manager.apply_ap_hotspot(
             ssid=body.get('ssid'), password=body.get('password'))})
@@ -4234,8 +4198,6 @@ def apply_wifi_ap_hotspot():
 
 @app.post('/api/network/wifi/client/activate')
 def activate_wifi_client_mode():
-    if wifi_manager is None:
-        return jsonify({'ok': False, 'error': 'wifi_manager 未部署'})
     try:
         return jsonify({'ok': True, 'data': wifi_manager.activate_client_wifi()})
     except wifi_manager.WifiError as exc:
@@ -4287,7 +4249,7 @@ def _license_payload() -> dict:
     #   此时品牌尚未确定 —— 多渠道机型应把渠道名加进 TTBOX_WIFI_DEFAULT_SSIDS。
     ui = _ui_block(license_data.get('ui_brand'))
     core_version = '2026.05.16'
-    app_version = TTBOX_APP_VERSION
+    app_version = kAppVersion
     return {
         'app_version': app_version,
         'auto_start': _auto_start_payload(),
@@ -4425,13 +4387,7 @@ def activate_license():
 @app.post('/api/activation/network/prepare')
 def prepare_activation_network():
     # 保持 Web 契约：返回 attempted/changed/status 结构（含 ap 子结构）
-    wifi = {}
-    try:
-        sys.path.insert(0, '/opt/ttbox/scripts')
-        import wifi_manager
-        wifi = wifi_manager.wifi_status(force_scan=False)
-    except Exception:
-        wifi = {'ap': {}, 'ethernet_connected': True, 'available': False}
+    wifi = wifi_manager.wifi_status(force_scan=False)
     ap = wifi.get('ap') or {}
     return jsonify({'ok': True, 'data': {
         'attempted': True,
