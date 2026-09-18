@@ -112,7 +112,7 @@
 | `TTBOX_CLIENT_SECRET` / `TTBOX_APP_KEY` / `TTBOX_LICENSE_SERVER` | `scripts/ttbox_m207_*`、`scripts/legacy/*` | TEST | 验收脚本注入的云端凭据（**非产品端口/路径**） |
 | `CLOUD_PORT = 10015` | `scripts/ttbox_m207_b21_expire.py:35` | TEST | **云端回调端口常量**（验收脚本夹具），非产品端口，**登记即可、不改值** |
 | `TTBOX_RESTART_UNITS` / `TTBOX_HEALTH_TIMEOUT` / `TTBOX_RELEASE_SELFTEST` / `TTBOX_RELEASE_VERIFY_REPRO` / `TTBOX_RELEASE_VERIFY_USBPROXY_REBUILD` / `TTBOX_REAL_CORE_MAIN` | `scripts/*_selftest.sh` / `*_verify.sh` | TEST | 自测/体检脚本开关 |
-| `TTBOX_WEB` | `scripts/ttbox_m207_accept.py:1123`、`scripts/ttbox_m2xx_console_accept.py:539` | TEST | 验收脚本覆盖 web 基址（默认 http://127.0.0.1:8000）；非产品变量，不进 RUNTIME allowlist |
+| `TTBOX_WEB` | `scripts/ttbox_m207_accept.py`、`scripts/ttbox_m2xx_console_accept.py` 的 `--base-url` 默认值 | TEST | 验收脚本覆盖 web 基址（默认 http://127.0.0.1:8000）；非产品变量，不进 RUNTIME allowlist |
 
 > **§6-5 裁定**：`10015` 属 **TEST** 域（验收脚本常量），登记后**不改值**。
 
