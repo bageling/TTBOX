@@ -95,7 +95,6 @@ set(CORE_SOURCES
   src/output/AiboxHidOutput.cpp
   src/output/OutputBackend.cpp
   src/output/LocalHidBackend.cpp
-  src/output/MakcuMouseBackend.cpp
   src/output/MouseControlClient.cpp
   src/common/Logger.cpp
   src/common/CpuAffinity.cpp

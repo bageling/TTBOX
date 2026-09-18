@@ -56,11 +56,10 @@ note '--- OV-006 fan_control 字段 ---'
 TT_FAN=$(cat /tmp/tt_state.json | python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}).get('state',{}).get('fan_control',{}); print(sorted(d.keys()))")
 [ -n "$TT_FAN" ] && ok "OV-006 fan_control 字段 ($TT_FAN)" || bad "OV-006 fan_control 空"
 
-# OV-007: /api/system/version 存在
-note '--- OV-007 /api/system/version ---'
-curl -s "$TT/api/system/version" 2>/dev/null > /tmp/tt_sys.json
-TT_SV=$(cat /tmp/tt_sys.json 2>/dev/null | python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}).get('version',''); print(d)" 2>/dev/null || echo "")
-[ -n "$TT_SV" ] && ok "OV-007 /api/system/version 存在 (TT=$TT_SV)" || bad "OV-007 /api/system/version empty"
+# OV-007: /api/system/version 已随 S1 减法卸载（2026-09-18）—— 反向断言 404
+note '--- OV-007 /api/system/version（已卸载） ---'
+TT_SV=$(curl -s -o /dev/null -w '%{http_code}' "$TT/api/system/version")
+[ "$TT_SV" = "404" ] && ok "OV-007 system/version 已卸载 (404)" || bad "OV-007 system/version TT=$TT_SV（应 404）"
 
 # OV-008: /api/system/storage 真实
 note '--- OV-008 /api/system/storage ---'
@@ -72,10 +71,10 @@ note '--- OV-009 /api/license ---'
 TT_LI=$(curl -s "$TT/api/license" | python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}); print('license' in d)")
 [ "$TT_LI" = "True" ] && ok "OV-009 /api/license 结构完整" || bad "OV-009 /api/license TT=$TT_LI"
 
-# OV-010: preview.jpg (Core 运行中应有帧)
-note '--- OV-010 preview.jpg ---'
+# OV-010: preview.jpg 已随 S1 减法卸载（2026-09-18，MJPEG 预览走 /api/preview.mjpg）—— 反向断言 404
+note '--- OV-010 preview.jpg（已卸载） ---'
 TT_PV=$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "$TT/api/preview.jpg")
-[ "$TT_PV" = "200" ] && ok "OV-010 preview.jpg 200 (TT=$TT_PV)" || bad "OV-010 preview.jpg TT=$TT_PV"
+[ "$TT_PV" = "404" ] && ok "OV-010 preview.jpg 已卸载 (404)" || bad "OV-010 preview.jpg TT=$TT_PV（应 404）"
 
 # OV-011: Web 根路径
 note '--- OV-011 Web 根路径 ---'

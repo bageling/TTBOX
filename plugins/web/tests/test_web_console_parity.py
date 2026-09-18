@@ -16,23 +16,23 @@ import re
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 TEMPLATE = REPO_ROOT / 'plugins' / 'web' / 'templates' / 'index.html'
 
-# 参照物 12 页签的 section id（DOM 内 section 出现顺序）
+# S1 减法（2026-09-18）后的 9 页签 section id（DOM 内 section 出现顺序）
+# （07 Hailo / 08 键鼠盒子 / 09 无线 三个页签整段移除）
 EXPECTED_PAGES = [
-    'home', 'profiles', 'control', 'assist', 'model', 'wifi',
-    'hardware', 'hailo', 'kmbox', 'preset', 'license', 'fan',
+    'home', 'profiles', 'control', 'assist', 'model',
+    'hardware', 'preset', 'license', 'fan',
 ]
 
-# [布局冻结] 侧栏页签顺序 = 模板中 data-page-target 的出现顺序 = 01..12 展示顺序
+# [布局冻结] 侧栏页签顺序 = 模板中 data-page-target 的出现顺序 = 01..09 展示顺序
 EXPECTED_TAB_TARGETS = [
     'home-page', 'profiles-page', 'control-page', 'assist-page', 'model-page',
-    'hardware-page', 'hailo-page', 'kmbox-page', 'wifi-page', 'preset-page',
-    'license-page', 'fan-page',
+    'hardware-page', 'preset-page', 'license-page', 'fan-page',
 ]
 
 # [布局冻结] 侧栏页签文案（编号 + 名称），逐字锁死
 EXPECTED_TAB_LABELS = [
     '01总览', '02热键控制', '03移动控制', '04辅助功能', '05模型库', '06显示与鼠标',
-    '07Hailo-8加速', '08键鼠盒子', '09网络配置', '10预设参数', '11系统状态', '12风扇控制',
+    '07预设参数', '08系统状态', '09风扇控制',
 ]
 
 # [布局冻结] .app-shell 固定宽度基线（px）；停用的上游响应式断点共 4 个
@@ -51,17 +51,17 @@ def test_template_exists():
     assert TEMPLATE.is_file(), f'面板模板缺失: {TEMPLATE}'
 
 
-def test_twelve_pages_present():
-    """12 个 section id=*-page：多一个/少一个都说明整包落地被裁剪。"""
+def test_nine_pages_present():
+    """9 个 section id=*-page：多一个/少一个都说明整包落地被裁剪或减法未同步。"""
     ids = re.findall(r'<section id="([a-z0-9\-]+)-page"', _src())
-    assert len(ids) == 12, f'期望 12 个 section.*-page，实际 {len(ids)}: {ids}'
+    assert len(ids) == 9, f'期望 9 个 section.*-page，实际 {len(ids)}: {ids}'
     assert set(ids) == set(EXPECTED_PAGES)
 
 
-def test_twelve_page_targets_present():
-    """12 个 data-page-target（侧栏导航），与 12 个 section 一一对应。"""
+def test_nine_page_targets_present():
+    """9 个 data-page-target（侧栏导航），与 9 个 section 一一对应。"""
     targets = re.findall(r'data-page-target="([a-z0-9\-]+)"', _src())
-    assert len(targets) == 12, f'期望 12 个 data-page-target，实际 {len(targets)}: {targets}'
+    assert len(targets) == 9, f'期望 9 个 data-page-target，实际 {len(targets)}: {targets}'
     assert set(targets) == {p + '-page' for p in EXPECTED_PAGES}
 
 
@@ -134,10 +134,10 @@ def test_nav_tab_labels_are_frozen():
 
 
 def test_section_ids_match_tab_targets():
-    """[布局冻结] 12 个 section id=*-page 的集合必须与页签契约一一对应（不多不少）。"""
+    """[布局冻结] 9 个 section id=*-page 的集合必须与页签契约一一对应（不多不少）。"""
     ids = re.findall(r'<section id="([a-z0-9\-]+)-page"', _src())
     expected_ids = {t[: -len('-page')] for t in EXPECTED_TAB_TARGETS}
-    assert len(ids) == 12, f'期望 12 个 section.*-page，实际 {len(ids)}: {ids}'
+    assert len(ids) == 9, f'期望 9 个 section.*-page，实际 {len(ids)}: {ids}'
     assert set(ids) == expected_ids, f'section id 集合与页签契约不一致: {sorted(set(ids))}'
 
 

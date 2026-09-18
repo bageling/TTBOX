@@ -13,7 +13,9 @@
 #   2 metrics 缺字段（旧 Core / 未运行）⇒ 明确 unknown + False + 0，**不猜成 compatible**
 #   3 Web 层**不得**重算谓词：core 说不知道就必须原样透传"不知道"
 #   4 core 键名契约锁：改名即变红（Web 与外部诊断工具按名消费）
-#   5 framework 兼容面 /api/core/status 与外层 /api/state 同源（两面不得漂移）
+#   5 framework 兼容面 /api/core/status 已随 S1 减法移出出货包（A0-3c），
+#     「两面同源」约束随之终结；framework_api 自身路由契约改由
+#     framework/tests/test_web_framework_api.py（独立 app）覆盖。
 #
 # 判据的**唯一来源**在 core，故本文件刻意**不**重复断言"什么模型该走哪条路径"
 #   —— 那部分在 core/tests/test_input_path_summary.cpp（纯函数矩阵交叉锁）。
@@ -109,7 +111,7 @@ def web_mod(monkeypatch):
 
 
 def _patch_state_deps(monkeypatch, mod, metrics):
-    """把 collect_web_state 依赖的 11 个模块级函数换成确定值（metrics 是唯一变量）。"""
+    """把 collect_web_state 依赖的模块级函数换成确定值（metrics 是唯一变量）。"""
     monkeypatch.setattr(mod, '_get_status', lambda: {
         'running': True, 'runtime_running': True, 'version': 'test-1.0',
         'metrics': metrics,
@@ -122,7 +124,6 @@ def _patch_state_deps(monkeypatch, mod, metrics):
     monkeypatch.setattr(mod, '_calibration_payload', lambda: {'runtime': {}})
     monkeypatch.setattr(mod, '_core_state_payload', lambda: {})
     monkeypatch.setattr(mod, '_fan_control_payload', lambda: {})
-    monkeypatch.setattr(mod, '_hailo_temperature_payload', lambda: {})
     monkeypatch.setattr(mod, '_loopout_payload', lambda: {})
 
 
@@ -279,42 +280,7 @@ def test_worker_skew_is_surfaced(web_mod, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# 3. 兼容面：/api/core/status 与外层 /api/state 同源（两面不得漂移）
-# ---------------------------------------------------------------------------
-
-def _frameworks_module():
-    mod = sys.modules.get('framework_api')
-    assert mod is not None, 'framework_api 未被 ttbox-web.py 导入（导入方式已变，请更新本用例）'
-    return mod
-
-
-def test_framework_core_status_mirrors_model_input(web_mod, monkeypatch):
-    """framework 兼容面必须携带同一批字段 —— 否则同一块板子上两个接口答案不同。"""
-    fw = _frameworks_module()
-    monkeypatch.setattr(fw, '_ipc_request',
-                        lambda *a, **k: {'status': 0, 'data': {'app_name': 'ttbox',
-                                                              'metrics': _fast_path_metrics()}})
-    # M2.07（D1）：面板免密化后无鉴权层，入口执法只剩激活 gate
-    # （判据 = _license_block().activated）。本用例只验证兼容面同源，不测授权语义，
-    # 故把 _license_block 打桩为「已激活」以放行 API（不再走 first-setup/login）。
-    monkeypatch.setattr(web_mod, '_license_block', lambda: {'activated': True})
-    web_mod.app.config['TESTING'] = False
-    client = web_mod.app.test_client()
-
-    resp = client.get('/api/core/status')
-    assert resp.status_code == 200, resp.get_data(as_text=True)[:200]
-    body = resp.get_json()
-    assert body['ok'] is True
-    d = body['data']
-    assert d['model_input_pass_mode'] == 'xor_shift128'
-    assert d['model_input_type_name'] == 'int8'
-    assert d['model_fast_path_active'] is True
-    assert d['model_zero_copy_ready'] is True
-    assert d['model_input_note'] == ''
-
-
-# ---------------------------------------------------------------------------
-# 4. /api/models/select 契约：补齐参照物 applySelectedModel 消费的 4 键
+# 3. /api/models/select 契约：补齐参照物 applySelectedModel 消费的 4 键
 #    （result.config / result.models / result.presets / result.model）。
 #    缺任一键 ⇒ 切换模型后「配置表单/模型卡片/预设列表/选中项」静默不刷新。
 # ---------------------------------------------------------------------------

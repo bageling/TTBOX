@@ -33,8 +33,8 @@ UNIT_REL_DIR="deploy/systemd"
 #   保持同步（install 浇筑、本脚本逐条断言）。断链/指向 release 外即 FAIL：
 #   目的是抓住"新增一个硬编码路径却忘了补软链"的回归。
 TRANSITIONAL_LINKS=(
-    "plugins:current/plugins"   # framework_api.py:60 插件发现 + 旧 web unit 路径
-    "scripts:current/scripts"   # wifi_manager / lan_blocklist / edid 工具链 import
+    "plugins:current/plugins"   # 插件发现 + 旧 web unit 路径
+    "scripts:current/scripts"   # lan_blocklist / edid 工具链 import（wifi_manager 已移出）
 )
 
 # 设备专有库名单：其解析路径必须落在本 release 的 lib/ 内（可覆盖）

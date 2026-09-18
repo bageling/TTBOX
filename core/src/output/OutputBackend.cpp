@@ -24,7 +24,6 @@
 #include "common/Logger.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "output/LocalHidBackend.hpp"
-#include "output/MakcuMouseBackend.hpp"
 #include "output/MouseControlClient.hpp"
 
 namespace {

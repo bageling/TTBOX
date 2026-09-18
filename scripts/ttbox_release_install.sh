@@ -69,15 +69,16 @@ SELFTEST_STALL=0   # 唯一赋值点：--selftest-stall 参数解析处（且需
 #   （数据类硬编码见普查报告【应改造】档，归源码侧修复）。
 #   ⚠ 与 scripts/ttbox_release_verify.sh 的同名清单保持同步（verify 逐条断言）。
 TRANSITIONAL_LINKS=(
-    # 插件发现（framework_api.py:60 TTBOX_PLUGINS_ROOT）+ 旧 web unit 停血路径
+    # 插件发现（framework plugin root）+ 旧 web unit 停血路径
     "plugins:current/plugins"
-    # wifi_manager / lan_blocklist / edid 工具链 import（ttbox-web.py:53,1190,3374 等、
-    # scripts/edid/hdmirx_edid.py:9、edid_apply.sh:17）
+    # lan_blocklist / edid 工具链 import（ttbox-web.py、scripts/edid/hdmirx_edid.py:9、
+    # edid_apply.sh:17；wifi_manager.py 已随无线功能移出出货包）
     "scripts:current/scripts"
 )
 
-# tar 排除项（不依赖 rsync）
-TAR_EXCLUDES=(--exclude=__pycache__ --exclude='*.pyc' --exclude=.git)
+# tar 排除项（不依赖 rsync）；E02（2026-09-18）：--exclude=tests 与 fhs_init tcopy 的
+# payload 侧口径镜像，两处一起改。
+TAR_EXCLUDES=(--exclude=__pycache__ --exclude='*.pyc' --exclude=.git --exclude=tests)
 
 # 记录切换前的版本，供健康检查失败时回切
 PREV_VERSION=""

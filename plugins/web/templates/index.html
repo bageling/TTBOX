@@ -5231,23 +5231,14 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
         <button class="module-tab" type="button" data-page-target="hardware-page">
           <span>06</span>显示与鼠标
         </button>
-        <button class="module-tab" type="button" data-page-target="hailo-page">
-          <span>07</span>Hailo-8加速
-        </button>
-        <button class="module-tab" type="button" data-page-target="kmbox-page">
-          <span>08</span>键鼠盒子
-        </button>
-        <button class="module-tab" type="button" data-page-target="wifi-page">
-          <span>09</span>网络配置
-        </button>
         <button class="module-tab" type="button" data-page-target="preset-page">
-          <span>10</span>预设参数
+          <span>07</span>预设参数
         </button>
         <button class="module-tab" type="button" data-page-target="license-page">
-          <span>11</span>系统状态
+          <span>08</span>系统状态
         </button>
         <button class="module-tab" type="button" data-page-target="fan-page">
-          <span>12</span>风扇控制
+          <span>09</span>风扇控制
         </button>
       </nav>
     </aside>
@@ -5294,10 +5285,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
               <div>
                 <span>检测帧率</span>
                 <strong id="mobileFps">-- 帧/秒</strong>
-              </div>
-              <div>
-                <span>Hailo 温度</span>
-                <strong id="mobileHailoTemperature">--</strong>
               </div>
               <div>
                 <span>目标状态</span>
@@ -5825,100 +5812,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
           </div>
         </section>
 
-        <section id="wifi-page" class="page-card" data-page>
-          <div class="page-head mobile-action-head">
-            <div>
-              <p>网络连接</p>
-              <h2>网络配置</h2>
-            </div>
-          </div>
-
-          <div class="hardware-grid wifi-page-grid">
-            <article class="module-tile wifi-panel">
-              <div class="module-title">
-                <h3>无线网络</h3>
-                <span id="wifiStatusPill" class="pill">未读取</span>
-              </div>
-              <div class="wifi-mode-tabs" role="group" aria-label="无线模式">
-                <button id="wifiClientModeButton" class="wifi-mode-button is-active" type="button">Wi-Fi</button>
-                <button id="wifiApModeButton" class="wifi-mode-button" type="button">AP 热点</button>
-              </div>
-              <div id="wifiSummary" class="wifi-summary"></div>
-              <div id="wifiClientPanel" class="wifi-mode-panel">
-                <div class="field-grid compact wifi-connect-grid">
-                  <label class="field">Wi-Fi 列表
-                    <select id="wifiNetworkSelect"></select>
-                  </label>
-                  <label class="field">密码
-                    <input id="wifiPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" placeholder="Wi-Fi 密码">
-                  </label>
-                </div>
-                <div class="hardware-actions">
-                  <button id="wifiScanButton" class="ghost-button" type="button">扫描 Wi-Fi</button>
-                  <button id="wifiConnectButton" class="ghost-button" type="button">连接</button>
-                  <button id="wifiFallbackButton" class="ghost-button" type="button">重置默认 Wi-Fi</button>
-                </div>
-                <div id="wifiNetworkList" class="wifi-network-list"></div>
-              </div>
-              <div id="wifiApPanel" class="wifi-mode-panel" hidden>
-                <div id="wifiApSummary" class="wifi-ap-summary"></div>
-                <div class="field-grid compact wifi-connect-grid">
-                  <label class="field">热点名称
-                    <input id="wifiApSsid" type="text" autocomplete="off" maxlength="32" placeholder="YUAI">
-                  </label>
-                  <label class="field">热点密码
-                    <input id="wifiApPassword" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" minlength="8" maxlength="63" placeholder="12345678">
-                  </label>
-                </div>
-                <div class="hardware-actions">
-                  <button id="wifiApApplyButton" class="ghost-button" type="button">应用热点</button>
-                  <button id="wifiClientActivateButton" class="ghost-button" type="button">切回 Wi-Fi</button>
-                  <small id="wifiApHint">热点开启后，请连接热点并访问下方显示的热点地址。</small>
-                </div>
-              </div>
-
-              <section class="network-access-panel" aria-label="局域网名称与访问端口">
-                <div class="network-access-fields">
-                  <label class="field">局域网名称
-                    <input id="lanHostnameInput" type="text" autocomplete="off" maxlength="63" placeholder="aiassistance">
-                    <span id="lanHostnameHint" class="field-hint">用于路由器设备列表和 .local 访问地址，路由器列表可能要等网络刷新后更新。</span>
-                  </label>
-                  <label class="field">访问端口
-                    <input id="webPortInput" type="number" inputmode="numeric" min="1024" max="65535" step="1" placeholder="8080">
-                    <span id="webPortHint" class="field-hint">修改后 Web 服务会短暂重启，需要用新端口重新打开页面。</span>
-                  </label>
-                </div>
-                <div class="network-access-actions">
-                  <button id="applyNetworkAccessButton" class="ghost-button" type="button">应用网络访问设置</button>
-                </div>
-              </section>
-
-              <section class="network-access-panel lan-blocklist-panel" aria-label="局域网访问黑名单">
-                <div class="module-title compact-title">
-                  <h3>局域网黑名单</h3>
-                  <span id="lanBlockStatusPill" class="pill">未读取</span>
-                </div>
-                <div id="lanBlockSummary" class="wifi-summary"></div>
-                <div class="network-access-fields lan-block-fields">
-                  <label class="field">发现的设备
-                    <select id="lanBlockDeviceSelect"></select>
-                    <span id="lanBlockDeviceHint" class="field-hint">扫描后选择一个设备，应用后该 IP 将无法访问本机。</span>
-                  </label>
-                  <label class="field">手动 IP
-                    <input id="lanBlockIpInput" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.176.50">
-                    <span class="field-hint">仅支持单个 IPv4，不能填写网段。</span>
-                  </label>
-                </div>
-                <div class="network-access-actions lan-block-actions">
-                  <button id="scanLanDevicesButton" class="ghost-button" type="button">扫描设备</button>
-                  <button id="applyLanBlockButton" class="danger-button" type="button" disabled>拉黑选中 IP</button>
-                  <button id="clearLanBlockButton" class="ghost-button" type="button" disabled>清除黑名单</button>
-                </div>
-              </section>
-            </article>
-          </div>
-        </section>
-
         <section id="hardware-page" class="page-card" data-page>
           <div class="page-head mobile-action-head">
             <div>
@@ -6026,191 +5919,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 <button id="randomMouseHardwareButton" class="ghost-button" type="button">随机身份</button>
                 <button id="saveMouseHardwareButton" class="ghost-button" type="button">保存并应用</button>
                 <small id="mouseHardwareModeHint">完整透传使用真实鼠标硬件信息，合成模式可自定义身份。</small>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section id="hailo-page" class="page-card" data-page>
-          <div class="page-head mobile-action-head">
-            <div>
-              <p>Hailo-8加速</p>
-              <h2>PCIe 加速后端</h2>
-            </div>
-            <span id="hailoReadyPill" class="pill">未检测</span>
-          </div>
-          <div class="hardware-grid hailo-page-grid">
-            <article class="module-tile">
-              <div class="module-title">
-                <h3>设备状态</h3>
-                <button id="refreshHailoButton" class="ghost-button" type="button">刷新状态</button>
-              </div>
-              <div class="hailo-status-grid" id="hailoStatusGrid">
-                <div>
-                  <span>PCIe 插卡</span>
-                  <strong id="hailoPcieValue">--</strong>
-                </div>
-                <div>
-                  <span>内核驱动</span>
-                  <strong id="hailoDriverValue">--</strong>
-                </div>
-                <div>
-                  <span>HailoRT</span>
-                  <strong id="hailoRuntimeValue">--</strong>
-                </div>
-                <div>
-                  <span>设备扫描</span>
-                  <strong id="hailoScanValue">--</strong>
-                </div>
-                <div>
-                  <span>当前内核</span>
-                  <strong id="hailoKernelValue">--</strong>
-                </div>
-                <div>
-                  <span>芯片温度</span>
-                  <strong id="hailoTemperatureValue">--</strong>
-                </div>
-              </div>
-            </article>
-
-            <article class="module-tile hailo-performance-card">
-              <div class="module-title">
-                <h3>性能设置</h3>
-                <span class="pill">1-4</span>
-              </div>
-              <div class="field-grid compact hailo-performance-grid">
-                <label class="field"><span class="field-label">并发深度</span><input id="hailo_pipeline_depth" data-config class="value-input" type="number" min="1" max="4" step="1"><input id="hailo_pipeline_depth_range" type="range" min="1" max="4" step="1"><span class="field-hint">提高此值可提高检测FPS，减少丢帧，若发现链路延迟明显升高且FPS没有明显提升，请降低。</span></label>
-              </div>
-            </article>
-
-            <article class="module-tile">
-              <div class="module-title">
-                <h3>依赖安装</h3>
-                <span id="hailoInstallStage" class="pill">空闲</span>
-              </div>
-              <div class="hailo-install-actions">
-                <button id="installHailoButton" class="ghost-button" type="button" disabled>安装 Hailo-8 依赖</button>
-                <small id="hailoInstallHint">检测到 Hailo-8 PCIe 设备后可安装驱动和 HailoRT。</small>
-              </div>
-              <div id="hailoInstallProgress" class="update-progress-panel" hidden>
-                <div class="update-progress-head">
-                  <strong id="hailoInstallMessage">准备中</strong>
-                  <span id="hailoInstallPercent">0%</span>
-                </div>
-                <div class="update-progress-track"><span id="hailoInstallProgressBar" style="width: 0%"></span></div>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section id="kmbox-page" class="page-card" data-page>
-          <div class="page-head mobile-action-head">
-            <div>
-              <p>外接键鼠盒子</p>
-              <h2>键鼠盒子</h2>
-            </div>
-            <div class="external-mouse-head-actions">
-              <button id="testMouseCircleButton" class="ghost-button" type="button">测试画圈</button>
-              <span id="kmboxStatus" class="pill">未启用</span>
-            </div>
-          </div>
-
-          <div class="hardware-grid kmbox-grid">
-            <article class="module-tile external-mouse-card" data-kmbox-card>
-              <div class="module-title">
-                <h3>kmboxNet 网络协议</h3>
-                <label class="switch" aria-label="启用 kmboxNet 测试功能，请勿使用">
-                  <input id="kmbox_enabled" type="checkbox">
-                  <span></span>
-                </label>
-              </div>
-              <div class="external-mouse-body" data-kmbox-body>
-                <div class="kmbox-warning">
-                  测试功能，请勿使用。启用后，系统会使用键鼠盒子进行鼠标移动、五个标准按键监听与控制；请将物理键鼠接入盒子，并确保开发板能访问盒子的 USB 网卡局域网地址。
-                </div>
-                <div class="field-grid compact">
-                  <label class="field">盒子 IP<input id="kmbox_ip" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.2.188"><span class="field-hint">填写盒子屏幕显示的 IP 地址。</span></label>
-                  <label class="field">通信端口<input id="kmbox_port" type="number" min="1" max="65535" step="1" placeholder="1282"><span class="field-hint">填写盒子屏幕显示的 UDP 端口。</span></label>
-                  <label class="field">UUID<input id="kmbox_uuid" type="text" maxlength="8" autocomplete="off" placeholder="AF425414"><span class="field-hint">8 位十六进制 UUID。</span></label>
-                  <label class="field">监听端口<input id="kmbox_monitor_port" type="number" min="0" max="65535" step="1" placeholder="5001"><span class="field-hint">开发板本地 UDP 端口；填 0 可关闭物理按键监听。</span></label>
-                  <label class="field">响应超时 ms<input id="kmbox_timeout_ms" type="number" min="50" max="3000" step="10" placeholder="300"><span class="field-hint">连接和命令等待盒子响应的时间。</span></label>
-                  <label class="check-line"><input id="kmbox_encrypted" type="checkbox"> 使用加密命令</label>
-                </div>
-                <div id="kmboxValidation" class="hardware-validation" hidden></div>
-                <div class="hardware-actions">
-                  <button id="saveKmboxButton" class="ghost-button" type="button">保存配置</button>
-                  <small id="kmboxRuntimeHint">测试功能，请勿使用；保存后会自动尝试连接。</small>
-                </div>
-              </div>
-            </article>
-
-            <article class="module-tile external-mouse-card" data-catnet-card>
-              <div class="module-title">
-                <h3>CatNet 网络协议</h3>
-                <span id="catnetStatus" class="pill">未启用</span>
-                <label class="switch" aria-label="启用 CatNet 网络协议">
-                  <input id="catnet_enabled" type="checkbox">
-                  <span></span>
-                </label>
-              </div>
-              <div class="external-mouse-body" data-catnet-body>
-                <div class="field-grid compact">
-                  <label class="field">盒子 IP<input id="catnet_ip" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.7.1"><span class="field-hint">Cat 盒子 USB 网卡地址，通常为 192.168.7.1。</span></label>
-                  <label class="field">通信端口<input id="catnet_port" type="number" min="1" max="65535" step="1" placeholder="8888"><span class="field-hint">Cat 协议 UDP 端口，通常为 8888。</span></label>
-                  <label class="field">UUID<input id="catnet_uuid" type="text" maxlength="8" autocomplete="off" placeholder="2FE8DBB0"><span class="field-hint">8 位十六进制 UUID。</span></label>
-                  <label class="field">监听端口<input id="catnet_monitor_port" type="number" min="0" max="65535" step="1" placeholder="1234"><span class="field-hint">开发板本地 UDP 端口；填 0 可关闭物理按键监听。</span></label>
-                  <label class="field">响应超时 ms<input id="catnet_timeout_ms" type="number" min="50" max="3000" step="10" placeholder="300"><span class="field-hint">连接和命令等待盒子响应的时间。</span></label>
-                </div>
-                <div id="catnetValidation" class="hardware-validation" hidden></div>
-                <div class="hardware-actions">
-                  <button id="saveCatnetButton" class="ghost-button" type="button">保存配置</button>
-                  <small id="catnetRuntimeHint">保存后会自动尝试连接。</small>
-                </div>
-              </div>
-            </article>
-
-            <article class="module-tile external-mouse-card" data-makcu-card>
-              <div class="module-title">
-                <h3>MAKCU 串口控制器</h3>
-                <span id="makcuStatus" class="pill">未启用</span>
-                <label class="switch" aria-label="启用 MAKCU 串口控制器">
-                  <input id="makcu_enabled" type="checkbox">
-                  <span></span>
-                </label>
-              </div>
-              <div class="external-mouse-body" data-makcu-body>
-                <div class="field-grid compact">
-                  <label class="field">串口<select id="makcu_port"></select><span class="field-hint">自动选择只会匹配 MAKCU/CH34x 特征设备。</span></label>
-                  <label class="check-line"><input id="makcu_high_speed" type="checkbox"> 高速模式 4Mbps</label>
-                </div>
-                <div id="makcuValidation" class="hardware-validation" hidden></div>
-                <div class="hardware-actions">
-                  <button id="refreshMakcuDevicesButton" class="ghost-button" type="button">刷新串口</button>
-                  <button id="saveMakcuButton" class="ghost-button" type="button">保存配置</button>
-                  <small id="makcuRuntimeHint">保存后会自动尝试连接。</small>
-                </div>
-              </div>
-            </article>
-
-            <article class="module-tile external-mouse-card" data-ferrum-card>
-              <div class="module-title">
-                <h3>Ferrum Legacy 串口</h3>
-                <span id="ferrumStatus" class="pill">未启用</span>
-                <label class="switch" aria-label="启用 Ferrum Legacy 串口">
-                  <input id="ferrum_enabled" type="checkbox">
-                  <span></span>
-                </label>
-              </div>
-              <div class="external-mouse-body" data-ferrum-body>
-                <div class="field-grid compact">
-                  <label class="field">串口<select id="ferrum_port"></select><span class="field-hint">自动优先选择 CP210x / Silicon Labs 设备，连接后切换到 3Mbps。</span></label>
-                </div>
-                <div id="ferrumValidation" class="hardware-validation" hidden></div>
-                <div class="hardware-actions">
-                  <button id="refreshFerrumDevicesButton" class="ghost-button" type="button">刷新串口</button>
-                  <button id="saveFerrumButton" class="ghost-button" type="button">保存配置</button>
-                  <small id="ferrumRuntimeHint">保存后会自动尝试连接。</small>
-                </div>
               </div>
             </article>
           </div>
@@ -6345,6 +6053,49 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
               </div>
               <pre id="storageExpandLog" class="hardware-log">暂无扩容信息</pre>
             </article>
+            <article class="module-tile">
+              <div class="module-title">
+                <h3>网络访问</h3>
+              </div>
+              <section class="network-access-panel" aria-label="局域网名称与访问端口">
+                <div class="network-access-fields">
+                  <label class="field">局域网名称
+                    <input id="lanHostnameInput" type="text" autocomplete="off" maxlength="63" placeholder="aiassistance">
+                    <span id="lanHostnameHint" class="field-hint">用于路由器设备列表和 .local 访问地址，路由器列表可能要等网络刷新后更新。</span>
+                  </label>
+                  <label class="field">访问端口
+                    <input id="webPortInput" type="number" inputmode="numeric" min="1024" max="65535" step="1" placeholder="8080">
+                    <span id="webPortHint" class="field-hint">修改后 Web 服务会短暂重启，需要用新端口重新打开页面。</span>
+                  </label>
+                </div>
+                <div class="network-access-actions">
+                  <button id="applyNetworkAccessButton" class="ghost-button" type="button">应用网络访问设置</button>
+                </div>
+              </section>
+
+              <section class="network-access-panel lan-blocklist-panel" aria-label="局域网访问黑名单">
+                <div class="module-title compact-title">
+                  <h3>局域网黑名单</h3>
+                  <span id="lanBlockStatusPill" class="pill">未读取</span>
+                </div>
+                <div id="lanBlockSummary" class="wifi-summary"></div>
+                <div class="network-access-fields lan-block-fields">
+                  <label class="field">发现的设备
+                    <select id="lanBlockDeviceSelect"></select>
+                    <span id="lanBlockDeviceHint" class="field-hint">扫描后选择一个设备，应用后该 IP 将无法访问本机。</span>
+                  </label>
+                  <label class="field">手动 IP
+                    <input id="lanBlockIpInput" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.176.50">
+                    <span class="field-hint">仅支持单个 IPv4，不能填写网段。</span>
+                  </label>
+                </div>
+                <div class="network-access-actions lan-block-actions">
+                  <button id="scanLanDevicesButton" class="ghost-button" type="button">扫描设备</button>
+                  <button id="applyLanBlockButton" class="danger-button" type="button" disabled>拉黑选中 IP</button>
+                  <button id="clearLanBlockButton" class="ghost-button" type="button" disabled>清除黑名单</button>
+                </div>
+              </section>
+            </article>
           </div>
         </section>
 
@@ -6371,7 +6122,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <option value="cpu_big">CPU 大核</option>
                     <option value="gpu">GPU</option>
                     <option value="npu">NPU</option>
-                    <option value="hailo">Hailo-8</option>
                   </select>
                 </label>
               </div>
@@ -6685,34 +6435,7 @@ const CONTROLLER_DEFAULTS = {
 };
 const MOVEMENT_CONTROL_DEFAULTS = {
   sens: 1,
-  mouse_output_mode: "passthrough",
   controller: CONTROLLER_DEFAULTS,
-};
-const KMBOXNET_DEFAULTS = {
-  enabled: false,
-  ip: "",
-  port: 0,
-  uuid: "",
-  monitor_port: 5001,
-  encrypted: false,
-  timeout_ms: 300,
-};
-const CATNET_DEFAULTS = {
-  enabled: false,
-  ip: "192.168.7.1",
-  port: 8888,
-  uuid: "",
-  monitor_port: 1234,
-  timeout_ms: 300,
-};
-const MAKCU_DEFAULTS = {
-  enabled: false,
-  port: "auto",
-  high_speed: true,
-};
-const FERRUM_DEFAULTS = {
-  enabled: false,
-  port: "auto",
 };
 const RECOIL_DEFAULTS = {
   enabled: false,
@@ -6847,8 +6570,6 @@ const state = {
   modelBackendFilter: "all",
   modelGameOptions: [],
   modelGameSuggestionOpen: false,
-  makcuDevices: [],
-  ferrumDevices: [],
   presetNames: [],
   presetSelectedName: "",
   presetListSignature: "",
@@ -6868,15 +6589,8 @@ const state = {
   updateStatusTimer: null,
   updateStatusInFlight: false,
   updateRefreshScheduled: false,
-  hailo: null,
-  hailoStatusTimer: null,
-  hailoStatusInFlight: false,
   licenseRecoveryInProgress: false,
   lastLicenseRecoveryMessage: "",
-  wifi: null,
-  wifiSelectedSsid: "",
-  wifiModePanel: "client",
-  wifiApCredentialsInitialized: false,
   lanBlockDevices: [],
   displayRealMonitor: null,
   displayHardwarePayload: null,
@@ -7024,10 +6738,6 @@ function applyBrand(payload) {
 
   const hostnameInput = $("lanHostnameInput");
   if (hostnameInput) hostnameInput.placeholder = config.defaultLocalName;
-  const apSsidInput = $("wifiApSsid");
-  if (apSsidInput) apSsidInput.placeholder = config.defaultHotspotSsid;
-  const fallbackButton = $("wifiFallbackButton");
-  if (fallbackButton) fallbackButton.textContent = config.fallbackResetText;
 
   const themeButton = $("themeToggleButton");
   if (themeButton) themeButton.hidden = !config.allowThemeSwitch;
@@ -7775,592 +7485,6 @@ function getRadioValue(name, fallback = "") {
   return checked ? checked.value : fallback;
 }
 
-function normalizeMouseOutputMode(mode) {
-  if (mode === "kmboxnet") {
-    return "kmboxnet";
-  }
-  if (mode === "catnet") {
-    return "catnet";
-  }
-  if (mode === "makcu") {
-    return "makcu";
-  }
-  if (mode === "ferrum") {
-    return "ferrum";
-  }
-  return "passthrough";
-}
-
-function normalizeKmboxUuid(value) {
-  return String(value || "").replace(/[^0-9a-fA-F]/g, "").slice(0, 8).toUpperCase();
-}
-
-function normalizeKmboxConfig(config = {}, mode = "passthrough") {
-  const port = Number(config.port);
-  const monitorPort = Number(config.monitor_port);
-  const timeoutMs = Number(config.timeout_ms);
-  const enabled = Boolean(config.enabled) || normalizeMouseOutputMode(mode) === "kmboxnet";
-  return {
-    enabled,
-    ip: String(config.ip || "").trim(),
-    port: Number.isFinite(port) ? Math.round(port) : KMBOXNET_DEFAULTS.port,
-    uuid: normalizeKmboxUuid(config.uuid),
-    monitor_port: Number.isFinite(monitorPort) ? Math.round(monitorPort) : KMBOXNET_DEFAULTS.monitor_port,
-    encrypted: Boolean(config.encrypted),
-    timeout_ms: Number.isFinite(timeoutMs) ? Math.round(timeoutMs) : KMBOXNET_DEFAULTS.timeout_ms,
-  };
-}
-
-function normalizeCatnetConfig(config = {}, mode = "passthrough") {
-  const port = Number(config.port);
-  const monitorPort = Number(config.monitor_port);
-  const timeoutMs = Number(config.timeout_ms);
-  const enabled = Boolean(config.enabled) || normalizeMouseOutputMode(mode) === "catnet";
-  return {
-    enabled,
-    ip: String(config.ip || CATNET_DEFAULTS.ip).trim(),
-    port: Number.isFinite(port) ? Math.round(port) : CATNET_DEFAULTS.port,
-    uuid: normalizeKmboxUuid(config.uuid),
-    monitor_port: Number.isFinite(monitorPort) ? Math.round(monitorPort) : CATNET_DEFAULTS.monitor_port,
-    timeout_ms: Number.isFinite(timeoutMs) ? Math.round(timeoutMs) : CATNET_DEFAULTS.timeout_ms,
-  };
-}
-
-function normalizeMakcuPort(value) {
-  let port = String(value || "").trim();
-  if (!port || port.toLowerCase() === "auto") {
-    return "auto";
-  }
-  if (port.startsWith("/dev/")) {
-    port = port.slice(5);
-  }
-  return /^tty(?:USB|ACM)\d+$/.test(port) ? port : "auto";
-}
-
-function normalizeMakcuConfig(config = {}, mode = "passthrough") {
-  const enabled = Boolean(config.enabled) || normalizeMouseOutputMode(mode) === "makcu";
-  return {
-    enabled,
-    port: normalizeMakcuPort(config.port || MAKCU_DEFAULTS.port),
-    high_speed: config.high_speed === undefined ? MAKCU_DEFAULTS.high_speed : Boolean(config.high_speed),
-  };
-}
-
-function normalizeFerrumPort(value) {
-  return normalizeMakcuPort(value);
-}
-
-function normalizeFerrumConfig(config = {}, mode = "passthrough") {
-  const enabled = Boolean(config.enabled) || normalizeMouseOutputMode(mode) === "ferrum";
-  return {
-    enabled,
-    port: normalizeFerrumPort(config.port || FERRUM_DEFAULTS.port),
-  };
-}
-
-function makcuDeviceLabel(device) {
-  if (!device || !device.port) {
-    return "";
-  }
-  const parts = [device.path || `/dev/${device.port}`];
-  const vidPid = [device.vid, device.pid].filter(Boolean).join(":");
-  if (vidPid) {
-    parts.push(vidPid);
-  }
-  if (device.product) {
-    parts.push(device.product);
-  }
-  return parts.join(" · ");
-}
-
-function renderMakcuDeviceOptions(selectedPort = "auto") {
-  const select = $("makcu_port");
-  if (!select) {
-    return;
-  }
-  const normalized = normalizeMakcuPort(selectedPort);
-  select.innerHTML = "";
-  const autoOption = document.createElement("option");
-  autoOption.value = "auto";
-  autoOption.textContent = "自动选择";
-  select.appendChild(autoOption);
-  (state.makcuDevices || []).forEach((device) => {
-    if (!device || !device.port) {
-      return;
-    }
-    const option = document.createElement("option");
-    option.value = normalizeMakcuPort(device.port);
-    option.textContent = makcuDeviceLabel(device);
-    if (!device.is_makcu) {
-      option.textContent += " · 非自动候选";
-    }
-    select.appendChild(option);
-  });
-  const hasSelected = Array.from(select.options).some((option) => option.value === normalized);
-  if (!hasSelected && normalized !== "auto") {
-    const option = document.createElement("option");
-    option.value = normalized;
-    option.textContent = `/dev/${normalized} · 已保存`;
-    select.appendChild(option);
-  }
-  select.value = hasSelected ? normalized : (normalized === "auto" ? "auto" : normalized);
-}
-
-function populateMakcuConfig(config = {}, mode = "passthrough") {
-  const makcu = normalizeMakcuConfig(config, mode);
-  setCheckbox("makcu_enabled", makcu.enabled);
-  setCheckbox("makcu_high_speed", makcu.high_speed);
-  renderMakcuDeviceOptions(makcu.port);
-  updateMakcuFormUi(makcu);
-}
-
-function collectMakcuConfig() {
-  return normalizeMakcuConfig({
-    enabled: getCheckbox("makcu_enabled"),
-    port: getString("makcu_port") || "auto",
-    high_speed: getCheckbox("makcu_high_speed"),
-  });
-}
-
-function setExternalMouseCardExpanded(cardSelector, bodySelector, enabled) {
-  const card = document.querySelector(cardSelector);
-  const body = document.querySelector(bodySelector);
-  if (card) {
-    card.classList.toggle("is-collapsed", !enabled);
-  }
-  if (body) {
-    body.hidden = !enabled;
-  }
-}
-
-function updateMakcuFormUi(makcu = collectMakcuConfig()) {
-  const saveButton = $("saveMakcuButton");
-  if (saveButton) {
-    saveButton.textContent = makcu.enabled ? "保存并启用" : "保存配置";
-  }
-  setExternalMouseCardExpanded("[data-makcu-card]", "[data-makcu-body]", makcu.enabled);
-}
-
-function validateMakcuConfig() {
-  const fieldIds = ["makcu_port"];
-  const config = collectMakcuConfig();
-  const messages = [];
-  if (config.enabled && config.port !== "auto" && !/^tty(?:USB|ACM)\d+$/.test(config.port)) {
-    messages.push({ id: "makcu_port", text: "MAKCU 串口必须是自动选择、ttyUSB* 或 ttyACM*。" });
-  }
-  setValidation("makcuValidation", fieldIds, messages);
-  if (messages.length > 0) {
-    throw new Error("MAKCU 配置不符合规范");
-  }
-  renderMakcuDeviceOptions(config.port);
-  updateMakcuFormUi(config);
-  return config;
-}
-
-async function refreshMakcuDevices({ silent = false } = {}) {
-  try {
-    const result = await api("/api/makcu/devices");
-    state.makcuDevices = Array.isArray(result.devices) ? result.devices : [];
-    renderMakcuDeviceOptions(collectMakcuConfig().port);
-    if (!silent) {
-      showToast("MAKCU 串口列表已刷新");
-    }
-  } catch (error) {
-    if (!silent) {
-      throw error;
-    }
-  }
-}
-
-function ferrumDeviceLabel(device) {
-  if (!device || !device.port) {
-    return "";
-  }
-  const parts = [device.path || `/dev/${device.port}`];
-  const vidPid = [device.vid, device.pid].filter(Boolean).join(":");
-  if (vidPid) {
-    parts.push(vidPid);
-  }
-  if (device.product) {
-    parts.push(device.product);
-  }
-  if (device.manufacturer) {
-    parts.push(device.manufacturer);
-  }
-  return parts.join(" · ");
-}
-
-function renderFerrumDeviceOptions(selectedPort = "auto") {
-  const select = $("ferrum_port");
-  if (!select) {
-    return;
-  }
-  const normalized = normalizeFerrumPort(selectedPort);
-  select.innerHTML = "";
-  const autoOption = document.createElement("option");
-  autoOption.value = "auto";
-  autoOption.textContent = "自动选择";
-  select.appendChild(autoOption);
-  (state.ferrumDevices || []).forEach((device) => {
-    if (!device || !device.port) {
-      return;
-    }
-    const option = document.createElement("option");
-    option.value = normalizeFerrumPort(device.port);
-    option.textContent = ferrumDeviceLabel(device);
-    if (!device.is_ferrum) {
-      option.textContent += " · 非 CP210x 候选";
-    }
-    select.appendChild(option);
-  });
-  const hasSelected = Array.from(select.options).some((option) => option.value === normalized);
-  if (!hasSelected && normalized !== "auto") {
-    const option = document.createElement("option");
-    option.value = normalized;
-    option.textContent = `/dev/${normalized} · 已保存`;
-    select.appendChild(option);
-  }
-  select.value = hasSelected ? normalized : (normalized === "auto" ? "auto" : normalized);
-}
-
-function populateFerrumConfig(config = {}, mode = "passthrough") {
-  const ferrum = normalizeFerrumConfig(config, mode);
-  setCheckbox("ferrum_enabled", ferrum.enabled);
-  renderFerrumDeviceOptions(ferrum.port);
-  updateFerrumFormUi(ferrum);
-}
-
-function collectFerrumConfig() {
-  return normalizeFerrumConfig({
-    enabled: getCheckbox("ferrum_enabled"),
-    port: getString("ferrum_port") || "auto",
-  });
-}
-
-function updateFerrumFormUi(ferrum = collectFerrumConfig()) {
-  const saveButton = $("saveFerrumButton");
-  if (saveButton) {
-    saveButton.textContent = ferrum.enabled ? "保存并启用" : "保存配置";
-  }
-  setExternalMouseCardExpanded("[data-ferrum-card]", "[data-ferrum-body]", ferrum.enabled);
-}
-
-function validateFerrumConfig() {
-  const fieldIds = ["ferrum_port"];
-  const config = collectFerrumConfig();
-  const messages = [];
-  if (config.enabled && config.port !== "auto" && !/^tty(?:USB|ACM)\d+$/.test(config.port)) {
-    messages.push({ id: "ferrum_port", text: "Ferrum 串口必须是自动选择、ttyUSB* 或 ttyACM*。" });
-  }
-  setValidation("ferrumValidation", fieldIds, messages);
-  if (messages.length > 0) {
-    throw new Error("Ferrum 配置不符合规范");
-  }
-  renderFerrumDeviceOptions(config.port);
-  updateFerrumFormUi(config);
-  return config;
-}
-
-async function refreshFerrumDevices({ silent = false } = {}) {
-  try {
-    const result = await api("/api/ferrum/devices");
-    state.ferrumDevices = Array.isArray(result.devices) ? result.devices : [];
-    renderFerrumDeviceOptions(collectFerrumConfig().port);
-    if (!silent) {
-      showToast("Ferrum 串口列表已刷新");
-    }
-  } catch (error) {
-    if (!silent) {
-      throw error;
-    }
-  }
-}
-
-function populateKmboxConfig(config = {}, mode = "passthrough") {
-  const kmbox = normalizeKmboxConfig(config, mode);
-  setCheckbox("kmbox_enabled", kmbox.enabled);
-  setValue("kmbox_ip", kmbox.ip);
-  setValue("kmbox_port", kmbox.port || "");
-  setValue("kmbox_uuid", kmbox.uuid);
-  setValue("kmbox_monitor_port", kmbox.monitor_port);
-  setValue("kmbox_timeout_ms", kmbox.timeout_ms);
-  setCheckbox("kmbox_encrypted", kmbox.encrypted);
-  updateKmboxFormUi(kmbox);
-}
-
-function collectKmboxConfig() {
-  return normalizeKmboxConfig({
-    enabled: getCheckbox("kmbox_enabled"),
-    ip: getString("kmbox_ip"),
-    port: getNumber("kmbox_port", 0),
-    uuid: normalizeKmboxUuid(getString("kmbox_uuid")),
-    monitor_port: getNumber("kmbox_monitor_port", KMBOXNET_DEFAULTS.monitor_port),
-    encrypted: getCheckbox("kmbox_encrypted"),
-    timeout_ms: getNumber("kmbox_timeout_ms", KMBOXNET_DEFAULTS.timeout_ms),
-  });
-}
-
-function updateKmboxFormUi(kmbox = collectKmboxConfig()) {
-  const saveButton = $("saveKmboxButton");
-  if (saveButton) {
-    saveButton.textContent = kmbox.enabled ? "保存并启用" : "保存配置";
-  }
-  setExternalMouseCardExpanded("[data-kmbox-card]", "[data-kmbox-body]", kmbox.enabled);
-}
-
-function validateKmboxConfig() {
-  const fieldIds = [
-    "kmbox_ip",
-    "kmbox_port",
-    "kmbox_uuid",
-    "kmbox_monitor_port",
-    "kmbox_timeout_ms",
-  ];
-  const config = collectKmboxConfig();
-  const messages = [];
-  if (config.enabled) {
-    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(config.ip) ||
-        config.ip.split(".").some((part) => Number(part) > 255)) {
-      messages.push({ id: "kmbox_ip", text: "盒子 IP 必须是 IPv4 地址，例如 192.168.2.188。" });
-    }
-    if (config.port < 1 || config.port > 65535) {
-      messages.push({ id: "kmbox_port", text: "通信端口必须在 1-65535 之间。" });
-    }
-    if (!/^[0-9A-F]{8}$/.test(config.uuid)) {
-      messages.push({ id: "kmbox_uuid", text: "UUID 必须是 8 位十六进制字符。" });
-    }
-    if (config.monitor_port !== 0 && (config.monitor_port < 1024 || config.monitor_port > 65535)) {
-      messages.push({ id: "kmbox_monitor_port", text: "监听端口必须为 0，或 1024-65535 之间的本地 UDP 端口。" });
-    }
-    if (config.timeout_ms < 50 || config.timeout_ms > 3000) {
-      messages.push({ id: "kmbox_timeout_ms", text: "响应超时必须在 50-3000 ms 之间。" });
-    }
-  }
-  setValidation("kmboxValidation", fieldIds, messages);
-  if (messages.length > 0) {
-    throw new Error("键鼠盒子配置不符合规范");
-  }
-  setValue("kmbox_uuid", config.uuid);
-  setValue("kmbox_port", config.port || "");
-  setValue("kmbox_monitor_port", config.monitor_port);
-  setValue("kmbox_timeout_ms", config.timeout_ms);
-  updateKmboxFormUi(config);
-  return config;
-}
-
-function populateCatnetConfig(config = {}, mode = "passthrough") {
-  const catnet = normalizeCatnetConfig(config, mode);
-  setCheckbox("catnet_enabled", catnet.enabled);
-  setValue("catnet_ip", catnet.ip);
-  setValue("catnet_port", catnet.port || "");
-  setValue("catnet_uuid", catnet.uuid);
-  setValue("catnet_monitor_port", catnet.monitor_port);
-  setValue("catnet_timeout_ms", catnet.timeout_ms);
-  updateCatnetFormUi(catnet);
-}
-
-function collectCatnetConfig() {
-  return normalizeCatnetConfig({
-    enabled: getCheckbox("catnet_enabled"),
-    ip: getString("catnet_ip"),
-    port: getNumber("catnet_port", CATNET_DEFAULTS.port),
-    uuid: normalizeKmboxUuid(getString("catnet_uuid")),
-    monitor_port: getNumber("catnet_monitor_port", CATNET_DEFAULTS.monitor_port),
-    timeout_ms: getNumber("catnet_timeout_ms", CATNET_DEFAULTS.timeout_ms),
-  });
-}
-
-function updateCatnetFormUi(catnet = collectCatnetConfig()) {
-  const saveButton = $("saveCatnetButton");
-  if (saveButton) {
-    saveButton.textContent = catnet.enabled ? "保存并启用" : "保存配置";
-  }
-  setExternalMouseCardExpanded("[data-catnet-card]", "[data-catnet-body]", catnet.enabled);
-}
-
-function validateCatnetConfig() {
-  const fieldIds = [
-    "catnet_ip",
-    "catnet_port",
-    "catnet_uuid",
-    "catnet_monitor_port",
-    "catnet_timeout_ms",
-  ];
-  const config = collectCatnetConfig();
-  const messages = [];
-  if (config.enabled) {
-    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(config.ip) ||
-        config.ip.split(".").some((part) => Number(part) > 255)) {
-      messages.push({ id: "catnet_ip", text: "CatNet 盒子 IP 必须是 IPv4 地址，例如 192.168.7.1。" });
-    }
-    if (config.port < 1 || config.port > 65535) {
-      messages.push({ id: "catnet_port", text: "通信端口必须在 1-65535 之间。" });
-    }
-    if (!/^[0-9A-F]{8}$/.test(config.uuid)) {
-      messages.push({ id: "catnet_uuid", text: "UUID 必须是 8 位十六进制字符。" });
-    }
-    if (config.monitor_port !== 0 && (config.monitor_port < 1024 || config.monitor_port > 65535)) {
-      messages.push({ id: "catnet_monitor_port", text: "监听端口必须为 0，或 1024-65535 之间的本地 UDP 端口。" });
-    }
-    if (config.timeout_ms < 50 || config.timeout_ms > 3000) {
-      messages.push({ id: "catnet_timeout_ms", text: "响应超时必须在 50-3000 ms 之间。" });
-    }
-  }
-  setValidation("catnetValidation", fieldIds, messages);
-  if (messages.length > 0) {
-    throw new Error("CatNet 配置不符合规范");
-  }
-  setValue("catnet_uuid", config.uuid);
-  setValue("catnet_port", config.port || "");
-  setValue("catnet_monitor_port", config.monitor_port);
-  setValue("catnet_timeout_ms", config.timeout_ms);
-  updateCatnetFormUi(config);
-  return config;
-}
-
-function renderKmboxStatus(mouseOutput = {}) {
-  const config = state.config && state.config.mouse_output ? state.config.mouse_output : {};
-  const kmboxConfig = normalizeKmboxConfig(config.kmboxnet || {}, config.mode);
-  const runtimeMode = normalizeMouseOutputMode(mouseOutput.mode || config.mode);
-  const enabled = kmboxConfig.enabled || runtimeMode === "kmboxnet";
-  const connected = runtimeMode === "kmboxnet" && !!mouseOutput.connected;
-  const lastError = runtimeMode === "kmboxnet" ? String(mouseOutput.last_error || "") : "";
-  const status = $("kmboxStatus");
-  if (status) {
-    if (!enabled) {
-      setHardwareStatus("kmboxStatus", "未启用", false);
-    } else if (connected) {
-      setHardwareStatus("kmboxStatus", "已连接", true);
-    } else if (lastError) {
-      setHardwareStatus("kmboxStatus", "连接失败", false);
-    } else {
-      setHardwareStatus("kmboxStatus", "等待连接", false);
-    }
-  }
-  const hint = $("kmboxRuntimeHint");
-  if (hint) {
-    if (!enabled) {
-      hint.textContent = "测试功能，请勿使用；保存后会自动尝试连接。";
-    } else if (connected) {
-      hint.textContent = "测试功能，请勿使用；kmboxNet 已接管鼠标监听与控制。";
-    } else if (lastError) {
-      hint.textContent = `测试功能，请勿使用；连接错误：${lastError}`;
-    } else {
-      hint.textContent = "测试功能，请勿使用；已启用 kmboxNet，等待系统运行后自动连接。";
-    }
-  }
-}
-
-function renderCatnetStatus(mouseOutput = {}) {
-  const config = state.config && state.config.mouse_output ? state.config.mouse_output : {};
-  const catnetConfig = normalizeCatnetConfig(config.catnet || {}, config.mode);
-  const runtimeMode = normalizeMouseOutputMode(mouseOutput.mode || config.mode);
-  const enabled = catnetConfig.enabled || runtimeMode === "catnet";
-  const connected = runtimeMode === "catnet" && !!mouseOutput.connected;
-  const lastError = runtimeMode === "catnet" ? String(mouseOutput.last_error || "") : "";
-  if (!enabled) {
-    setHardwareStatus("catnetStatus", "未启用", false);
-  } else if (connected) {
-    setHardwareStatus("catnetStatus", "已连接", true);
-  } else if (lastError) {
-    setHardwareStatus("catnetStatus", "连接失败", false);
-  } else {
-    setHardwareStatus("catnetStatus", "等待连接", false);
-  }
-  const hint = $("catnetRuntimeHint");
-  if (hint) {
-    if (!enabled) {
-      hint.textContent = "保存后会自动尝试连接。";
-    } else if (connected) {
-      hint.textContent = "CatNet 已接管鼠标监听与控制。";
-    } else if (lastError) {
-      hint.textContent = `连接错误：${lastError}`;
-    } else {
-      hint.textContent = "已启用 CatNet，等待系统运行后自动连接。";
-    }
-  }
-}
-
-function renderMakcuStatus(mouseOutput = {}) {
-  const config = state.config && state.config.mouse_output ? state.config.mouse_output : {};
-  const makcuConfig = normalizeMakcuConfig(config.makcu || {}, config.mode);
-  const runtimeMode = normalizeMouseOutputMode(mouseOutput.mode || config.mode);
-  const enabled = makcuConfig.enabled || runtimeMode === "makcu";
-  const connected = runtimeMode === "makcu" && !!mouseOutput.connected;
-  const lastError = runtimeMode === "makcu" ? String(mouseOutput.last_error || "") : "";
-  if (!enabled) {
-    setHardwareStatus("makcuStatus", "未启用", false);
-  } else if (connected) {
-    setHardwareStatus("makcuStatus", "已连接", true);
-  } else if (lastError) {
-    setHardwareStatus("makcuStatus", "连接失败", false);
-  } else {
-    setHardwareStatus("makcuStatus", "等待连接", false);
-  }
-  const hint = $("makcuRuntimeHint");
-  if (hint) {
-    if (!enabled) {
-      hint.textContent = "保存后会自动尝试连接。";
-    } else if (connected) {
-      hint.textContent = "MAKCU 已接管鼠标监听与控制。";
-    } else if (lastError) {
-      hint.textContent = `连接错误：${lastError}`;
-    } else {
-      hint.textContent = "已启用 MAKCU，等待系统运行后自动连接。";
-    }
-  }
-}
-
-function renderFerrumStatus(mouseOutput = {}) {
-  const config = state.config && state.config.mouse_output ? state.config.mouse_output : {};
-  const ferrumConfig = normalizeFerrumConfig(config.ferrum || {}, config.mode);
-  const runtimeMode = normalizeMouseOutputMode(mouseOutput.mode || config.mode);
-  const enabled = ferrumConfig.enabled || runtimeMode === "ferrum";
-  const connected = runtimeMode === "ferrum" && !!mouseOutput.connected;
-  const lastError = runtimeMode === "ferrum" ? String(mouseOutput.last_error || "") : "";
-  if (!enabled) {
-    setHardwareStatus("ferrumStatus", "未启用", false);
-  } else if (connected) {
-    setHardwareStatus("ferrumStatus", "已连接", true);
-  } else if (lastError) {
-    setHardwareStatus("ferrumStatus", "连接失败", false);
-  } else {
-    setHardwareStatus("ferrumStatus", "等待连接", false);
-  }
-  const hint = $("ferrumRuntimeHint");
-  if (hint) {
-    if (!enabled) {
-      hint.textContent = "保存后会自动尝试连接。";
-    } else if (connected) {
-      hint.textContent = "Ferrum Legacy 已接管鼠标监听与控制。";
-    } else if (lastError) {
-      hint.textContent = `连接错误：${lastError}`;
-    } else {
-      hint.textContent = "已启用 Ferrum Legacy，等待系统运行后自动连接。";
-    }
-  }
-}
-
-async function testMouseOutputCircle() {
-  const button = $("testMouseCircleButton");
-  if (button) {
-    button.disabled = true;
-    button.textContent = "发送中";
-  }
-  try {
-    const result = await api("/api/mouse-output/test-circle", { method: "POST" });
-    if (result && result.state) {
-      renderRuntime({ ...(state.data || {}), state: result.state });
-    }
-    showToast("测试画圈已发送");
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent = "测试画圈";
-    }
-  }
-}
-
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -8583,20 +7707,6 @@ function formatPreprocessBackend(latencyState) {
   return "-";
 }
 
-function formatHailoTemperature(hailoTemperature) {
-  const info = hailoTemperature || {};
-  const maxTemp = Number(info.max_celsius);
-  const ts0 = Number(info.ts0_celsius);
-  const ts1 = Number(info.ts1_celsius);
-  if (!info.available || !Number.isFinite(maxTemp) || maxTemp <= 0) {
-    return { value: "--", detail: info.last_error || "未采样" };
-  }
-  const detail = Number.isFinite(ts0) && Number.isFinite(ts1)
-    ? `TS0 ${ts0.toFixed(1)} °C / TS1 ${ts1.toFixed(1)} °C`
-    : "Hailo-8";
-  return { value: `${maxTemp.toFixed(1)} °C`, detail };
-}
-
 function modelProfileLabel(value) {
   if (!value || value === "generic") {
     return "通用";
@@ -8673,22 +7783,6 @@ function modelBackend(model) {
 
 function modelBackendLabel(model) {
   return modelBackend(model) === "hailo" ? "Hailo" : "RKNN";
-}
-
-function modelHailoPipelineDepth(model) {
-  const depth = Number(model && model.hailo_pipeline_depth);
-  if (!Number.isFinite(depth) || depth <= 0) {
-    return modelBackend(model) === "hailo" ? 3 : null;
-  }
-  return Math.round(clamp(depth, 1, 4));
-}
-
-function modelHailoPipelineDepthLabel(model) {
-  if (modelBackend(model) !== "hailo") {
-    return "";
-  }
-  const depth = modelHailoPipelineDepth(model);
-  return depth ? `并发 ${depth}` : "并发默认";
 }
 
 function modelBackendFilterValue(model) {
@@ -10516,7 +9610,8 @@ function collectCrosshairConfig() {
 
 function normalizeFanTemperatureSource(value) {
   const source = String(value || "").trim();
-  return ["auto", "soc", "cpu_big", "gpu", "npu", "hailo"].includes(source) ? source : "auto";
+  // A1201（2026-09-18）：Hailo-8 温度来源已随 Hailo 页整体移除，core 不认识该值
+  return ["auto", "soc", "cpu_big", "gpu", "npu"].includes(source) ? source : "auto";
 }
 
 function populateFanControlConfig(fanControl) {
@@ -10636,11 +9731,6 @@ function populateForm(config) {
   setValue("video_detection_confidence", config.video_detection_confidence);
   setValue("video_detection_iou", config.video_detection_iou);
   setValue("sens", config.sens);
-  setRadioValue("mouse_output_mode", normalizeMouseOutputMode(mouseOutput.mode));
-  populateKmboxConfig(mouseOutput.kmboxnet || {}, mouseOutput.mode);
-  populateCatnetConfig(mouseOutput.catnet || {}, mouseOutput.mode);
-  populateMakcuConfig(mouseOutput.makcu || {}, mouseOutput.mode);
-  populateFerrumConfig(mouseOutput.ferrum || {}, mouseOutput.mode);
   setValue("range_factor", config.range_factor);
   setValue("pos", config.pos);
   setCheckbox("hotkey_guard_enabled", hotkeyGuard.enabled ?? HOTKEY_GUARD_DEFAULTS.enabled);
@@ -10725,16 +9815,11 @@ function populateForm(config) {
   state.configReady = true;
   state.isPopulating = false;
   updateAssistModuleCollapseStates();
-  renderKmboxStatus((state.data && state.data.state && state.data.state.mouse_output) || {});
-  renderCatnetStatus((state.data && state.data.state && state.data.state.mouse_output) || {});
-  renderMakcuStatus((state.data && state.data.state && state.data.state.mouse_output) || {});
-  renderFerrumStatus((state.data && state.data.state && state.data.state.mouse_output) || {});
 }
 
 function setMovementControlDefaultsToForm() {
   const controller = MOVEMENT_CONTROL_DEFAULTS.controller;
   setValue("sens", MOVEMENT_CONTROL_DEFAULTS.sens);
-  setRadioValue("mouse_output_mode", MOVEMENT_CONTROL_DEFAULTS.mouse_output_mode);
   setValue("controller_kp_x", controller.kp_x);
   setValue("controller_kp_y", controller.kp_y);
   setValue("controller_ki_x", controller.ki_x);
@@ -10792,8 +9877,6 @@ function resetFieldDefaults(fieldDefaults) {
       setCheckbox(id, value);
     } else if (el.type === "radio") {
       el.checked = !!value;
-    } else if (id === "mouse_output_mode") {
-      setRadioValue("mouse_output_mode", value);
     } else {
       setValue(id, value);
     }
@@ -10816,7 +9899,6 @@ function movementDefaultsForSection(sectionId) {
   const defaultsBySection = {
     "control-section-pid": {
       sens: MOVEMENT_CONTROL_DEFAULTS.sens,
-      mouse_output_mode: MOVEMENT_CONTROL_DEFAULTS.mouse_output_mode,
       controller_kp_x: controller.kp_x,
       controller_kp_y: controller.kp_y,
       controller_ki_x: controller.ki_x,
@@ -10936,24 +10018,11 @@ function collectConfig() {
     "";
   const autoTriggerProfiles = collectAutoTriggerProfiles();
   const primaryAutoTriggerProfile = autoTriggerProfiles[0] || defaultAutoTriggerProfile();
-  const kmboxConfig = collectKmboxConfig();
-  const catnetConfig = collectCatnetConfig();
-  const makcuConfig = collectMakcuConfig();
-  const ferrumConfig = collectFerrumConfig();
   const autoBackFlickClassMask = collectAutoBackFlickClassMask(
     state.config && state.config.auto_back_flick
       ? state.config.auto_back_flick
       : AUTO_BACK_FLICK_DEFAULTS
   );
-  const mouseOutputMode = ferrumConfig.enabled
-    ? "ferrum"
-    : makcuConfig.enabled
-    ? "makcu"
-    : catnetConfig.enabled
-    ? "catnet"
-    : kmboxConfig.enabled
-    ? "kmboxnet"
-    : normalizeMouseOutputMode(getRadioValue("mouse_output_mode", MOVEMENT_CONTROL_DEFAULTS.mouse_output_mode));
   return {
     model_id: selectedModel,
     video_detection_confidence: getNumber("video_detection_confidence", 0.25),
@@ -10982,11 +10051,7 @@ function collectConfig() {
     },
     fan_control: collectFanControlConfig(previousFanControl),
     mouse_output: {
-      mode: mouseOutputMode,
-      kmboxnet: kmboxConfig,
-      catnet: catnetConfig,
-      makcu: makcuConfig,
-      ferrum: ferrumConfig,
+      mode: "passthrough",
     },
     sens: getNumber("sens", MOVEMENT_CONTROL_DEFAULTS.sens),
     range_factor: getNumber("range_factor", 1),
@@ -11193,11 +10258,6 @@ function renderRuntime(payload) {
   const detection = runtime.detection || {};
   const aim = runtime.aim || {};
   const latencyState = runtime.latency || {};
-  const mouseOutput = runtime.mouse_output || {};
-  renderKmboxStatus(mouseOutput);
-  renderCatnetStatus(mouseOutput);
-  renderMakcuStatus(mouseOutput);
-  renderFerrumStatus(mouseOutput);
   renderFanControlStatus(runtime.fan_control || {});
   setText("hotkeyGuardRuntimeStatus", aim.hotkeys_suspended ? "已禁用" : "未禁用");
   const badge = $("statusBadge");
@@ -11211,7 +10271,6 @@ function renderRuntime(payload) {
   const inferenceMs = isRunning ? detection.inference_ms : 0;
   const inferenceFps = isRunning ? detection.inference_fps : 0;
   const captureFps = isRunning ? capture.capture_fps : 0;
-  const hailoTemperature = formatHailoTemperature(runtime.hailo_temperature);
   const detections = isRunning ? detection.detections || 0 : 0;
   const tracks = isRunning ? detection.tracks || 0 : 0;
   if (badge) {
@@ -11224,7 +10283,6 @@ function renderRuntime(payload) {
   if (runtimeSummary) {
     const modelLabel = selectedModelDisplayName(payload, runtime, detection);
     const preprocessBackend = formatPreprocessBackend(latencyState);
-    setText("hailoTemperatureValue", hailoTemperature.value);
     runtimeSummary.innerHTML = `
       <div class="runtime-stat">
         <span>当前模型</span>
@@ -11274,10 +10332,6 @@ function renderRuntime(payload) {
   const fps = $("mobileFps");
   if (fps) {
     fps.textContent = `${formatNumber(inferenceFps)} 帧/秒`;
-  }
-  const mobileHailoTemperature = $("mobileHailoTemperature");
-  if (mobileHailoTemperature) {
-    mobileHailoTemperature.textContent = hailoTemperature.value;
   }
   const videoStatus = $("mobileVideoStatus");
   if (videoStatus) {
@@ -11508,32 +10562,6 @@ function webUrl(host, port = state.webPort || 8080) {
 
 function defaultMdnsHost() {
   return `${currentBrandConfig().defaultLocalName}.local`;
-}
-
-function displayDefaultHotspotSsid(value = "") {
-  const text = String(value || "").trim();
-  if ((state.uiBrand === UI_BRAND_XH || state.uiBrand === UI_BRAND_XCSH) && (!text || text === "YUAI")) {
-    return currentBrandConfig().defaultHotspotSsid;
-  }
-  return text || currentBrandConfig().defaultHotspotSsid;
-}
-
-function brandHotspotSsid(value = "", fallback = "") {
-  const text = String(value || "").trim();
-  const fallbackText = String(fallback || "").trim();
-  if (!text || text === "YUAI" || text === fallbackText) {
-    return displayDefaultHotspotSsid(fallbackText || text);
-  }
-  return text;
-}
-
-function displayDefaultWifiList(payload) {
-  const ssids = payload && Array.isArray(payload.default_ssids) ? payload.default_ssids : [];
-  const cleaned = ssids.map((item) => String(item || "").trim()).filter(Boolean);
-  if (cleaned.length) {
-    return cleaned.join(" / ");
-  }
-  return displayDefaultHotspotSsid(payload && payload.default_ssid);
 }
 
 function syncWebPortInputs(payload) {
@@ -11803,460 +10831,6 @@ async function clearLanBlock() {
   const payload = await api("/api/system/lan-blocklist", { method: "DELETE" });
   renderLanBlocklist(payload);
   showToast("局域网黑名单已清除");
-}
-
-function wifiSecurityLabel(value) {
-  const text = String(value || "").trim();
-  if (!text || text.toLowerCase() === "open") {
-    return "开放";
-  }
-  return text;
-}
-
-function wifiRequiresPassword(network) {
-  const security = String((network && network.security) || "").trim().toLowerCase();
-  return !!security && security !== "open";
-}
-
-function wifiApPayload(payload = state.wifi) {
-  return (payload && payload.ap) || {};
-}
-
-function wifiIsApMode(payload = state.wifi) {
-  const ap = wifiApPayload(payload);
-  return payload && (payload.mode === "ap" || ap.active);
-}
-
-function wifiApAddress(ap = wifiApPayload()) {
-  return ap.ip4 || "10.42.0.1";
-}
-
-function wifiApAccessHint(ap = wifiApPayload()) {
-  return ap.gateway_url || webUrl(wifiApAddress(ap));
-}
-
-function wifiIpText(payload) {
-  if (wifiIsApMode(payload)) {
-    return wifiApAddress(wifiApPayload(payload));
-  }
-  const connected = payload && payload.connected;
-  return (connected && connected.ip4) || "--";
-}
-
-function wifiStatusText(payload) {
-  if (!payload) {
-    return "读取失败";
-  }
-  if (!payload.available) {
-    return "无无线网卡";
-  }
-  if (wifiIsApMode(payload)) {
-    return "AP 热点";
-  }
-  if (payload.connected && payload.connected.ssid) {
-    return "已连接";
-  }
-  if (payload.ethernet_connected) {
-    return "有线在线";
-  }
-  return "待连接";
-}
-
-function wifiCurrentText(payload) {
-  if (!payload) {
-    return "--";
-  }
-  if (wifiIsApMode(payload)) {
-    const ap = wifiApPayload(payload);
-    return brandHotspotSsid(ap.ssid, ap.default_ssid) || "AP 热点";
-  }
-  if (payload.connected && payload.connected.ssid) {
-    return payload.connected.ssid;
-  }
-  return payload.ethernet_connected ? "有线网络" : "未连接";
-}
-
-function setWifiPill(id, payload) {
-  const pill = $(id);
-  if (!pill) {
-    return;
-  }
-  const danger = !payload || !payload.available || (!!payload.error && !(payload.connected && payload.connected.ssid) && !wifiIsApMode(payload));
-  pill.textContent = wifiStatusText(payload);
-  pill.className = `pill${danger ? " danger-pill" : ""}`;
-}
-
-function wifiNetworks(payload) {
-  return payload && Array.isArray(payload.networks) ? payload.networks : [];
-}
-
-function selectedWifiNetwork(payload = state.wifi) {
-  return wifiNetworks(payload).find((network) => network.ssid === state.wifiSelectedSsid) || null;
-}
-
-function normalizeWifiSelection(payload) {
-  if (wifiIsApMode(payload)) {
-    return;
-  }
-  const networks = wifiNetworks(payload);
-  const connectedSsid = payload && payload.connected && payload.connected.ssid;
-  const selectedExists = networks.some((network) => network.ssid === state.wifiSelectedSsid);
-  if (!state.wifiSelectedSsid || !selectedExists) {
-    state.wifiSelectedSsid = connectedSsid || (networks[0] && networks[0].ssid) || "";
-  }
-}
-
-function renderWifiSummary(id, payload, compact = false) {
-  const summary = $(id);
-  if (!summary) {
-    return;
-  }
-  if (!payload) {
-    summary.innerHTML = `
-      <div class="runtime-stat">
-        <span>无线状态</span>
-        <strong>读取失败</strong>
-      </div>
-    `;
-    return;
-  }
-  const error = payload.error || "";
-  const ap = wifiApPayload(payload);
-  if (compact) {
-    summary.innerHTML = `
-      <div class="runtime-stat">
-        <span>当前网络</span>
-        <strong>${escapeHtml(wifiCurrentText(payload))}</strong>
-        <small>${escapeHtml(error || (payload.connected ? "Wi-Fi 已连接" : "等待连接"))}</small>
-      </div>
-      <div class="runtime-stat">
-        <span>设备地址</span>
-        <strong>${escapeHtml(wifiIpText(payload))}</strong>
-        <small>${escapeHtml(payload.interface || displayDefaultHotspotSsid(payload.default_ssid))}</small>
-      </div>
-    `;
-    return;
-  }
-  summary.innerHTML = `
-    <div class="runtime-stat">
-      <span>无线网卡</span>
-      <strong>${payload.available ? escapeHtml(payload.interface || "已检测") : "未检测到"}</strong>
-      <small>${escapeHtml(error || payload.manager || "NetworkManager")}</small>
-    </div>
-    <div class="runtime-stat">
-      <span>有线状态</span>
-      <strong>${payload.ethernet_connected ? "已连接" : "未连接"}</strong>
-      <small>${wifiIsApMode(payload) ? (payload.ethernet_connected ? "热点共享有线网络" : "热点仅本地访问") : (payload.ethernet_connected ? "不会强制切换 Wi-Fi" : `默认回退 ${escapeHtml(displayDefaultWifiList(payload))}`)}</small>
-    </div>
-    <div class="runtime-stat">
-      <span>当前网络</span>
-      <strong>${escapeHtml(wifiCurrentText(payload))}</strong>
-      <small>${wifiIsApMode(payload) ? "AP 热点模式" : (payload.connected && payload.connected.signal !== null ? `${payload.connected.signal}% 信号` : "--")}</small>
-    </div>
-    <div class="runtime-stat">
-      <span>设备地址</span>
-      <strong>${escapeHtml(wifiIpText(payload))}</strong>
-      <small>${escapeHtml(wifiIsApMode(payload) ? wifiApAccessHint(ap) : (payload.connected && payload.connected.connection || defaultMdnsHost()))}</small>
-    </div>
-  `;
-}
-
-function renderWifiSelect(id, payload) {
-  const select = $(id);
-  if (!select) {
-    return;
-  }
-  const networks = wifiNetworks(payload);
-  if (!payload || !payload.available) {
-    select.innerHTML = '<option value="">无无线网卡</option>';
-    select.disabled = true;
-    return;
-  }
-  if (networks.length === 0) {
-    select.innerHTML = '<option value="">未扫描到 Wi-Fi</option>';
-    select.disabled = true;
-    return;
-  }
-  select.disabled = false;
-  select.innerHTML = networks.map((network) => {
-    const active = network.active ? " / 已连接" : "";
-    const lock = wifiRequiresPassword(network) ? " · 锁" : "";
-    const label = `${network.ssid} · ${network.signal}% · ${wifiSecurityLabel(network.security)}${lock}${active}`;
-    return `<option value="${escapeAttr(network.ssid)}">${escapeHtml(label)}</option>`;
-  }).join("");
-  select.value = state.wifiSelectedSsid;
-}
-
-function renderWifiNetworkList(payload) {
-  const list = $("wifiNetworkList");
-  if (!list) {
-    return;
-  }
-  const networks = wifiNetworks(payload);
-  if (!payload || !payload.available) {
-    list.innerHTML = '<span class="wifi-empty">未检测到无线网卡</span>';
-    return;
-  }
-  if (networks.length === 0) {
-    list.innerHTML = '<span class="wifi-empty">未扫描到 Wi-Fi</span>';
-    return;
-  }
-  list.innerHTML = networks.map((network) => {
-    const active = network.active ? " is-active" : "";
-    const selected = network.ssid === state.wifiSelectedSsid ? " is-selected" : "";
-    const meta = `${network.signal}% · ${wifiSecurityLabel(network.security)}${network.active ? " · 已连接" : ""}`;
-    const lock = wifiRequiresPassword(network) ? '<span class="wifi-lock" aria-label="需要密码">锁</span>' : "";
-    return `
-      <button class="wifi-network-button${active}${selected}" type="button" data-wifi-ssid="${escapeAttr(network.ssid)}">
-        <strong>${escapeHtml(network.ssid)}${lock}</strong>
-        <small>${escapeHtml(meta)}</small>
-      </button>
-    `;
-  }).join("");
-  list.querySelectorAll("[data-wifi-ssid]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.wifiSelectedSsid = button.dataset.wifiSsid || "";
-      renderWifiPanels(state.wifi);
-    });
-  });
-}
-
-function setWifiModePanel(mode) {
-  state.wifiModePanel = mode === "ap" ? "ap" : "client";
-  const clientPanel = $("wifiClientPanel");
-  const apPanel = $("wifiApPanel");
-  const clientButton = $("wifiClientModeButton");
-  const apButton = $("wifiApModeButton");
-  if (clientPanel) {
-    clientPanel.hidden = state.wifiModePanel !== "client";
-  }
-  if (apPanel) {
-    apPanel.hidden = state.wifiModePanel !== "ap";
-  }
-  if (clientButton) {
-    clientButton.classList.toggle("is-active", state.wifiModePanel === "client");
-  }
-  if (apButton) {
-    apButton.classList.toggle("is-active", state.wifiModePanel === "ap");
-  }
-}
-
-function maybeInitializeWifiApInputs(payload) {
-  if (!payload || state.wifiApCredentialsInitialized) {
-    return;
-  }
-  const ap = wifiApPayload(payload);
-  const ssidInput = $("wifiApSsid");
-  const passwordInput = $("wifiApPassword");
-  if (ssidInput) {
-    ssidInput.value = brandHotspotSsid(ap.ssid, ap.default_ssid);
-  }
-  if (passwordInput) {
-    passwordInput.value = ap.default_password || "12345678";
-  }
-  state.wifiApCredentialsInitialized = true;
-}
-
-function renderWifiApSummary(payload) {
-  const summary = $("wifiApSummary");
-  if (!summary) {
-    return;
-  }
-  if (!payload || !payload.available) {
-    summary.innerHTML = '<span class="wifi-empty">未检测到无线网卡</span>';
-    return;
-  }
-  const ap = wifiApPayload(payload);
-  const supportText = ap.supported ? "支持 AP" : "不可用";
-  const activeText = ap.active ? "已开启" : (ap.autoconnect ? "重启后开启" : "未开启");
-  const accessUrl = wifiApAccessHint(ap);
-  summary.innerHTML = `
-    <div class="runtime-stat">
-      <span>AP 支持</span>
-      <strong>${escapeHtml(supportText)}</strong>
-      <small>${escapeHtml(ap.support_error || payload.interface || "--")}</small>
-    </div>
-    <div class="runtime-stat">
-      <span>热点状态</span>
-      <strong>${escapeHtml(activeText)}</strong>
-      <small>${escapeHtml(brandHotspotSsid(ap.ssid, ap.default_ssid))}</small>
-    </div>
-    <div class="runtime-stat">
-      <span>热点地址</span>
-      <strong>${escapeHtml(wifiApAddress(ap))}</strong>
-      <small>${escapeHtml(accessUrl)}</small>
-    </div>
-    <div class="runtime-stat">
-      <span>共享网络</span>
-      <strong>${payload.ethernet_connected ? "有线共享" : "本地访问"}</strong>
-      <small>${payload.ethernet_connected ? "热点客户端可尝试访问外网" : "连接热点后访问前端"}</small>
-    </div>
-  `;
-}
-
-function renderWifiPanels(payload) {
-  state.wifi = payload;
-  if (payload && wifiIsApMode(payload)) {
-    state.wifiModePanel = "ap";
-  }
-  normalizeWifiSelection(payload);
-  maybeInitializeWifiApInputs(payload);
-  setWifiPill("wifiStatusPill", payload);
-  renderWifiSummary("wifiSummary", payload, false);
-  renderWifiSelect("wifiNetworkSelect", payload);
-  renderWifiNetworkList(payload);
-  renderWifiApSummary(payload);
-  setWifiModePanel(state.wifiModePanel);
-  updateWifiConnectButtonState();
-  updateWifiApButtonState();
-}
-
-function updateWifiConnectButtonState() {
-  const connectButton = $("wifiConnectButton");
-  if (connectButton) {
-    const network = selectedWifiNetwork();
-    const needsPassword = wifiRequiresPassword(network);
-    const passwordReady = !needsPassword || wifiPassword("wifiPassword").trim().length >= 8;
-    const disabled = !state.wifi || !state.wifi.available || !network || !passwordReady;
-    connectButton.disabled = disabled;
-    connectButton.title = needsPassword && !passwordReady ? "请输入至少 8 位 Wi-Fi 密码" : "";
-  }
-  const fallback = $("wifiFallbackButton");
-  if (fallback) {
-    fallback.disabled = !state.wifi || !state.wifi.available || wifiIsApMode(state.wifi);
-  }
-}
-
-function updateWifiApButtonState() {
-  const ap = wifiApPayload();
-  const applyButton = $("wifiApApplyButton");
-  const ssidInput = $("wifiApSsid");
-  const passwordInput = $("wifiApPassword");
-  const ssid = ssidInput ? ssidInput.value.trim() : "";
-  const password = passwordInput ? passwordInput.value : "";
-  const ssidBytes = new TextEncoder().encode(ssid).length;
-  const credentialsReady = ssidBytes >= 1 && ssidBytes <= 32 && password.length >= 8 && password.length <= 63;
-  if (applyButton) {
-    applyButton.disabled = !state.wifi || !state.wifi.available || !ap.supported || !credentialsReady;
-    applyButton.title = !ap.supported
-      ? (ap.support_error || "当前无线网卡不支持 AP 模式")
-      : (!credentialsReady ? "热点名称需 1-32 字节，密码需 8-63 位" : "");
-  }
-  const clientButton = $("wifiClientActivateButton");
-  if (clientButton) {
-    clientButton.disabled = !state.wifi || !state.wifi.available || !wifiIsApMode(state.wifi);
-  }
-}
-
-async function refreshWifi(forceScan = false) {
-  const payload = forceScan
-    ? await api("/api/network/wifi/scan", { method: "POST" })
-    : await api("/api/network/wifi");
-  renderWifiPanels(payload);
-  return payload;
-}
-
-function selectedWifiSsid(selectId) {
-  const select = $(selectId);
-  return (select && select.value) || state.wifiSelectedSsid || "";
-}
-
-function wifiPassword(inputId) {
-  const input = $(inputId);
-  return input ? input.value : "";
-}
-
-function clearWifiPasswords() {
-  const input = $("wifiPassword");
-  if (input) {
-    input.value = "";
-  }
-}
-
-function validateWifiApInputs() {
-  const ssidInput = $("wifiApSsid");
-  const passwordInput = $("wifiApPassword");
-  const ssid = brandHotspotSsid(ssidInput ? ssidInput.value : "", state.wifi && state.wifi.ap && state.wifi.ap.default_ssid);
-  const password = passwordInput ? passwordInput.value : "";
-  const ssidBytes = new TextEncoder().encode(ssid).length;
-  if (ssidBytes < 1 || ssidBytes > 32) {
-    throw new Error("热点名称需 1-32 字节");
-  }
-  if (password.length < 8 || password.length > 63) {
-    throw new Error("热点密码需 8-63 位");
-  }
-  return { ssid, password };
-}
-
-async function connectWifiFrom(selectId, passwordId) {
-  const ssid = selectedWifiSsid(selectId);
-  if (!ssid) {
-    throw new Error("请选择 Wi-Fi");
-  }
-  const network = selectedWifiNetwork();
-  if (wifiRequiresPassword(network) && wifiPassword(passwordId).trim().length < 8) {
-    throw new Error("请输入至少 8 位 Wi-Fi 密码");
-  }
-  try {
-    const payload = await api("/api/network/wifi/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ssid, password: wifiPassword(passwordId) }),
-    });
-    renderWifiPanels(payload);
-    clearWifiPasswords();
-    showToast(`Wi-Fi 已连接：${ssid}`);
-  } catch (error) {
-    if (error instanceof TypeError) {
-      showToast(`Wi-Fi 切换中，请连到同一网络后访问 ${defaultMdnsHost()}`);
-      return;
-    }
-    await refreshWifi(false).catch(() => {});
-    throw error;
-  }
-}
-
-async function fallbackWifi() {
-  const payload = await api("/api/network/wifi/fallback", { method: "POST" });
-  renderWifiPanels(payload);
-  clearWifiPasswords();
-  showToast("已重置默认 Wi-Fi");
-}
-
-async function applyWifiApHotspot() {
-  const credentials = validateWifiApInputs();
-  try {
-    const payload = await api("/api/network/wifi/ap/apply", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(credentials),
-    });
-    renderWifiPanels(payload);
-    setWifiModePanel("ap");
-    const ap = wifiApPayload(payload);
-    showToast(`AP 热点已开启：${ap.ssid || credentials.ssid}`);
-  } catch (error) {
-    if (error instanceof TypeError) {
-      showToast(`AP 热点切换中，请连接热点后访问 ${webUrl("10.42.0.1")} 或 ${webUrl(defaultMdnsHost())}`);
-      return;
-    }
-    await refreshWifi(false).catch(() => {});
-    throw error;
-  }
-}
-
-async function activateWifiClientMode() {
-  const payload = await api("/api/network/wifi/client/activate", { method: "POST" });
-  renderWifiPanels(payload);
-  setWifiModePanel("client");
-  showToast("已切回 Wi-Fi 模式");
-}
-
-function initWifiPolling() {
-  refreshWifi(false).catch(() => renderWifiPanels(null));
-  setInterval(() => {
-    refreshWifi(false).catch(() => renderWifiPanels(null));
-  }, 7000);
 }
 
 async function refreshSystemStats() {
@@ -12904,7 +11478,6 @@ function renderModelPanel(models, selectedModelId) {
       ? [
         modelDimension(currentModel),
         modelBackendLabel(currentModel),
-        modelHailoPipelineDepthLabel(currentModel),
         modelOutputLabel(currentModel),
         modelProfileLabel(currentModel.game_profile),
         currentModel.preset_name ? `绑定预设：${currentModel.preset_name}` : "",
@@ -13100,7 +11673,6 @@ function renderModelCards(models, selectedModelId) {
     const description = (model.description || "").trim() || "暂无描述";
     const presetName = String(model.preset_name || "");
     const presetLabel = presetName || "未绑定（自动创建）";
-    const pipelineDepthLabel = modelHailoPipelineDepthLabel(model);
     const presetOptions = [
       { value: "", label: presetName ? "清空绑定" : "未绑定（自动创建）" },
       ...state.presetNames.map((name) => ({ value: name, label: name })),
@@ -13114,7 +11686,6 @@ function renderModelCards(models, selectedModelId) {
 	      <span class="model-card-meta">
 	        <span>${escapeHtml(modelDimension(model))}</span>
 	        <span>${escapeHtml(modelBackendLabel(model))}</span>
-	        ${pipelineDepthLabel ? `<span>${escapeHtml(pipelineDepthLabel)}</span>` : ""}
 	        <span>${escapeHtml(modelClassLabel(model))}</span>
         <span>${escapeHtml(modelProfileLabel(model.game_profile))}</span>
       </span>
@@ -14270,110 +12841,6 @@ function randomizeMouseHardware() {
   ], []);
 }
 
-function hailoYesNo(value) {
-  return value ? "正常" : "未就绪";
-}
-
-function hailoInstallRunning(install) {
-  return install && install.status === "running";
-}
-
-function renderHailoStatus(payload) {
-  const status = payload || {};
-  state.hailo = status;
-  const pcie = status.pcie || {};
-  const driver = status.driver || {};
-  const runtime = status.runtime || {};
-  const device = status.device || {};
-  const install = status.install || {};
-  const scan = device.scan || {};
-  const ready = !!status.ready;
-  const pciePresent = !!pcie.present;
-  const running = hailoInstallRunning(install);
-
-  setText("hailoReadyPill", ready ? "已就绪" : pciePresent ? "已插卡" : "未插卡");
-  setText("hailoPcieValue", pciePresent ? "已检测" : "未检测");
-  setText("hailoDriverValue", hailoYesNo(driver.loaded));
-  setText("hailoRuntimeValue", runtime.installed ? `已安装 ${runtime.expected_version || ""}`.trim() : "未安装");
-  setText("hailoScanValue", scan.ok ? "正常" : "未通过");
-  setText("hailoKernelValue", status.kernel_release || "--");
-  setText("hailoInstallStage", install.status === "ready" ? "完成" : running ? "安装中" : install.status === "failed" ? "失败" : "空闲");
-
-  const installButton = $("installHailoButton");
-  if (installButton) {
-    installButton.disabled = !pciePresent || running || ready;
-    installButton.textContent = ready ? "Hailo-8 已就绪" : running ? "正在安装" : "安装 Hailo-8 依赖";
-  }
-  setText(
-    "hailoInstallHint",
-    !pciePresent
-      ? "未检测到 Hailo-8 PCIe 设备，插卡后刷新状态。"
-      : ready
-        ? "驱动、HailoRT 和设备扫描均已就绪。"
-        : running
-          ? "正在下载并安装依赖，请保持设备联网。"
-          : "检测到 Hailo-8，可从授权服务器安装驱动和 HailoRT。"
-  );
-
-  const progressPanel = $("hailoInstallProgress");
-  const progressBar = $("hailoInstallProgressBar");
-  const installStatus = install.status || "idle";
-  if (progressPanel) {
-    progressPanel.hidden = installStatus === "idle";
-    progressPanel.classList.toggle("is-failed", installStatus === "failed");
-    progressPanel.classList.toggle("is-success", installStatus === "ready");
-  }
-  const progress = Number(install.progress || 0);
-  setText("hailoInstallMessage", install.error || install.message || "暂无安装任务");
-  setText("hailoInstallPercent", `${Math.max(0, Math.min(100, Math.round(progress)))}%`);
-  if (progressBar) {
-    progressBar.style.width = `${Math.max(0, Math.min(100, progress))}%`;
-  }
-}
-
-async function refreshHailoStatus({ silent = false } = {}) {
-  if (state.hailoStatusInFlight) {
-    return state.hailo;
-  }
-  state.hailoStatusInFlight = true;
-  try {
-    const payload = await api("/api/hailo/status");
-    renderHailoStatus(payload);
-    return payload;
-  } catch (error) {
-    if (!silent) {
-      throw error;
-    }
-    return state.hailo;
-  } finally {
-    state.hailoStatusInFlight = false;
-  }
-}
-
-function scheduleHailoStatusPolling() {
-  if (state.hailoStatusTimer) {
-    clearTimeout(state.hailoStatusTimer);
-    state.hailoStatusTimer = null;
-  }
-  const install = state.hailo && state.hailo.install;
-  if (!hailoInstallRunning(install)) {
-    return;
-  }
-  state.hailoStatusTimer = setTimeout(async () => {
-    await refreshHailoStatus({ silent: true });
-    scheduleHailoStatusPolling();
-  }, 1500);
-}
-
-async function installHailoDependencies() {
-  const result = await api("/api/hailo/install", { method: "POST" });
-  if (result && result.status) {
-    renderHailoStatus({ ...(state.hailo || {}), install: result.status });
-  }
-  await refreshHailoStatus({ silent: true });
-  scheduleHailoStatusPolling();
-}
-
 function bindHardwareInputFilters() {
   const filters = {
     display_name: (value) => printableAscii(value, 13),
@@ -14386,10 +12853,6 @@ function bindHardwareInputFilters() {
     mouse_usb_product: (value) => printableAscii(value, 64),
     mouse_usb_serial: (value) => printableAscii(value, 64),
     mouse_usb_configuration: (value) => printableAscii(value, 32),
-    kmbox_ip: (value) => String(value || "").replace(/[^0-9.]/g, "").slice(0, 64),
-    kmbox_uuid: normalizeKmboxUuid,
-    catnet_ip: (value) => String(value || "").replace(/[^0-9.]/g, "").slice(0, 64),
-    catnet_uuid: normalizeKmboxUuid,
   };
   Object.entries(filters).forEach(([id, filter]) => {
     const el = $(id);
@@ -14400,11 +12863,6 @@ function bindHardwareInputFilters() {
       const filtered = filter(el.value);
       if (el.value !== filtered) {
         el.value = filtered;
-      }
-      if (id.startsWith("kmbox_")) {
-        updateKmboxFormUi();
-      } else if (id.startsWith("catnet_")) {
-        updateCatnetFormUi();
       }
     });
   });
@@ -14425,12 +12883,6 @@ async function refreshAll() {
   state.data = payload;
   applyFullState(payload);
   await loadHardware();
-  await refreshMakcuDevices({ silent: true });
-  await refreshFerrumDevices({ silent: true });
-  if (state.activePageId === "hailo-page") {
-    await refreshHailoStatus({ silent: true });
-    scheduleHailoStatusPolling();
-  }
   setApplyStatus("ready", "已同步");
 }
 
@@ -14608,9 +13060,6 @@ function initPageNavigation() {
     tabs.forEach((tab) => {
       tab.classList.toggle("is-active", tab.dataset.pageTarget === pageId);
     });
-    if (pageId === "hailo-page") {
-      refreshHailoStatus({ silent: true }).then(() => scheduleHailoStatusPolling()).catch(() => {});
-    }
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -15133,49 +13582,6 @@ function bindEvents() {
   on("applyLanBlockButton", "click", () => runUiAction(applyLanBlock));
   on("clearLanBlockButton", "click", () => runUiAction(clearLanBlock));
 
-  const wifiSelect = $("wifiNetworkSelect");
-  if (wifiSelect) {
-    wifiSelect.addEventListener("change", () => {
-      state.wifiSelectedSsid = wifiSelect.value;
-      renderWifiPanels(state.wifi);
-    });
-  }
-
-  const wifiPasswordInput = $("wifiPassword");
-  if (wifiPasswordInput) {
-    wifiPasswordInput.addEventListener("input", updateWifiConnectButtonState);
-  }
-
-  const wifiClientModeButton = $("wifiClientModeButton");
-  if (wifiClientModeButton) {
-    wifiClientModeButton.addEventListener("click", () => setWifiModePanel("client"));
-  }
-
-  const wifiApModeButton = $("wifiApModeButton");
-  if (wifiApModeButton) {
-    wifiApModeButton.addEventListener("click", () => setWifiModePanel("ap"));
-  }
-
-  ["wifiApSsid", "wifiApPassword"].forEach((id) => {
-    const input = $(id);
-    if (input) {
-      input.addEventListener("input", () => {
-        state.wifiApCredentialsInitialized = true;
-        updateWifiApButtonState();
-      });
-    }
-  });
-
-  on("wifiScanButton", "click", () => runUiAction(async () => {
-    await refreshWifi(true);
-    showToast("Wi-Fi 列表已刷新");
-  }));
-
-  on("wifiConnectButton", "click", () => runUiAction(() => connectWifiFrom("wifiNetworkSelect", "wifiPassword")));
-  on("wifiFallbackButton", "click", () => runUiAction(fallbackWifi));
-  on("wifiApApplyButton", "click", () => runUiAction(applyWifiApHotspot));
-  on("wifiClientActivateButton", "click", () => runUiAction(activateWifiClientMode));
-
   on("resetOverviewDefaultsButton", "click", resetOverviewDefaults);
   on("resetControllerDefaultsButton", "click", resetCurrentMovementSectionDefaults);
   on("resetAssistDefaultsButton", "click", resetCurrentAssistSectionDefaults);
@@ -15524,245 +13930,6 @@ function bindEvents() {
     showToast("硬件信息已刷新");
   }));
 
-  on("refreshHailoButton", "click", () => runUiAction(async () => {
-    await refreshHailoStatus();
-    scheduleHailoStatusPolling();
-    showToast("Hailo-8 状态已刷新");
-  }));
-
-  on("installHailoButton", "click", () => runUiAction(async () => {
-    await installHailoDependencies();
-    showToast("Hailo-8 安装任务已启动");
-  }));
-
-  on("testMouseCircleButton", "click", () => runUiAction(testMouseOutputCircle));
-
-  on("saveKmboxButton", "click", () => runUiAction(async () => {
-    const config = validateKmboxConfig();
-    if (config.enabled) {
-      setCheckbox("catnet_enabled", false);
-      setCheckbox("makcu_enabled", false);
-      setCheckbox("ferrum_enabled", false);
-      updateCatnetFormUi();
-      updateMakcuFormUi();
-      updateFerrumFormUi();
-    }
-    setRadioValue("mouse_output_mode", config.enabled ? "kmboxnet" : "passthrough");
-    await applyConfigNow();
-    showToast(config.enabled ? "测试功能，请勿使用；键鼠盒子配置已保存" : "键鼠盒子已关闭");
-  }));
-
-  on("saveCatnetButton", "click", () => runUiAction(async () => {
-    const config = validateCatnetConfig();
-    if (config.enabled) {
-      setCheckbox("kmbox_enabled", false);
-      setCheckbox("makcu_enabled", false);
-      setCheckbox("ferrum_enabled", false);
-      updateKmboxFormUi();
-      updateMakcuFormUi();
-      updateFerrumFormUi();
-    }
-    setRadioValue("mouse_output_mode", config.enabled ? "catnet" : "passthrough");
-    await applyConfigNow();
-    showToast(config.enabled ? "CatNet 配置已保存" : "CatNet 已关闭");
-  }));
-
-  on("refreshMakcuDevicesButton", "click", () => runUiAction(async () => {
-    await refreshMakcuDevices();
-  }));
-
-  on("saveMakcuButton", "click", () => runUiAction(async () => {
-    const config = validateMakcuConfig();
-    if (config.enabled) {
-      setCheckbox("kmbox_enabled", false);
-      setCheckbox("catnet_enabled", false);
-      setCheckbox("ferrum_enabled", false);
-      updateKmboxFormUi();
-      updateCatnetFormUi();
-      updateFerrumFormUi();
-    }
-    setRadioValue("mouse_output_mode", config.enabled ? "makcu" : "passthrough");
-    await applyConfigNow();
-    showToast(config.enabled ? "MAKCU 配置已保存" : "MAKCU 已关闭");
-  }));
-
-  on("refreshFerrumDevicesButton", "click", () => runUiAction(async () => {
-    await refreshFerrumDevices();
-  }));
-
-  on("saveFerrumButton", "click", () => runUiAction(async () => {
-    const config = validateFerrumConfig();
-    if (config.enabled) {
-      setCheckbox("kmbox_enabled", false);
-      setCheckbox("catnet_enabled", false);
-      setCheckbox("makcu_enabled", false);
-      updateKmboxFormUi();
-      updateCatnetFormUi();
-      updateMakcuFormUi();
-    }
-    setRadioValue("mouse_output_mode", config.enabled ? "ferrum" : "passthrough");
-    await applyConfigNow();
-    showToast(config.enabled ? "Ferrum Legacy 配置已保存" : "Ferrum Legacy 已关闭");
-  }));
-
-  [
-    "kmbox_enabled",
-    "kmbox_encrypted",
-    "kmbox_port",
-    "kmbox_monitor_port",
-    "kmbox_timeout_ms",
-  ].forEach((id) => {
-    const input = $(id);
-    if (!input) {
-      return;
-    }
-    const eventName = input.type === "checkbox" || input.tagName === "SELECT" ? "change" : "input";
-    input.addEventListener(eventName, () => {
-      if (id === "kmbox_enabled") {
-        if (input.checked) {
-          setCheckbox("catnet_enabled", false);
-          setCheckbox("makcu_enabled", false);
-          setCheckbox("ferrum_enabled", false);
-          updateCatnetFormUi();
-          updateMakcuFormUi();
-          updateFerrumFormUi();
-        } else {
-          setCheckbox("catnet_enabled", false);
-          setCheckbox("makcu_enabled", false);
-          setCheckbox("ferrum_enabled", false);
-          setRadioValue("mouse_output_mode", "passthrough");
-          updateCatnetFormUi();
-          updateMakcuFormUi();
-          updateFerrumFormUi();
-          updateKmboxFormUi();
-          runUiAction(async () => {
-            await applyConfigNow();
-            showToast("键鼠盒子已关闭，已切回默认监听与移动");
-          });
-          return;
-        }
-      }
-      updateKmboxFormUi();
-    });
-  });
-
-  [
-    "catnet_enabled",
-    "catnet_port",
-    "catnet_monitor_port",
-    "catnet_timeout_ms",
-  ].forEach((id) => {
-    const input = $(id);
-    if (!input) {
-      return;
-    }
-    const eventName = input.type === "checkbox" || input.tagName === "SELECT" ? "change" : "input";
-    input.addEventListener(eventName, () => {
-      if (id === "catnet_enabled") {
-        if (input.checked) {
-          setCheckbox("kmbox_enabled", false);
-          setCheckbox("makcu_enabled", false);
-          setCheckbox("ferrum_enabled", false);
-          updateKmboxFormUi();
-          updateMakcuFormUi();
-          updateFerrumFormUi();
-        } else {
-          setCheckbox("kmbox_enabled", false);
-          setCheckbox("makcu_enabled", false);
-          setCheckbox("ferrum_enabled", false);
-          setRadioValue("mouse_output_mode", "passthrough");
-          updateKmboxFormUi();
-          updateMakcuFormUi();
-          updateFerrumFormUi();
-          updateCatnetFormUi();
-          runUiAction(async () => {
-            await applyConfigNow();
-            showToast("CatNet 已关闭，已切回默认监听与移动");
-          });
-          return;
-        }
-      }
-      updateCatnetFormUi();
-    });
-  });
-
-  [
-    "makcu_enabled",
-    "makcu_high_speed",
-    "makcu_port",
-  ].forEach((id) => {
-    const input = $(id);
-    if (!input) {
-      return;
-    }
-    const eventName = input.type === "checkbox" || input.tagName === "SELECT" ? "change" : "input";
-    input.addEventListener(eventName, () => {
-      if (id === "makcu_enabled") {
-        if (input.checked) {
-          setCheckbox("kmbox_enabled", false);
-          setCheckbox("catnet_enabled", false);
-          setCheckbox("ferrum_enabled", false);
-          updateKmboxFormUi();
-          updateCatnetFormUi();
-          updateFerrumFormUi();
-        } else {
-          setCheckbox("kmbox_enabled", false);
-          setCheckbox("catnet_enabled", false);
-          setCheckbox("ferrum_enabled", false);
-          setRadioValue("mouse_output_mode", "passthrough");
-          updateKmboxFormUi();
-          updateCatnetFormUi();
-          updateFerrumFormUi();
-          updateMakcuFormUi();
-          runUiAction(async () => {
-            await applyConfigNow();
-            showToast("MAKCU 已关闭，已切回默认监听与移动");
-          });
-          return;
-        }
-      }
-      updateMakcuFormUi();
-    });
-  });
-
-  [
-    "ferrum_enabled",
-    "ferrum_port",
-  ].forEach((id) => {
-    const input = $(id);
-    if (!input) {
-      return;
-    }
-    const eventName = input.type === "checkbox" || input.tagName === "SELECT" ? "change" : "input";
-    input.addEventListener(eventName, () => {
-      if (id === "ferrum_enabled") {
-        if (input.checked) {
-          setCheckbox("kmbox_enabled", false);
-          setCheckbox("catnet_enabled", false);
-          setCheckbox("makcu_enabled", false);
-          updateKmboxFormUi();
-          updateCatnetFormUi();
-          updateMakcuFormUi();
-        } else {
-          setCheckbox("kmbox_enabled", false);
-          setCheckbox("catnet_enabled", false);
-          setCheckbox("makcu_enabled", false);
-          setRadioValue("mouse_output_mode", "passthrough");
-          updateKmboxFormUi();
-          updateCatnetFormUi();
-          updateMakcuFormUi();
-          updateFerrumFormUi();
-          runUiAction(async () => {
-            await applyConfigNow();
-            showToast("Ferrum Legacy 已关闭，已切回默认监听与移动");
-          });
-          return;
-        }
-      }
-      updateFerrumFormUi();
-    });
-  });
-
   on("randomDisplayHardwareButton", "click", () => {
     if (getCheckbox("display_loopout_enabled")) {
       showToast("环出模式使用真实显示器身份，不能随机");
@@ -16021,7 +14188,6 @@ async function main() {
   bindAssistModuleCollapseState();
   bindEvents();
   initSystemPolling();
-  initWifiPolling();
   refreshLanBlocklist();
 
   try {

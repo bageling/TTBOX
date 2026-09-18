@@ -347,11 +347,9 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         const std::string fifo_path =
             config_.get_string("output_fifo_path", "/tmp/ttbox_hid.fifo");
         hid_output_ = std::make_shared<output::FifoHidOutput>(fifo_path);
-    } else if (output_kind == "local_hid" || output_kind == "usb_proxy" ||
-               output_kind == "kmboxnet" || output_kind == "makcu" || output_kind == "ferrum" ||
-               output_kind == "kmboxb") {
+    } else if (output_kind == "local_hid" || output_kind == "usb_proxy") {
         // 统一 OutputBackend：按 kind 选择后端，行为与 AiboxHidOutput 完全一致
-        // （local_hid 即原 aibox 逻辑迁移；kmboxnet/makcu/ferrum/kmboxb 后续接入）。
+        // （local_hid 即原 aibox 逻辑迁移）。
         auto backend = std::make_shared<output::OutputBackend>();
         output::OutputBackend::Params bp;
         bp.kind = output_kind;
@@ -366,6 +364,14 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         } else {
             hid_output_ = std::move(backend);
         }
+    } else if (output_kind == "kmboxnet" || output_kind == "makcu" ||
+               output_kind == "ferrum" || output_kind == "kmboxb" ||
+               output_kind == "catnet") {
+        // S1-2026-09-18（A801）：键鼠盒子功能整体移除。
+        // 历史配置里残留的盒子 kind 在此显式告警后落到下方 aibox 兜底，
+        // 不走"未知 kind 一律 fail-closed"（默认值 "aibox" 本身就依赖兜底分支）。
+        TTBOX_LOG_WARN("output_backend='" + output_kind +
+                       "' 为已移除的键鼠盒子后端（A801），回退 aibox 本机 HID");
     }
     if (!hid_output_) {
         const std::string hidg_path =

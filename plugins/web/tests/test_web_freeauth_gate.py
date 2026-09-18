@@ -151,12 +151,15 @@ def test_unactivated_api_gate_403_activation_required(client, web_mod, monkeypat
 def test_unactivated_whitelist_endpoints_reachable(client, web_mod, monkeypatch):
     monkeypatch.setattr(web_mod, '_license_block', lambda: dict(UNACTIVATED_LICENSE))
     web_mod._ACTIVATION_CACHE['ts'] = 0.0
-    # D9 白名单：/api/license、/api/license/activate、/api/activation/network/prepare、
-    #            /api/network/wifi*、/api/system
+    # D9 白名单（S1 减法后）：/api/license、/api/license/activate、/api/system
+    # （/api/activation/network/prepare 与 /api/network/wifi* 已随网络页签移除而卸载）
     assert client.get('/api/license').status_code == 200
     assert client.get('/api/system').status_code == 200
-    assert client.post('/api/activation/network/prepare').status_code == 200
-    assert client.get('/api/network/wifi').status_code == 200
+    # 已卸载端点：未激活时 gate 在路由分发前拦截 ⇒ 403 activation_required
+    # （关键是不可达 200；激活态下它们才是 404）
+    r = client.post('/api/activation/network/prepare')
+    assert r.status_code == 403 and r.get_json()['error'] == 'activation_required'
+    assert client.get('/api/network/wifi').status_code == 403
     # 入参缺失 ⇒ 400（说明端点本身可达，未落 403 gate）
     assert client.post('/api/license/activate', json={}).status_code == 400
 

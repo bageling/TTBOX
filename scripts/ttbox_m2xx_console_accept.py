@@ -7,7 +7,7 @@
 `scripts/ttbox_m207_accept.py` 同风格（HTTP + IPC，不跟随重定向、显式忽略环境代理）。
 
 覆盖（A1–A10）：
-  A1  12 页渲染：GET / 侧栏 12 个 module-tab 与 12 个 section id=*-page 一一对应
+  A1  9 页渲染：GET / 侧栏 9 个 module-tab 与 9 个 section id=*-page 一一对应（S1 减法后）
   A2  品牌随卡：/api/state.data.ui 的 skin 与 brand_* 取自服务端；skin ∈ {yu,xh,xcsh}
   A3  激活双保险 + fail-closed：未激活 /⇒302 /activate、/api/state⇒403 activation_required、
       /activate 卡片含 #licenseGateOverlay 结构；**服务端为唯一放行判据**（API 403 与弹层无关）
@@ -62,19 +62,21 @@ except Exception as _exc:    # 取不到真源时只接受已登记 RUNTIME 覆�
 STORE_DIR = '/var/lib/ttbox/license'
 CLOUD_SESSION_PATH = os.environ.get('TTBOX_CLOUD_SESSION', '/opt/ttbox/config/cloud_session.json')
 
-# 参照物 12 页签（侧栏 01..12）—— 与 templates/index.html 的 section id 一一对应
-EXPECTED_SECTIONS = ['home', 'profiles', 'control', 'assist', 'model', 'wifi',
-                     'hardware', 'hailo', 'kmbox', 'preset', 'license', 'fan']
-EXPECTED_TABS = ['总览', '热键控制', '移动控制', '辅助功能', '模型库', '显示与鼠标',
-                 'Hailo-8加速', '键鼠盒子', '网络配置', '预设参数', '系统状态', '风扇控制']
+# 参照物 9 页签（侧栏 01..09）—— S1 减法（2026-09-18）后与 templates/index.html 一致
+EXPECTED_SECTIONS = ['home', 'profiles', 'control', 'assist', 'model',
+                     'hardware', 'preset', 'license', 'fan']
+EXPECTED_TABS = ['总览', '热键控制', '移动控制', '辅助功能', '模型库',
+                 '显示与鼠标', '预设参数', '系统状态', '风扇控制']
 
 # 参照物消费的全部 /api/* 端点（A4 无 404；见架构设计 §6）
+# S1 减法（2026-09-18）后收缩：ferrum/hailo/makcu/kmboxb 设备与状态、network/wifi 已删
+# （已删端点的反向断言在 a6()）。
 REF_API_PATHS = [
     '/api/announcement', '/api/config', '/api/control/start', '/api/control/stop',
     '/api/diagnostics/aim-trace', '/api/diagnostics/usb-proxy.zip',
-    '/api/ferrum/devices', '/api/hailo/status', '/api/hardware/display', '/api/hardware/mouse',
-    '/api/license', '/api/makcu/devices', '/api/kmboxb/devices', '/api/models',
-    '/api/models/device-code', '/api/network/wifi', '/api/presets', '/api/preview.mjpg',
+    '/api/hardware/display', '/api/hardware/mouse',
+    '/api/license', '/api/models',
+    '/api/models/device-code', '/api/presets', '/api/preview.mjpg',
     '/api/state', '/api/system', '/api/system/storage', '/api/update/status',
     '/api/update/versions',
 ]
@@ -318,10 +320,10 @@ def skip(cid: str, desc: str, reason: str) -> None:
 
 
 # ===========================================================================
-# A1 12 页渲染
+# A1 9 页渲染
 # ===========================================================================
 def a1() -> None:
-    desc = 'A1 12 页渲染（侧栏 12 module-tab ↔ 12 section id=*-page）'
+    desc = 'A1 9 页渲染（侧栏 9 module-tab ↔ 9 section id=*-page；S1 减法后）'
     if not lic_core().get('activated'):
         skip('A1', desc, '需已激活基线（未激活 / 会 302 /activate）')
         return
@@ -334,7 +336,7 @@ def a1() -> None:
     targets = re.findall(r'data-page-target="([a-z0-9\-]+)"', html)
     labels = [m.strip() for m in re.findall(
         r'data-page-target="[^"]*"[^>]*>\s*<span>\d+</span>\s*([^<]+?)\s*</button>', html)]
-    ok = (set(sections) == set(EXPECTED_SECTIONS) and len(sections) == 12
+    ok = (set(sections) == set(EXPECTED_SECTIONS) and len(sections) == 9
           and set(targets) == {s + '-page' for s in EXPECTED_SECTIONS}
           and set(labels) == set(EXPECTED_TABS))
     check('A1', desc, ok,
@@ -445,27 +447,23 @@ def a5() -> None:
 # A6 无硬件页占位
 # ===========================================================================
 def a6() -> None:
-    desc = 'A6 无硬件页占位（/api/hailo/status 结构完整且 pcie.present 布尔；/api/kmboxb/devices 可达；不 500）'
+    # S1 减法（2026-09-18）：Hailo / 键鼠盒子 / 无线三页整页移除，对应端点已卸载。
+    # 原断言（hailo/kmboxb 结构可达）随功能删除失效，改为反向断言：已删端点必须 404。
+    desc = 'A6 硬件页已移除（/api/hailo/status 与 /api/kmboxb/devices 必须已卸载 404）'
     if not lic_core().get('activated'):
         skip('A6', desc, '需已激活基线')
         return
     h = http('GET', '/api/hailo/status', timeout=8)
-    hd = h.data()
-    hailo_ok = (h.status == 200 and isinstance(hd.get('pcie'), dict)
-                and isinstance(hd['pcie'].get('present'), bool)
-                and isinstance(hd.get('install'), dict) and isinstance(hd.get('runtime'), dict))
     k = http('GET', '/api/kmboxb/devices', timeout=8)
-    kmbox_ok = (k.status == 200)
-    check('A6', desc, hailo_ok and kmbox_ok,
-          'hailo=%s pcie.present=%s ready=%s ; kmboxb=%s'
-          % (h.status, (hd.get('pcie') or {}).get('present'), hd.get('ready'), k.status))
+    check('A6', desc, h.status == 404 and k.status == 404,
+          'hailo/status=%s ; kmboxb/devices=%s' % (h.status, k.status))
 
 
 # ===========================================================================
 # A7 旧测试全绿（宿主侧）
 # ===========================================================================
 def a7() -> None:
-    desc = 'A7 旧测试全绿（pytest plugins/web/tests/：freeauth 302/403 + brand 12 标签 + grep 门禁）'
+    desc = 'A7 旧测试全绿（pytest plugins/web/tests/：freeauth 302/403 + brand 9 标签 + grep 门禁）'
     repo_tests = Path(__file__).resolve().parents[1] / 'plugins' / 'web' / 'tests'
     if not repo_tests.is_dir():
         skip('A7', desc, '板端 release 树无 plugins/web/tests/ ⇒ 请在**仓库树**跑 '

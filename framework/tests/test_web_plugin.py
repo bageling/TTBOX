@@ -17,7 +17,8 @@ class WebPluginTests(unittest.TestCase):
         self.assertEqual(manifest["api_version"], "1")
         self.assertTrue((WEB_PLUGIN / manifest["entry"]).is_file())
         self.assertTrue((WEB_PLUGIN / "templates" / "index.html").is_file())
-        self.assertTrue((WEB_PLUGIN / "static" / "app.js").is_file())
+        # E01（2026-09-18）：旧前端已迁入 static/legacy/，断言随实际布局修正
+        self.assertTrue((WEB_PLUGIN / "static" / "legacy" / "app.js").is_file())
 
     def test_flask_routes_and_pages_from_migrated_entry(self):
         entry = WEB_PLUGIN / "bin" / "ttbox-web.py"
@@ -25,13 +26,25 @@ class WebPluginTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         client = module.app.test_client()
-        self.assertEqual(client.get("/").status_code, 200)
-        self.assertEqual(client.get("/desktop").status_code, 200)
-        self.assertEqual(client.get("/mobile").status_code, 200)
-        self.assertEqual(client.get("/static/app.js").status_code, 200)
+        # 激活 gate（M2.07）：未激活 ⇒ 需激活页面 302 /activate（2026-09-18 实证 HEAD 亦如此，
+        # 测试环境无云会话属预期）；激活页本体与 /mobile 恒 200。
+        r_home = client.get("/")
+        self.assertEqual(r_home.status_code, 302)
+        self.assertTrue(r_home.headers.get("Location", "").endswith("/activate"))
+        self.assertEqual(client.get("/activate").status_code, 200)
+        self.assertEqual(client.get("/static/legacy/app.js").status_code, 200)
         rules = {rule.rule for rule in module.app.url_map.iter_rules()}
-        for route in ("/api/state", "/api/models", "/api/config", "/api/system", "/api/hailo/status", "/api/network/wifi"):
+        # S1-2026-09-18：/api/hailo/status、/api/network/wifi 随页签移除已删，断言同步
+        for route in ("/api/state", "/api/models", "/api/config", "/api/system", "/api/preview.mjpg"):
             self.assertIn(route, rules)
+        for removed in ("/api/hailo/status", "/api/hailo/install", "/api/network/wifi",
+                        "/api/system/master-reactivate", "/api/system/version",
+                        "/api/health/frontend", "/api/settings/auto-start",
+                        "/api/hardware/mouse/timing", "/api/models/game-profile",
+                        "/api/models/cloud-encrypted", "/api/preview.jpg",
+                        "/api/activation/network/prepare", "/api/mouse-output/test-circle",
+                        "/api/makcu/devices", "/api/ferrum/devices", "/api/kmboxb/devices"):
+            self.assertNotIn(removed, rules)
 
     def test_ttbox_state_and_license_contract(self):
         entry = WEB_PLUGIN / "bin" / "ttbox-web.py"

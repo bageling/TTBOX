@@ -153,17 +153,9 @@ C1_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/system/react
 if [ "$(err_has /tmp/rft_c1.json '当前授权状态正常')" = "YES" ]; then ok "C1 reactivate 文案"; else bad "C1 reactivate 文案 ($(cat /tmp/rft_c1.json))"; fi
 assert_eq "C1 reactivate HTTP" "$C1_CODE" "400"
 
-# C2: cloud-encrypted 空名
-http_json POST /api/models/cloud-encrypted '{}' > /tmp/rft_c2.json
-if [ "$(err_has /tmp/rft_c2.json '云端模型名不能为空')" = "YES" ]; then ok "C2 cloud-encrypted 空名"; else bad "C2 ($(cat /tmp/rft_c2.json))"; fi
-
-# C3: cloud-encrypted 非 .rknn
-http_json POST /api/models/cloud-encrypted '{"model_name": "test"}' > /tmp/rft_c3.json
-if [ "$(err_has /tmp/rft_c3.json '必须以 .rknn 结尾')" = "YES" ]; then ok "C3 cloud-encrypted 非rknn"; else bad "C3 ($(cat /tmp/rft_c3.json))"; fi
-
-# C4: cloud-encrypted .rknn → 诚实 503（无云端）
-C4_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/models/cloud-encrypted" -H 'Content-Type: application/json' -d '{"model_name": "test.rknn"}')
-assert_eq "C4 cloud-encrypted rknn HTTP" "$C4_CODE" "503"
+# C2/C3/C4: cloud-encrypted 已随 S1 减法卸载（2026-09-18）—— 反向断言 404
+C2_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/models/cloud-encrypted" -H 'Content-Type: application/json' -d '{}')
+assert_eq "C2 cloud-encrypted 已卸载" "$C2_CODE" "404"
 
 # C5: aim-trace（Core 未运行→400 诚实拒绝；Core 运行中→200 真实记录）
 C5_EXPECT=$([ "$CORE_STATE" = "active" ] && echo "200" || echo "400")

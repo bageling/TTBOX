@@ -17,13 +17,10 @@ note '════════ Phase 2: Hotkey & Profiles ═══════�
 TT_STATE=$(curl -s "$TT/api/state" 2>/dev/null)
 TT_CFG=$(echo "$TT_STATE" | python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}).get('config',{}); print(json.dumps(d))" 2>/dev/null)
 
-# HP-001: auto-start 结构
-note '--- HP-001 auto-start ---'
-TT_AS=$(curl -s "$TT/api/settings/auto-start")
-TT_OK=$(echo "$TT_AS" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('ok'))" 2>/dev/null)
-[ "$TT_OK" = "True" ] && ok "HP-001 auto-start ok" || bad "HP-001 auto-start TT=$TT_OK"
-TT_AS_EN=$(echo "$TT_AS" | python3 -c "import json,sys; d=json.load(sys.stdin).get('data',{}); print(d.get('enabled'),d.get('status'))" 2>/dev/null)
-[ -n "$TT_AS_EN" ] && ok "HP-001 auto-start 字段 ($TT_AS_EN)" || bad "HP-001 auto-start 字段空"
+# HP-001: auto-start 端点已随 S1 减法卸载（2026-09-18）—— 反向断言 404
+note '--- HP-001 auto-start（已卸载） ---'
+TT_AS_CODE=$(curl -s -o /dev/null -w '%{http_code}' "$TT/api/settings/auto-start")
+[ "$TT_AS_CODE" = "404" ] && ok "HP-001 auto-start 已卸载 (404)" || bad "HP-001 auto-start TT=$TT_AS_CODE（应 404）"
 
 # HP-002: controller 字段存在（从 state.config 获取）
 note '--- HP-002 controller 字段 ---'

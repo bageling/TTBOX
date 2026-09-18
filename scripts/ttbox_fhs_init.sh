@@ -217,7 +217,9 @@ tcopy() {
         return 0
     fi
     mkdir -p -- "$dst"
-    tar -C "$src" --exclude=__pycache__ --exclude='*.pyc' --exclude=.git -cf - . \
+    # E02（2026-09-18）：tests/ 不进出货包 —— 这是 payload 侧唯一口径，
+    # install 侧 TAR_EXCLUDES 与此镜像（改口径两处一起改）。
+    tar -C "$src" --exclude=__pycache__ --exclude='*.pyc' --exclude=.git --exclude=tests -cf - . \
         | tar -C "$dst" -xf -
 }
 
@@ -375,11 +377,18 @@ sync_tree() {
     #   顶层模块与子包）——只拷 web/preview 两个子目录会让 release 树里 `plugins` 包残缺，
     #   web 启动即 ModuleNotFoundError。bin/ 闭集（A7）不受影响（那是 bin/ 的白名单）。
     tcopy "${REPO_ROOT}/plugins" "${payload}/plugins"
+    # S1-2026-09-18（A0-3c/A0-3d/C04）：死路由文件与旧版静态资产移出出货包（仓库内保留）。
+    #   api_v1.py / framework_api.py：死路由，且 ttbox-web.py 已同步摘除注册点；
+    #   static/legacy：旧版面板资产，现役 index.html 自包含零引用（E01 断言已改指 legacy）。
+    rm -f "${payload}/plugins/web/api_v1.py" \
+          "${payload}/plugins/web/framework_api.py"
+    rm -rf "${payload}/plugins/web/static/legacy"
 
     # Web 运行期硬依赖领域包（ttbox-web.py:37 sys.path.append(parents[3])）
     tcopy "${REPO_ROOT}/framework" "${payload}/framework"
     tcopy "${REPO_ROOT}/ttbox_motion" "${payload}/ttbox_motion"
-    tcopy "${REPO_ROOT}/platform" "${payload}/platform"
+    # S1-2026-09-18（C04/C05）：platform/ 移出出货包（与 stdlib `platform` 同名，
+    # 留在 payload 根 = PYTHONPATH 阴影隐患；现役代码零消费，仓库内保留）。
 
     # usbproxy/：含 board 脚本 + 预编译二进制（DEP-04④）
     tcopy "${REPO_ROOT}/usbproxy" "${payload}/usbproxy"
@@ -389,13 +398,12 @@ sync_tree() {
     #   为何能穿过发布门禁：step5b 的 unit 断言只查 ExecStart 首 token
     #   （= usbproxy/board/run-ttbox-usb-proxy.sh，has shebang ⇒ 0755），**不查**它内部
     #   `exec "$PROJECT_DIR/usb-proxy"` 的那个二进制 ⇒ 该缺陷在门禁下静默通过。
-    #   （对照：同批 tcopy 的 plugins/*/bin/* 与 scripts/*.sh 都有 shebang，故未被波及；
-    #     scripts/wifi_manager.py 由 `install -m 0755` 显式赋权，也不受源模式影响。）
+    #   （对照：同批 tcopy 的 plugins/*/bin/* 与 scripts/*.sh 都有 shebang，故未被波及。）
     chmod 0755 -- "${payload}/usbproxy/usb-proxy"
 
-    # scripts/：edid 工具链 + wifi_manager + ensure 脚本（Web/EDID 硬依赖）
+    # scripts/：edid 工具链 + ensure 脚本（Web/EDID 硬依赖）
+    # S1-2026-09-18（A903/C 组）：wifi_manager.py 随无线功能整体移出出货包（仓库内保留）。
     tcopy "${REPO_ROOT}/scripts/edid" "${payload}/scripts/edid"
-    install -m 0755 "${REPO_ROOT}/scripts/wifi_manager.py" "${payload}/scripts/wifi_manager.py"
     install -m 0755 "${ENSURE_SCRIPT}" "${payload}/scripts/ttbox_ensure_services.sh"
 
     # deploy/systemd/：unit 随版本走（DEP-07 前置）

@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, url_for
-# 让 TTBOX 根目录下的 framework / ttbox_motion 领域包可被加载（必须放在 import framework_api 之前）
+# 让 TTBOX 根目录下的 framework / ttbox_motion 领域包可被加载
 # 注意（2026-09-16 线上故障修复）：TTBOX 根目录必须用 append 而非 insert(0)。
 # /opt/ttbox/platform/ 是带 __init__.py 的正式包，与 Python 标准库 `platform` 同名；
 # 若用 insert(0) 把根目录顶到 sys.path 最前，它会遮蔽标准库，导致
@@ -42,7 +42,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # 登记 + scripts/ttbox_conventions_gate.sh 断言。
 from lib import paths as ttbox_paths
 
-from framework_api import install_framework_api
+# S1-2026-09-18（A0-3c/A0-3d）：framework_api.py（26 条死路由）与 api_v1.py（47 条死路由）
+# 已随交付减法移出出货包，此处同步摘除注册点（原 install_framework_api(app) 与
+# api_v1 蓝图注册块删除；/ui-custom.css 设计器常驻路由随 api_v1 一并移除，现役面板零引用）。
 
 # 板端 /opt/ttbox/web 运行时同样加载 TTBOX 根目录领域包。
 from ttbox_motion.training import MotionProfileStore, MotionSampleError, MotionTrainingError
@@ -57,9 +59,7 @@ from ttbox_motion.calibration import (
 
 # scripts 目录经 A-PATH-3 相对派生（<root>/scripts；开发机=仓库根、板端=release 树），
 # 用 append 而非 insert(0)（防遮蔽 stdlib，见上方 platform 冲突说明）。
-# 不设 try/except 兜底：wifi_manager 仅用标准库，导入失败 = 真实部署错误，必须暴露。
 sys.path.append(ttbox_paths.scripts_dir())
-import wifi_manager
 
 # ====================================================================
 # 配置
@@ -1260,7 +1260,6 @@ def collect_web_state() -> dict:
                     'valid': False, 'x': 0.0, 'y': 0.0,
                 },
                 'fan_control': _fan_control_payload(),
-                'hailo_temperature': _hailo_temperature_payload(),
                 'detection': {
                     'detections': m.get('detect_count', 0),
                     'tracks': m.get('tracks', 0),
@@ -1361,7 +1360,7 @@ def collect_web_state() -> dict:
                     'physical_motion_block_error': '',
                 },
                 # MJPEG 流（动态预览）：img 标签原生支持 multipart/x-mixed-replace，
-                # 前端 previewImage 直接消费；不能用 /api/preview.jpg（静态单帧，加载一次就冻结）
+                # 前端 previewImage 直接消费（S1-2026-09-18：/api/preview.jpg 静态单帧端点已删除）
                 'preview_path': '/api/preview.mjpg',
                 'running': running and not degraded,
                 'selected_model_id': prof.get('model_id', ''),
@@ -1449,15 +1448,13 @@ def _invalidate_blocklist_cache() -> None:
 
 # ---- 激活 gate（D9）----
 # ★ 白名单常量单点定义（§7.8）：页面 302 与 API 403 共用本语义；改白名单只改这里。
-#   白名单 = /api/license、/api/license/activate、/api/activation/network/prepare、
-#            /api/network/wifi*（激活前可能需要配网）、/api/system（激活页状态展示）。
+#   白名单 = /api/license、/api/license/activate、/api/system（激活页状态展示）。
 _ACTIVATION_WHITELIST = frozenset({
     ('GET', '/api/license'),
     ('POST', '/api/license/activate'),
-    ('POST', '/api/activation/network/prepare'),
     ('GET', '/api/system'),
 })
-_ACTIVATION_WHITELIST_PREFIXES = ('/api/network/wifi',)
+_ACTIVATION_WHITELIST_PREFIXES = ()
 
 # 页面路由（全部）：不进 API 403 面；页面自身的激活态引导在 _enforce_gate 里做。
 # ★ M2.07：/setup、/login 页面随免密化下线；新增 /activate 激活页。
@@ -1640,17 +1637,8 @@ def _cloud_license_subblock() -> dict:
 # ====================================================================
 # 页面路由
 # ====================================================================
-install_framework_api(app)
-
-# ---- /api/v1 真接线 API（追加注册，不改动既有路由逻辑）----
-# api_v1.py 位于 plugins/web/ 下，sys.path 已含该目录（见文件头 sys.path.insert）。
-# 页面路由集中在下方 @app.get('/') / '/desktop' / '/mobile' / '/activate' 注册。
-try:
-    from api_v1 import api_v1, register_designer_routes
-    register_designer_routes(app)  # /ui-custom.css 读取常驻 + /designer 页面（需 TTBOX_ENABLE_DESIGNER=1）
-    app.register_blueprint(api_v1)
-except Exception as _e:  # 注册失败不影响旧面板可用
-    app.logger.warning('api_v1 注册失败: %s', _e)
+# S1-2026-09-18（A0-3c/A0-3d）：原 install_framework_api(app) 与 /api/v1 蓝图注册块已删，
+# framework_api.py / api_v1.py 两个死路由文件随交付减法移出出货包。
 
 @app.after_request
 def add_no_cache_headers(response):
@@ -1747,11 +1735,6 @@ def activate_page():
 # ====================================================================
 
 # -- 系统/状态 --
-@app.get('/api/health/frontend')
-def frontend_health():
-    return jsonify({'ok': True, 'status': 'ok', 'version': 'ttbox'})
-
-
 @app.get('/api/state')
 def get_state():
     return jsonify(collect_web_state())
@@ -1771,18 +1754,6 @@ def get_system_status():
 
 
 
-@app.get('/api/system/version')
-def get_system_version():
-    return jsonify({
-        'ok': True,
-        'data': {
-            'product': 'TTBOX',
-            'version': kAppVersion,
-            'build': '2026.09.01.2',
-            'hardware': 'RK3588',
-            'channel': 'stable'
-        }
-    })
 @app.get('/api/system/storage')
 def get_storage_status():
     s = _storage()
@@ -1957,43 +1928,10 @@ def reactivate_device():
                     'error': f"授权未激活（state={lic.get('state')}）；在线修复下沉 T2.x"}), 409
 
 
-@app.post('/api/system/master-reactivate')
-def master_reactivate_device():
-    # ★ T1.07b：同 reactivate —— 读真状态，未激活不得答"正常"。
-    lic = _license_block()
-    if lic.get('activated'):
-        return jsonify({'ok': False, 'error': '当前授权状态正常，无需修复授权'}), 400
-    return jsonify({'ok': False,
-                    'error': f"授权未激活（state={lic.get('state')}）；在线修复下沉 T2.x"}), 409
-
-
 @app.post('/api/ota/install')
 def api_ota_install():
-    """OTA-01：只做调度，**立即返回**；真正的下载/验签/安装在 updater 进程里。
-
-    ★ 脱离 Web 进程是硬要求（t1.11 §0.4）：更新会重启 `ttbox-web`，
-      若在本进程内同步等待 updater ⇒ 更新流程把自己杀掉。
-    ★ M2.07（D1）：鉴权前置已随免密化删除 —— 本端点免密直通；
-      capabilities.ota 门控保留（M2.03 机制不动）。
-    ★ Web 侧的 scheme 初筛只是**提前提示**，**不作数** —— 权威判据在 updater。
-      判据顺序：403（feature 未授权）> 400（入参校验）。core 不可达 ⇒
-      capabilities 诚实默认全 False ⇒ 亦 403（fail-closed）。
-    """
-    # ★ M2.03：能力位门控（唯一来源 = _license_block() 投影；本层零推导）。
-    if not _license_block().get('capabilities', {}).get('ota'):
-        return jsonify({'ok': False, 'error': "feature 'ota' not licensed"}), 403
-    body = request.get_json(silent=True) or {}
-    url = str(body.get('url') or '').strip()
-    key_id = str(body.get('key_id') or 'ttbox-ota-2026a').strip()
-    if not url:
-        return jsonify({'ok': False, 'error': 'url is required'}), 400
-    if not url.startswith('https://'):
-        return jsonify({'ok': False, 'error': '仅接受 https 更新源'}), 400
-    unit = 'ttbox-update-%d' % int(time.time())
-    updater = '/opt/ttbox/current/scripts/ttbox_ota_updater.py'
-    subprocess.Popen(['systemd-run', '--unit', unit, '--collect', '--on-active=2s',
-                      updater, url, key_id])
-    return jsonify({'ok': True, 'scheduled': unit})
+    """OTA-01：调度入口；实现与 /api/update/install 共用 _ota_install_impl（单一实现点）。"""
+    return _ota_install_impl()
 
 
 # ---- M2.07：/api/update/* 薄映射（YU 端点兼容层，§2.4）----
@@ -2196,19 +2134,6 @@ def _fan_control_payload() -> dict:
     }
 
 
-def _hailo_temperature_payload() -> dict:
-    """保持 Web 契约 hailo_temperature 结构（无 Hailo 硬件时）。"""
-    return {
-        'available': False,
-        'last_error': 'hailo_create_vdevice failed: HAILO_OUT_OF_PHYSICAL_DEVICES (74)',
-        'max_celsius': 0.0,
-        'sample_count': 0,
-        'ts0_celsius': 0.0,
-        'ts1_celsius': 0.0,
-        'updated_at_ms': int(time.time() * 1000),
-    }
-
-
 def _loopout_payload() -> dict:
     """保持 Web 契约 loopout 结构（读真实 DRM connector 状态）。"""
     import glob as _glob
@@ -2252,26 +2177,6 @@ def _loopout_payload() -> dict:
         'status': 'disabled',
         'width': 0,
     }
-
-
-@app.get('/api/settings/auto-start')
-def get_auto_start_setting():
-    return jsonify({'ok': True, 'data': _auto_start_payload()})
-
-
-@app.put('/api/settings/auto-start')
-def update_auto_start_setting():
-    body = request.get_json(silent=True) or {}
-    if not isinstance(body.get('enabled'), bool):
-        return jsonify({'ok': False, 'error': 'enabled must be a boolean'}), 400
-    enabled = body.get('enabled')
-    action = 'enable' if enabled else 'disable'
-    try:
-        subprocess.run(['systemctl', action, 'ttbox-core'], check=True, timeout=5)
-        subprocess.run(['systemctl', action, 'ttbox-web'], check=True, timeout=5)
-        return jsonify({'ok': True, 'data': _auto_start_payload()})
-    except Exception as exc:
-        return jsonify({'ok': False, 'error': f'保存开机自启动设置失败: {exc}'}), 500
 
 
 # -- 模型卡 UI 扩展字段持久化（game_profile/preset_name/hailo/remote 等）--
@@ -2686,20 +2591,6 @@ def model_device_code():
     }})
 
 
-@app.post('/api/models/cloud-encrypted')
-def add_cloud_encrypted_model():
-    body = request.get_json(silent=True) or {}
-    model_name = str(body.get('model_name') or body.get('name') or '').strip()
-    # 保持 Web 契约：空名 → 云端模型名不能为空
-    if not model_name:
-        return jsonify({'ok': False, 'error': '云端模型名不能为空'})
-    # 保持 Web 契约：非 .rknn 结尾 → 云端模型名必须以 .rknn 结尾
-    if not model_name.lower().endswith('.rknn'):
-        return jsonify({'ok': False, 'error': '云端模型名必须以 .rknn 结尾'})
-    # TTBOX 本地模式无云端加密模型服务：诚实返回（绝不假装成功）
-    return jsonify({'ok': False, 'error': 'TTBOX 本地模式未接入云端模型服务'}), 503
-
-
 @app.post('/api/models/import')
 def import_model():
     f = request.files.get('file')
@@ -2819,20 +2710,6 @@ def bind_model_preset():
     if r is None:
         return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
     r['data']['model'] = {'preset_name': preset_name}
-    return jsonify(r)
-
-
-@app.post('/api/models/game-profile')
-def update_model_game_profile():
-    body = request.get_json(silent=True) or {}
-    if not body.get('model_id'):
-        return jsonify({'ok': False, 'error': 'model_id is required'}), 400
-    model_id = str(body.get('model_id') or '').strip()
-    game_profile = str(body.get('game_profile') or 'generic').strip() or 'generic'
-    r = _models_patch_response(model_id, {'game_profile': game_profile})
-    if r is None:
-        return jsonify({'ok': False, 'error': '模型不存在或不可用'}), 404
-    r['data']['message'] = '游戏配置已保存'
     return jsonify(r)
 
 
@@ -3928,35 +3805,6 @@ def update_mouse_proxy_mode():
     return jsonify({'ok': ok, 'data': payload})
 
 
-@app.put('/api/hardware/mouse/timing')
-def update_mouse_proxy_timing():
-    body = request.get_json(silent=True) or {}
-    # 保持 Web 契约：缺 identity_change_settle_delay_sec 时报错
-    if 'identity_change_settle_delay_sec' not in body:
-        return jsonify({'ok': False, 'error': 'identity_change_settle_delay_sec must be a number'})
-    try:
-        val = float(body['identity_change_settle_delay_sec'])
-        if val < 0:
-            raise ValueError
-    except (TypeError, ValueError):
-        return jsonify({'ok': False, 'error': 'identity_change_settle_delay_sec must be a number'})
-    prof = _get_runtime_profile()
-    mouse = prof.get('mouse') or {}
-    for k in ('identity_change_settle_delay_sec', 'mouse_settle_delay_sec', 'max_delay_sec'):
-        if k in body:
-            try:
-                mouse[k] = float(body[k])
-            except (TypeError, ValueError):
-                return jsonify({'ok': False, 'error': f'{k} must be a number'})
-    prof['mouse'] = mouse
-    ok, detail = _mouse_save_or_ipc(prof, mouse)
-    payload = _mouse_apply_payload(mouse)
-    if detail:
-        payload['_core_offline'] = True
-        payload['_detail'] = detail
-    return jsonify({'ok': ok, 'data': payload})
-
-
 def _display_mode_entry(token, label, w, h, refresh, pc_khz):
     """保持 Web 契约 advertised/available modes 条目结构（含 source + hdmi_raw_gbps）。"""
     hdmi_raw_gbps = round(pc_khz * 30 / 1e6, 5)  # 保持 Web 契约：pc_khz*30/1e6
@@ -4205,56 +4053,6 @@ def update_display_hardware():
     return jsonify({'ok': True, 'data': gv_data})
 
 
-# -- 网络/WiFi --
-@app.get('/api/network/wifi')
-def get_wifi_status():
-    return jsonify({'ok': True, 'data': wifi_manager.wifi_status(force_scan=False)})
-
-
-@app.post('/api/network/wifi/scan')
-def scan_wifi_networks():
-    return jsonify({'ok': True, 'data': wifi_manager.wifi_status(force_scan=True)})
-
-
-@app.post('/api/network/wifi/connect')
-def connect_wifi_network():
-    body = request.get_json(silent=True) or {}
-    ssid = body.get('ssid', '')
-    password = body.get('password', '')
-    if not ssid:
-        return jsonify({'ok': False, 'error': '缺少 SSID'})
-    try:
-        return jsonify({'ok': True, 'data': wifi_manager.connect_wifi(ssid, password)})
-    except wifi_manager.WifiError as exc:
-        return jsonify({'ok': False, 'error': str(exc)})
-
-
-@app.post('/api/network/wifi/fallback')
-def fallback_wifi_network():
-    try:
-        return jsonify({'ok': True, 'data': wifi_manager.reset_to_default_wifi()})
-    except wifi_manager.WifiError as exc:
-        return jsonify({'ok': False, 'error': str(exc)})
-
-
-@app.post('/api/network/wifi/ap/apply')
-def apply_wifi_ap_hotspot():
-    body = request.get_json(silent=True) or {}
-    try:
-        return jsonify({'ok': True, 'data': wifi_manager.apply_ap_hotspot(
-            ssid=body.get('ssid'), password=body.get('password'))})
-    except wifi_manager.WifiError as exc:
-        return jsonify({'ok': False, 'error': str(exc)})
-
-
-@app.post('/api/network/wifi/client/activate')
-def activate_wifi_client_mode():
-    try:
-        return jsonify({'ok': True, 'data': wifi_manager.activate_client_wifi()})
-    except wifi_manager.WifiError as exc:
-        return jsonify({'ok': False, 'error': str(exc)})
-
-
 # -- 激活/授权 --
 def _license_payload() -> dict:
     """保持 Web 契约 license 结构：app_version/auto_start/core/device/license/ui/ui_brand/version。"""
@@ -4291,13 +4089,7 @@ def _license_payload() -> dict:
     license_data['device_id'] = device_id
     license_data['device_fingerprint_hash'] = fingerprint
     # ui 块 = 品牌表投影（唯一来源，与 /api/state 同源，杜绝两处分叉）。
-    # ★ 耦合提醒（渠道白标上线必查）：本处的 default_hotspot_ssid 只是**面板展示/占位符**；
-    #   板子实际广播的 SSID 由 scripts/wifi_manager.py 的 DEFAULT_SSIDS 决定，其来源是
-    #   环境变量 TTBOX_WIFI_DEFAULT_SSIDS（默认 "TTBOX TTBOX-5G"）。两者必须一起改：
-    #   只改品牌表 ⇒ 面板显示渠道名、板子仍广播 TTBOX（用户找不到热点）。
-    #   对标 yu 的做法：它的 wifi_manager 直接把全品牌并列
-    #   （DEFAULT_SSIDS = ["YUAI","XCSH","XHAI"]），因为**开机读卡前**就要能广播，
-    #   此时品牌尚未确定 —— 多渠道机型应把渠道名加进 TTBOX_WIFI_DEFAULT_SSIDS。
+    # S1-2026-09-18：无线/AP 热点已随无线页签整体移除，default_hotspot_ssid 仅剩品牌表展示字段。
     ui = _ui_block(license_data.get('ui_brand'))
     core_version = '2026.05.16'
     app_version = kAppVersion
@@ -4435,24 +4227,6 @@ def activate_license():
         _ACTIVATION_LOCK.release()
 
 
-@app.post('/api/activation/network/prepare')
-def prepare_activation_network():
-    # 保持 Web 契约：返回 attempted/changed/status 结构（含 ap 子结构）
-    wifi = wifi_manager.wifi_status(force_scan=False)
-    ap = wifi.get('ap') or {}
-    return jsonify({'ok': True, 'data': {
-        'attempted': True,
-        'changed': False,
-        'status': {
-            'ap': ap,
-            'available': wifi.get('available', False),
-            'connected': wifi.get('connected'),
-            'ethernet_connected': wifi.get('ethernet_connected', True),
-            'mode': wifi.get('mode', 'client'),
-        },
-    }})
-
-
 @app.post('/api/activation/reset-local-identity')
 def reset_activation_local_identity():
     # ★ T1.07b：旧形**无条件**声称授权"正常"（未激活时也这么答 ⇒ 掩盖真实状态）。
@@ -4500,70 +4274,6 @@ def start_activation_full_recovery():
     return jsonify({'ok': False,
                     'error': f"授权未激活（state={lic.get('state')}）；本地全量恢复下沉 T2.x"}), 409
 
-
-@app.get('/api/hailo/status')
-def get_hailo_status():
-    return jsonify({'ok': True, 'data': _hailo_status_payload()})
-
-
-def _hailo_status_payload() -> dict:
-    """保持 Web 契约 hailo/status 结构（真实探测 Hailo-8 PCIe 设备）。"""
-    import glob as _glob
-    # 探测 PCIe Hailo 设备
-    pcie_devices = []
-    for d in sorted(_glob.glob('/sys/bus/pci/devices/*')):
-        try:
-            name = open(os.path.join(d, 'device')).read().strip()
-            cls = open(os.path.join(d, 'class')).read().strip()
-            if '1e60' in name or 'hailo' in open(os.path.join(d, 'vendor')).read().lower():
-                pcie_devices.append(os.path.basename(d))
-        except Exception:
-            pass
-    # HailoRT-CLI 版本
-    hailortcli = '/usr/local/bin/hailortcli'
-    rt_installed = os.path.exists(hailortcli)
-    rt_version = {'exit_code': 1, 'ok': False, 'output': ''}
-    if rt_installed:
-        try:
-            out = subprocess.check_output([hailortcli, '--version'], text=True, timeout=5).strip()
-            rt_version = {'exit_code': 0, 'ok': True, 'output': out}
-        except Exception:
-            pass
-    now = int(time.time())
-    return {
-        'board_id': '',
-        'board_model': 'RK3588 OPi 5 Plus',
-        'device': {
-            'nodes': [],
-            'scan': {'exit_code': 0, 'ok': True,
-                     'output': 'Hailo devices not found' if not pcie_devices else 'Hailo device found'},
-        },
-        'driver': {'loaded': False, 'module_path': ''},
-        'install': {
-            'error': '', 'log': [], 'message': '暂无安装任务',
-            'progress': 0, 'stage': 'idle',
-            'started_at': now, 'status': 'idle', 'updated_at': now,
-        },
-        'kernel_release': '5.10.160-rockchip-rk3588',
-        'pcie': {'devices': pcie_devices, 'present': bool(pcie_devices)},
-        'ready': False,
-        'runtime': {
-            'expected_version': '4.23.0',
-            'hailortcli': hailortcli,
-            'installed': rt_installed,
-            'version': rt_version,
-        },
-    }
-
-
-@app.post('/api/hailo/install')
-def install_hailo_dependencies():
-    # 保持 Web 契约：无 Hailo 设备时 400 + 完整状态
-    return jsonify({'ok': False, 'error': '未检测到 Hailo-8 PCIe 设备',
-                    'data': _hailo_status_payload()}), 400
-
-
-# -- 主题 --
 
 @app.get('/api/themes')
 def get_themes():
@@ -4840,73 +4550,7 @@ def remote_delete():
     return _remote_not_ready()
 
 
-# -- 其他 --
-@app.get('/api/makcu/devices')
-def list_makcu_devices():
-    return jsonify({'ok': True, 'data': {'devices': _list_serial_devices()}})
-
-
-def _list_serial_devices():
-    import glob
-    devs = []
-    for pattern in ('/dev/ttyUSB*', '/dev/ttyACM*'):
-        for d in glob.glob(pattern):
-            try:
-                desc = subprocess.check_output(['udevadm', 'info', '-q', 'property', '-n', d],
-                                               text=True, timeout=3)
-                vid = ''
-                model = ''
-                for line in desc.splitlines():
-                    if line.startswith('ID_VENDOR_ID='):
-                        vid = line.split('=')[1]
-                    if line.startswith('ID_MODEL='):
-                        model = line.split('=')[1]
-                devs.append({'path': d, 'vendor_id': vid, 'model': model, 'backend': 'serial'})
-            except Exception:
-                devs.append({'path': d, 'backend': 'serial'})
-    return devs
-
-
-@app.get('/api/ferrum/devices')
-def list_ferrum_devices():
-    return jsonify({'ok': True, 'data': {'devices': _list_serial_devices()}})
-
-
-@app.get('/api/kmboxb/devices')
-def list_kmboxb_devices():
-    return jsonify({'ok': True, 'data': {'devices': _list_serial_devices()}})
-
-
-@app.post('/api/mouse-output/test-circle')
-def test_mouse_output_circle():
-    # 保持 Web 契约：未启用外接键鼠盒子协议时拒绝
-    return jsonify({
-        'ok': False,
-        'error': '请先启用一种外接键鼠盒子协议',
-    })
-
-
 # -- 预览 --
-@app.get('/api/preview.jpg')
-def preview():
-    # Preview Plugin 进程优先承载编码与 HTTP；Core IPC 仅是受控快照源。
-    preview_url = os.environ.get('TTBOX_PREVIEW_URL', '').rstrip('/')
-    if preview_url:
-        try:
-            import urllib.request
-            with urllib.request.urlopen(preview_url + '/api/preview.jpg', timeout=2) as upstream:
-                return Response(upstream.read(), mimetype='image/jpeg')
-        except Exception:
-            pass
-    r = ipc_request('GET_PREVIEW', timeout=3)
-    if r.get('status') == 0 and r.get('data', {}).get('jpeg_base64'):
-        px = base64.b64decode(r['data']['jpeg_base64'])
-    else:
-        # 保持 Web 契约：无预览帧时 404
-        return Response('preview not available', status=404, mimetype='text/plain')
-    return Response(px, mimetype='image/jpeg')
-
-
 # 预览流健康监控：任何 MJPEG 连接收到帧数据即刷新 last_frame_ts。
 # 前端 /api/state 轮询依据 preview.alive 判断预览流是否存活（服务重启/断线时自动重建连接）。
 _PREVIEW_MONITOR = {"last_frame_ts": 0.0, "active_conns": 0}
