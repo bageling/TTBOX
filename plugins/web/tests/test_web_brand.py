@@ -429,3 +429,46 @@ def test_wifi_manager_consistent_when_ssid_broadcast(monkeypatch):
     rep = wifi.verify_brand_ssid_consistency()
     assert rep['ok'] is True
     assert rep['missing'] == []
+
+
+# ---------------------------------------------------------------------------
+# 11. 面板内联皮肤（skin）：闭集 {yu, xh, xcsh}；缺省/未知 ⇒ yu
+#     —— 皮肤只决定视觉（参照物 data-ui-brand），文案仍由 payload.ui.brand_* 下发。
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize('bad', ['', None, '  ', 'nope', 'yu ', 'XCS', 'xcshh', '中文', 'ye'])
+def test_normalize_skin_rejects_outside_closed_set(web_mod, bad):
+    assert web_mod._normalize_skin(bad) == 'yu'
+
+
+@pytest.mark.parametrize('token,skin', [('yu', 'yu'), ('xh', 'xh'), ('XCSH', 'xcsh'), (' xh ', 'xh')])
+def test_normalize_skin_accepts_closed_set(web_mod, token, skin):
+    assert web_mod._normalize_skin(token) == skin
+
+
+def test_ui_block_carries_skin_from_registry(web_mod, tmp_registry):
+    _write_registry(tmp_registry, {
+        'ttbox': _ttbox_entry(),
+        'acme': dict(_ttbox_entry(), brand_name='ACME', skin='xh'),
+    })
+    assert web_mod._ui_block('ttbox')['skin'] == 'yu'
+    assert web_mod._ui_block('acme')['skin'] == 'xh'
+
+
+def test_ui_block_skin_defaults_to_yu_when_missing(web_mod, tmp_registry):
+    """渠道条目未声明 skin ⇒ 由默认品牌补齐为 yu（v2 旧条目零改动可用）。"""
+    _write_registry(tmp_registry, {'ttbox': _ttbox_entry(), 'acme': dict(_ttbox_entry())})
+    assert web_mod._ui_block('acme')['skin'] == 'yu'
+
+
+def test_shipped_registry_skin_mapping(web_mod):
+    """仓库自带注册表：ttbox→yu、sample→xh（xcsh 预留给第三渠道）。"""
+    assert web_mod._ui_block('ttbox')['skin'] == 'yu'
+    assert web_mod._ui_block('sample')['skin'] == 'xh'
+
+
+def test_page_context_carries_ui_skin(web_mod, monkeypatch):
+    monkeypatch.setattr(web_mod, '_get_status',
+                        lambda: {'license': {'state': 'valid', 'activated': True,
+                                             'ui_brand': 'ttbox'}})
+    ctx = web_mod._page_context()
+    assert ctx['ui_skin'] == 'yu'

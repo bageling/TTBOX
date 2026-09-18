@@ -622,8 +622,9 @@ def capabilities():
 # 这里刻意不注册任何页面路由。
 #
 # 产品决策：原本挂在这里的自研控制台（GET /console → templates/console.html，
-# 配套 static/console.js / console.css）已被用户否定，模板与静态资源连同路由
-# 一起删除。主面板 '/' 始终由 ttbox-web.py 的 index() 提供（templates/index.html），
+# 配套 static/console.js / console.css）已被用户否定，路由已删除；其模板与静态资源
+# 不删除、改为**归档**到 static/legacy/（console.js / console.css，可回滚）。
+# 主面板 '/' 始终由 ttbox-web.py 的 index() 提供（templates/index.html），
 # 保持"只有一套 UI"的默认形态，避免两套界面互相劫持入口。
 # ====================================================================
 

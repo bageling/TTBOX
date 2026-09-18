@@ -399,6 +399,20 @@ DEFAULT_UI_BRAND = 'ttbox'
 _DEFAULT_BRAND_ACCENT = '#2F81F7'
 _VALID_THEME_MODES = ('dark', 'light')
 
+# ★ 面板内联皮肤闭集（与参照物 html[data-ui-brand=...] 覆盖段一一对应）。
+#   注册表条目可声明 "skin"；缺省/未知一律归一为默认皮肤 'yu'。皮肤**只决定视觉**
+#   （documentElement.dataset.uiBrand + body.ui-brand-*），文案永远由品牌注册表投影
+#   下发（payload.ui.brand_*），面板内不再硬编码任何品牌文案。
+DEFAULT_UI_SKIN = 'yu'
+_VALID_SKINS = ('yu', 'xh', 'xcsh')
+
+
+def _normalize_skin(value: Any) -> str:
+    """token → 皮肤闭集 {yu, xh, xcsh}；空/未知/非法一律回默认皮肤（对标参照物 normalizeUiBrand）。"""
+    token = str(value or '').strip().lower()
+    return token if token in _VALID_SKINS else DEFAULT_UI_SKIN
+
+
 # 内置兜底表：注册表文件缺失/损坏时仍能起服务（绝不因品牌配置问题白屏）
 _UI_BRAND_FALLBACK = {
     DEFAULT_UI_BRAND: {
@@ -415,6 +429,8 @@ _UI_BRAND_FALLBACK = {
         # ★ v2 外观字段（v1 条目缺省时由此补齐；向后兼容）
         'brand_accent': _DEFAULT_BRAND_ACCENT,
         'brand_logo': None,
+        # ★ 面板皮肤（缺省 yu）；渠道条目可覆盖以套用 xh/xcsh 内联皮肤。
+        'skin': DEFAULT_UI_SKIN,
         'template_dir': None,
         'static_dir': None,
     },
@@ -549,6 +565,8 @@ def _brand_payload(brand: Any = None) -> dict:
 
     payload = {
         'ui_brand': ui_brand,
+        # ★ 面板内联皮肤（闭集 yu/xh/xcsh；缺省 yu）。只决定视觉，不承载文案。
+        'skin': _normalize_skin(base.get('skin')),
         'brand_name': str(base.get('brand_name') or 'TTBOX'),
         'brand_mark': str(base.get('brand_mark') or 'TT'),
         'brand_eyebrow': str(base.get('brand_eyebrow') or 'TTBOX SYSTEM'),
@@ -653,6 +671,8 @@ def _ui_block(brand: Any = None) -> dict:
         'brand_eyebrow': b['brand_eyebrow'],
         'brand_title': b['brand_title'],
         'ui_brand': b['ui_brand'],
+        # ★ 面板内联皮肤（参照物 data-ui-brand 闭集）；与文案解耦，只负责选皮。
+        'skin': b['skin'],
         'default_theme': b['default_theme'],
         'allow_theme_switch': b['allow_theme_switch'],
         'default_local_name': b['default_local_name'],
@@ -1118,20 +1138,15 @@ def _core_state_payload() -> dict:
             'message': '核心模块未运行（ttbox-core 未启动）', 'version': '2026.05.16'}
 
 
-def collect_web_state() -> dict:
-    """合成 /api/state 的完整数据。"""
-    st = _get_status()
-    prof = _get_runtime_profile()
-    ml = ipc_request('MODEL_LIST')
-    ml_data0 = (ml.get('data', {}) or {}) if ml.get('status') == 0 else {}
-    # 真源统一：registry active 覆盖 profile.model_id（防止 PUT config 用旧缓存回写跳回）
-    registry_active = ml_data0.get('active', '')
-    if registry_active:
-        prof['model_id'] = registry_active
-    ml_data = (ml.get('data', {}) or {}) if ml.get('status') == 0 else {}
-    # Web 同构：state.models = 数组，字段对齐前端模型卡片（id/display_name/backend/enabled/尺寸）
+def _models_view(ml_data: dict) -> list:
+    """MODEL_LIST data → 面板模型卡片数组（单一真源）。
+
+    /api/state.data.models、/api/models、/api/models/select 三处**必须同形**，否则
+    切换模型后面板卡片字段会漂移（参照物 applySelectedModel 会把 result.models 直接
+    灌进 state.data.models）。故集中在本函数，杜绝多处各写一份。
+    """
     models = []
-    for mm in ml_data.get('models', []):
+    for mm in (ml_data or {}).get('models', []):
         models.append({
             'id': mm.get('model_id'),
             'model_id': mm.get('model_id'),
@@ -1151,7 +1166,22 @@ def collect_web_state() -> dict:
             'class_names': mm.get('class_names') or [],
             'rknn_concurrency': _effective_rknn_concurrency(mm),
         })
-    models = [_merge_model_ui_meta(m) for m in models]
+    return [_merge_model_ui_meta(m) for m in models]
+
+
+def collect_web_state() -> dict:
+    """合成 /api/state 的完整数据。"""
+    st = _get_status()
+    prof = _get_runtime_profile()
+    ml = ipc_request('MODEL_LIST')
+    ml_data0 = (ml.get('data', {}) or {}) if ml.get('status') == 0 else {}
+    # 真源统一：registry active 覆盖 profile.model_id（防止 PUT config 用旧缓存回写跳回）
+    registry_active = ml_data0.get('active', '')
+    if registry_active:
+        prof['model_id'] = registry_active
+    ml_data = (ml.get('data', {}) or {}) if ml.get('status') == 0 else {}
+    # Web 同构：state.models = 数组，字段对齐前端模型卡片（id/display_name/backend/enabled/尺寸）
+    models = _models_view(ml_data)
     active_model = registry_active or prof.get('model_id', '') or ''
 
     m = st.get('metrics', {})
@@ -1614,7 +1644,7 @@ install_framework_api(app)
 
 # ---- /api/v1 真接线 API（追加注册，不改动既有路由逻辑）----
 # api_v1.py 位于 plugins/web/ 下，sys.path 已含该目录（见文件头 sys.path.insert）。
-# 自研控制台 /console 已随产品决策整体删除，这里不再注册任何页面路由。
+# 页面路由集中在下方 @app.get('/') / '/desktop' / '/mobile' / '/activate' 注册。
 try:
     from api_v1 import api_v1, register_designer_routes
     register_designer_routes(app)  # /ui-custom.css 读取常驻 + /designer 页面（需 TTBOX_ENABLE_DESIGNER=1）
@@ -1630,7 +1660,7 @@ def add_no_cache_headers(response):
         response.headers['Pragma'] = 'no-cache'
     return response
 
-# 默认入口 = 原版面板（index.html）。新控制台挂在 /console，不劫持 '/'。
+# 默认入口 = 面板（index.html），'/' 直接托管、不劫持到任何其它路径。
 # --------------------------------------------------------------------
 # 面板模板上下文（品牌化）：'/' 、'/desktop' 、'/mobile' 三端共用**同一构造器**。
 #
@@ -1651,6 +1681,8 @@ def _page_context() -> dict:
     return {
         'app_title': ui['app_title'],
         'ui_brand': ui['ui_brand'],
+        # ★ 模板插槽 data-ui-brand / body.ui-brand-* 的取值（闭集皮肤；缺省 yu）。
+        'ui_skin': ui['skin'],
         'brand_mark': ui['brand_mark'],
         'brand_eyebrow': ui['brand_eyebrow'],
         'brand_title': ui['brand_title'],
@@ -2542,7 +2574,7 @@ def _conversion_worker(onnx_tmp: Path, calib_tmp, model_id: str, label: str,
                                          (f'：{detail}' if detail else '')),
                                   finished_at=time.time())
             return
-        # V-04：转换产物落点与 core 同根（lib.paths.models_root()），不再写死 /opt/ttbox/models/_incoming。
+        # V-04：转换产物落点与 core 同根（lib.paths.models_root()），不再写死绝对路径。
         inc = Path(ttbox_paths.models_root()) / '_incoming'
         inc.mkdir(parents=True, exist_ok=True)
         incoming_rknn = inc / (model_id + '.rknn')
@@ -2751,13 +2783,28 @@ def select_model():
     if status_response.get('status') != 0:
         return jsonify({'ok': False, 'error': status_response.get('error', 'ModelRegistry unavailable')}), 503
     data = status_response.get('data', {}) or {}
+    # ★ 参照物 applySelectedModel 消费 result.config / result.models / result.presets /
+    #   result.model —— 缺任一键会导致切换模型后「配置表单 / 模型卡片 / 预设列表 / 选中项」
+    #   静默不刷新。故后端并齐这 4 键：models 与 /api/state.data.models 同形（_models_view），
+    #   config 复用 profile_to_web（单一真源），presets 为预设名数组，model 为当前选中模型卡片。
+    models_view = _models_view(data)
+    active_id = data.get('selected_model_id', model_id) or model_id
+    selected_model = next((m for m in models_view if m.get('id') == active_id), None)
+    presets = [p.stem for p in sorted(Path(PRESETS_DIR).glob('*.json'))]
+    try:
+        config_web = profile_to_web(_get_runtime_profile())
+    except Exception:
+        config_web = {}
     return jsonify({'ok': True, 'data': {
         'message': '模型已切换，Core 已加载新模型并完成首帧验证',
         'restart_required': False,
-        'selected_model_id': data.get('selected_model_id', model_id),
+        'selected_model_id': active_id,
         'running_model_id': data.get('running_model_id', ''),
         'state': data.get('state', 'switching'),
-        'models': data.get('models', []),
+        'models': models_view,
+        'config': config_web,
+        'presets': presets,
+        'model': selected_model,
     }})
 
 
@@ -4023,8 +4070,8 @@ def get_display_hardware():
     data['config'] = cfg_disp
     # monitor 模块：真实 hdmirx RX 状态（独立于板端其它服务）
     # V-07 收口：scripts 目录已在文件头经 ttbox_paths.scripts_dir() append 进 sys.path
-    # （A-PATH-3 相对派生）；此处**不再** sys.path.insert(0, '/opt/ttbox/scripts')
-    # —— 绝对路径注入既散落字面量，又有 insert(0) 遮蔽 stdlib 的风险。
+    # （A-PATH-3 相对派生）；此处**不再**以绝对路径 insert(0, …) 注入 ——
+    # 绝对路径注入既散落字面量（A-PATH-3/5 违背），又有 insert(0) 遮蔽 stdlib 的风险。
     try:
         from edid.monitor import read_hdmirx_status
         rx = read_hdmirx_status()

@@ -124,8 +124,9 @@ RESTORE_VALID = False
 STRICT = False
 
 EXPECTED_TABS = ['总览', '热键控制', '移动控制', '辅助功能', '模型库',
-                 '显示与鼠标', '网络配置', '预设参数', '系统状态', '风扇']
-FORBIDDEN_TABS = ['Hailo', '键鼠盒子', '准星找色']
+                 '显示与鼠标', 'Hailo-8加速', '键鼠盒子', '网络配置', '预设参数',
+                 '系统状态', '风扇控制']
+FORBIDDEN_TABS = ['准星找色']
 
 
 # ===========================================================================
@@ -528,7 +529,7 @@ def b15() -> None:
 # B16 激活页 1:1
 # ===========================================================================
 def b16() -> None:
-    desc = 'B16 激活页 1:1（未激活 302→/activate；DOM id + --bg:#050505 + .activation-panel）'
+    desc = 'B16 激活页 1:1（未激活 302→/activate；DOM id + --bg:#0b0c0b + .license-gate-card）'
     if not web_reachable():
         skip('B16', desc, '板端 web 不可达')
         return
@@ -548,9 +549,10 @@ def b16() -> None:
         red_ok = (r.status == 302 and r.loc().endswith('/activate'))
         p = http('GET', '/activate', follow=False)
         html = p.body
-        ids = ['activationKeyInput', 'activateButton', 'refreshButton', 'activationToast']
+        ids = ['licenseGateOverlay', 'licenseGateKeyInput',
+               'licenseGateActivateButton', 'licenseGateRefreshButton']
         ids_ok = all(i in html for i in ids)
-        css_ok = ('--bg:#050505' in html.replace(' ', '')) and ('activation-panel' in html)
+        css_ok = ('--bg:#0b0c0b' in html.replace(' ', '')) and ('license-gate-card' in html)
         ok = red_ok and p.status == 200 and ids_ok and css_ok
         check('B16', desc, ok,
               'GET / => %s loc=%s ; /activate=%s ids=%s css=%s'
@@ -625,7 +627,7 @@ def _between(text: str, start: str, end: str) -> str:
 
 
 def b19() -> None:
-    desc = 'B19 侧边栏 == 10 页精确集合，且无 Hailo/键鼠盒子/准星找色'
+    desc = 'B19 侧边栏 == 12 页精确集合（含 Hailo-8加速/键鼠盒子；无准星找色）'
     if not lic_core().get('activated'):
         skip('B19', desc, '需已激活基线（未激活 / 会 302 /activate）')
         return

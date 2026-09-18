@@ -64,6 +64,7 @@ unit 是**版本产物的一部分**，随发布树交付：
       "brand_accent": "#RRGGBB",
       "brand_logo": "logos/<id>.png" | null,
       "theme": { "mode": "dark" | "light", "accent": "#RRGGBB" },
+      "skin": "yu" | "xh" | "xcsh",
       "template_dir": "<dir>" | null,
       "static_dir": "<dir>" | null
     }
@@ -83,6 +84,22 @@ unit 是**版本产物的一部分**，随发布树交付：
 > `brand_logo` / `theme{mode,accent}`，前端据此上色与挂 logo；`template_dir` / `static_dir`
 > 是**服务端路径控制字段**，**不进入** JSON 投影。
 
+### 面板皮肤（`skin`，本期新增）
+
+`skin` 把本注册表的品牌条目投影到**面板内联皮肤闭集** `{yu, xh, xcsh}`（缺省 `yu`，
+未知 token 归一为 `yu`）。它与 `brand_accent`/`theme` 的分工是：
+
+- **皮肤只决定视觉**：`_ui_block().skin` → `/api/state.data.ui.skin` → 面板
+  `document.documentElement.dataset.uiBrand` + `body.ui-brand-*`（决定 `html[data-ui-brand=...]`
+  下的 CSS 覆盖段）。
+- **文案永远取服务端**：`brand_mark` / `brand_eyebrow` / `brand_title` / `app_title` 一律来自
+  本注册表投影（`payload.ui.*`）。**面板内不再有任何硬编码品牌文案表** —— 新增渠道 = 加一条
+  JSON，零代码改动。
+- 缺省（未写 `skin`）⇒ `yu`；因此 **v2 旧条目无需改动**即可继续工作。
+
+当前映射：`ttbox` → `yu`（原厂暗色）、`sample` → `xh`（渠道浅色且锁换主题）；
+`xcsh` 皮肤**预留给第三渠道**（本期无对应品牌条目，仅 CSS 就绪）。
+
 ## 新增渠道 checklist（渠道白标上线必查）
 
 1. **加品牌条目**：在本文件 `brands` 下新增一条（参照 `sample` 条目）。
@@ -95,6 +112,7 @@ unit 是**版本产物的一部分**，随发布树交付：
 3. **皮肤（可选）**：把定制 CSS/图片放到 `plugins/web/static/<static_dir>/`，
    模板放到 `plugins/web/templates/<template_dir>/`（仅 `index.html`/`mobile.html` 换皮；
    `activate.html` 全品牌共用——读卡前品牌未定）。缺目录**不是错误**，静默回退默认。
+   若渠道要套用面板内联皮肤，补 `"skin": "yu" | "xh" | "xcsh"`（缺省 `yu`）。
 4. **回归**：`python -m pytest plugins/web/tests/test_web_brand.py -v`
    （含 v2 字段回退与 SSID 耦合判据）。
 

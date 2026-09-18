@@ -16,6 +16,7 @@
       "brand_accent": "#2F81F7",
       "brand_logo": null,
       "theme": { "mode": "dark", "accent": "#2F81F7" },
+      "skin": "yu",
       "template_dir": null,
       "static_dir": null
     },
@@ -33,6 +34,7 @@
       "brand_accent": "#E4572E",
       "brand_logo": "logos/sample.png",
       "theme": { "mode": "light", "accent": "#E4572E" },
+      "skin": "xh",
       "template_dir": "sample",
       "static_dir": "sample"
     }

@@ -311,3 +311,43 @@ def test_framework_core_status_mirrors_model_input(web_mod, monkeypatch):
     assert d['model_fast_path_active'] is True
     assert d['model_zero_copy_ready'] is True
     assert d['model_input_note'] == ''
+
+
+# ---------------------------------------------------------------------------
+# 4. /api/models/select 契约：补齐参照物 applySelectedModel 消费的 4 键
+#    （result.config / result.models / result.presets / result.model）。
+#    缺任一键 ⇒ 切换模型后「配置表单/模型卡片/预设列表/选中项」静默不刷新。
+# ---------------------------------------------------------------------------
+
+def test_select_model_returns_reference_contract_keys(web_mod, monkeypatch, tmp_path):
+    monkeypatch.setattr(web_mod, '_license_block',
+                        lambda: {'activated': True, 'valid': True, 'ui_brand': 'ttbox'})
+    web_mod._ACTIVATION_CACHE['ts'] = 0.0
+    monkeypatch.setattr(web_mod, 'PRESETS_DIR', str(tmp_path))
+    (tmp_path / 'presetA.json').write_text('{}', encoding='utf-8')
+
+    def fake_ipc(req_type, params=None, timeout=5):
+        if req_type == 'MODEL_LIST':
+            return {'status': 0, 'data': {
+                'selected_model_id': 'm2', 'running_model_id': 'm2', 'state': 'ready',
+                'models': [
+                    {'model_id': 'm1', 'label': 'One', 'input_width': 640, 'input_height': 640},
+                    {'model_id': 'm2', 'label': 'Two', 'input_width': 416, 'input_height': 416},
+                ],
+            }}
+        return {'status': 0, 'data': {}}
+
+    monkeypatch.setattr(web_mod, 'ipc_request', fake_ipc)
+    monkeypatch.setattr(web_mod, '_get_runtime_profile', lambda: {'model_id': 'm2'})
+    web_mod.app.config['TESTING'] = False
+    client = web_mod.app.test_client()
+
+    resp = client.post('/api/models/select', json={'model_id': 'm2'})
+    assert resp.status_code == 200, resp.get_data(as_text=True)[:200]
+    data = resp.get_json()['data']
+    for key in ('config', 'models', 'presets', 'model'):
+        assert key in data, f'/api/models/select 缺少参照物所需键: {key}'
+    assert [m['id'] for m in data['models']] == ['m1', 'm2']
+    assert data['presets'] == ['presetA']
+    assert data['model'] and data['model']['id'] == 'm2'
+    assert data['config'].get('model_id') == 'm2'

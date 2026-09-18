@@ -233,3 +233,64 @@ def test_update_thin_endpoints(client, web_mod, monkeypatch):
     # 无后端能力的端点 ⇒ not_supported（无假壳）
     assert client.get('/api/update/versions').status_code == 400
     assert client.get('/api/update/check').status_code == 400
+
+
+# ======================================================================
+# ⑦ 激活双保险（T03）：服务端 fail-closed 不变量 + /activate 卡片 1:1 + 面板兜底弹层
+# ======================================================================
+TEMPLATES_DIR = REPO_ROOT / 'plugins' / 'web' / 'templates'
+
+
+def test_activation_gate_invariants(web_mod):
+    """服务端执法不变量（语义级）：/ 必须在 _ACTIVATION_PAGES；/api/state 不得进白名单。
+
+    这是「双保险」的根基 —— 无论前端弹层怎么改，服务端始终 fail-closed：
+      页面 /、/desktop、/mobile ⇒ 302 /activate；非白名单 API ⇒ 403 activation_required。
+    若未来有人把 / 从 _ACTIVATION_PAGES 移出、或把 /api/state 加白名单，本用例立刻变红。
+    """
+    assert '/' in web_mod._ACTIVATION_PAGES
+    assert '/desktop' in web_mod._ACTIVATION_PAGES
+    assert '/mobile' in web_mod._ACTIVATION_PAGES
+    # /api/state 是面板主数据口，绝不因未激活而放行（否则整张面板对未授权客户端可达）
+    assert ('GET', '/api/state') not in web_mod._ACTIVATION_WHITELIST
+    assert not any(p.startswith('/api/state') for p in web_mod._ACTIVATION_WHITELIST_PREFIXES)
+
+
+def test_activation_pages_literal_is_locked():
+    """源码级锁：_ACTIVATION_PAGES 字面量必须逐字保留（防止被悄悄改写）。"""
+    src = WEB_SRC.read_text(encoding='utf-8')
+    assert "_ACTIVATION_PAGES = frozenset({'/', '/desktop', '/mobile'})" in src
+
+
+def test_activate_page_replicates_license_gate_card(client, web_mod, monkeypatch):
+    """激活页 = 参照物 #licenseGateOverlay 卡片 1:1（结构 + 文案 + 输入 + 双按钮 + 端点）。
+
+    需先置为「未激活」——否则 /activate 会 302 回面板（已激活直进系统）。
+    """
+    monkeypatch.setattr(web_mod, '_license_block', lambda: dict(UNACTIVATED_LICENSE))
+    web_mod._ACTIVATION_CACHE['ts'] = 0.0
+    r = client.get('/activate')
+    assert r.status_code == 200
+    html = r.get_data(as_text=True)
+    for marker in ('id="licenseGateOverlay"', '设备授权', '输入激活码后继续使用',
+                   'id="licenseGateKeyInput"', 'id="licenseGateActivateButton"',
+                   'id="licenseGateRefreshButton"', '/api/license/activate'):
+        assert marker in html, f'激活页缺少 {marker}'
+
+
+def test_panel_template_keeps_license_overlay_fallback():
+    """面板模板保留上游 #licenseGateOverlay 标记（运行期掉线/被撤销时就地兜底）。"""
+    html = (TEMPLATES_DIR / 'index.html').read_text(encoding='utf-8')
+    assert 'id="licenseGateOverlay"' in html
+    assert 'setLicenseNavigationLock' in html
+
+
+def test_unactivated_double_insurance_302_and_403(client, web_mod, monkeypatch):
+    """双保险：未激活时页面 302、API 403 —— 与前端弹层无关（devtools 删弹层也绕不过）。"""
+    monkeypatch.setattr(web_mod, '_license_block', lambda: dict(UNACTIVATED_LICENSE))
+    web_mod._ACTIVATION_CACHE['ts'] = 0.0
+    assert client.get('/').status_code == 302
+    r = client.get('/api/state')
+    assert r.status_code == 403 and r.get_json()['error'] == 'activation_required'
+    # 激活页自身恒可达（服务端引导入口）
+    assert client.get('/activate').status_code == 200
