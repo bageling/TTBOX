@@ -6,9 +6,10 @@
 本文 → 小白教程(guide/) → 架构(architecture/) → 完整链路 → 测试 → 问题排查
 ```
 
-> **2026-09-17 代码梳理批次 0**：`docs/` 已按「消费方 + 生命周期」重新分类（架构真源 / 协议 / 运维 / 教程 / 分域 / 归档），
-> 并对重叠的「盘点/瘦身/架构/代码地图」类报告做了**唯一真源归并**：重复的历史快照移入只读归档 [`archive/`](archive/)，
-> 见下方「五、历史归档」。旧目录 `docs/架构/` 已改名 `docs/architecture/`（旧的 `docs/架构/` 留了指针文件）。
+> **2026-09-17 代码梳理批次 0**：`docs/` 已按「消费方 + 生命周期」重新分类（架构真源 / 协议 / 运维 / 教程 / 分域）。
+> **2026-09-18 文档清理**：被新版取代的旧文档（根目录 `架构总览.md` / `模块说明.md` / `完整数据链路.md`）、四个旧路径
+> 指针目录（`架构/` / `开发/` / `规划/` / `验证/`）与历史归档 `archive/`（41 个文件）已删除，仅保留活真源。
+> 旧目录 `docs/架构/` 已改名 `docs/architecture/`；历史交接见下方「五、历史交接」。
 
 ---
 
@@ -107,16 +108,12 @@
 - [build/build-reproducibility.md](build/build-reproducibility.md)
 - [web/e2e/INDEX.md](web/e2e/INDEX.md)、[verification/真实HDMI闭环验证.md](verification/真实HDMI闭环验证.md)
 
-## 五、历史归档（只读，不再更新）
+## 五、历史交接（只读，不再更新）
 
-以下目录只保留**历史过程记录**，代码可能已重构，阅读时以当前 `core/src/` 为准：
-
-- [`archive/pre-refactor/`](archive/pre-refactor/) —— 整理前快照 / 瘦身报告 / 重构报告 / 旧代码地图（11 份）
-- [`archive/performance/`](archive/performance/) —— 历史性能报告（`performance-rk3588*.md`，10 份）
-- [`archive/stages/`](archive/stages/) —— 阶段报告（`a9-*` / `a10/` / `nightly/` / `delivery/` / `第13~15阶段` / PID 分析 / INT8 切换）
 - [`handover/`](handover/) —— ★ 历史交接记录（**只能追加/归档，禁改写**）
 
-这些报告的**重叠结论已归并**到上表「唯一真源」；如发现冲突，以真源为准。
+> **2026-09-18 清理**：原 `docs/archive/`（整理前快照 / 旧性能报告 / 阶段报告，共 41 个文件）已删除；
+> 重叠结论已归并到上表「唯一真源」。如需追溯，可从 git 历史（提交 `45321eb` 及更早）检出。
 
 ---
 

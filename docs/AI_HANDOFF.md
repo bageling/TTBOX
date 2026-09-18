@@ -57,5 +57,4 @@ TTBOX 参考资料以本仓库 `docs/` 自有文档为准：
 4. `docs/product/TTBOX_DOMAIN_MODEL.md`（领域模型）
 5. `docs/product/TTBOX_API_CONTRACT.md`（API 契约）
 6. `README.md`（项目概述）
-7. `docs/archive/pre-refactor/TTBOX_CODE_MAP_CN.md`（代码地图·已归档，只读备查）
-8. `docs/ops/RK3588开发流程.md`（RK3588 强制开发流程）
+7. `docs/ops/RK3588开发流程.md`（RK3588 强制开发流程）
