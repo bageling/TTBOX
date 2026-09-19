@@ -2177,8 +2177,21 @@ def api_update_status():
         doc = {}
     state = str(doc.get('state') or '').upper()
     if state == 'RUNNING':
-        return jsonify({'ok': True, 'data': {'status': 'running', 'progress': 50,
-                                             'message': '更新进行中',
+        # 2026-09-19 修复「卡50」：进度由更新器分阶段写入，这里只做投影。
+        # 另加超时保护：状态文件 30 分钟没动过 ⇒ 更新器大概率已死，报失败而不是永远转圈。
+        try:
+            progress = max(1, min(99, int(doc.get('progress'))))
+        except (TypeError, ValueError):
+            progress = 10
+        try:
+            stale = (time.time() - os.path.getmtime(OTA_STATUS_FILE)) > 1800
+        except OSError:
+            stale = False
+        if stale:
+            return jsonify({'ok': True, 'data': {'status': 'failed', 'progress': 100,
+                                                 'error': '更新进程中断（状态超过30分钟无进展）'}})
+        return jsonify({'ok': True, 'data': {'status': 'running', 'progress': progress,
+                                             'message': str(doc.get('phase') or '更新进行中'),
                                              'version': doc.get('version') or ''}})
     if state == 'SUCCESS':
         return jsonify({'ok': True, 'data': {'status': 'success', 'progress': 100,

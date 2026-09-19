@@ -246,6 +246,14 @@ class OtaUpdater:
         sys.stderr.write(f"OTA FAILED: {state}: {detail}\n")
         return 1
 
+    def _progress(self, pct: int, phase: str, version: str | None = None) -> None:
+        """分阶段进度（2026-09-19 修复「卡50」：前端轮询 ota_status.json，
+        RUNNING 必须带真实 progress，否则 UI 永远停在硬编码值。）"""
+        doc = {"state": "RUNNING", "progress": max(5, min(95, int(pct))), "phase": phase}
+        if version:
+            doc["version"] = version
+        self._write_status(doc)
+
     # -- 公钥 --
     def _load_pubkey(self, key_id: str) -> Ed25519PublicKey:
         if self._pubkey_pem:
@@ -323,7 +331,7 @@ class OtaUpdater:
         if u.scheme != "https":
             return self._fail("scheme_rejected", f"non-https URL: {u.scheme or '<空>'}")
 
-        self._write_status({"state": "RUNNING", "url": url, "key_id": key_id})
+        self._progress(5, "下载更新包")
         work = tempfile.mkdtemp(prefix="ttbox-ota-", dir="/var/tmp" if os.path.isdir("/var/tmp") else None)
         staging = ""
         try:
@@ -333,6 +341,7 @@ class OtaUpdater:
             # ②b 旁车签名
             sign_path = os.path.join(work, "pkg.tgz.sign.json")
             self.fetch(url + ".sign.json", sign_path)
+            self._progress(30, "下载完成，校验签名")
             try:
                 signs = json.loads(Path(sign_path).read_text(encoding="utf-8"))
             except Exception as e:
@@ -349,6 +358,7 @@ class OtaUpdater:
             ver = str(version or signs.get("version") or "").strip()
             if not ver:
                 return self._fail("version_missing", "签名记录缺 version")
+            self._progress(50, "校验通过，展开更新包", ver)
             # 命名注意（2026-09-18 板端实测）：release_install 的浇筑目标也是
             # releases/<ver>.staging —— 两者绝不能同名（否则其 tar 管道自拷自，
             # RELEASE_MANIFEST.json 会在拷贝中消失）。故本目录用 <ver>.ota.staging。
@@ -372,16 +382,18 @@ class OtaUpdater:
                                   f"包版本 {ver} 不高于当前版本 {cur or '<未知>'}（禁止降级）")
             # ⑦ 原子发布（先规范化权限：打包机的 mode/uid 不可信，见函数 docstring）
             normalize_staging_perms(staging)
+            self._progress(65, "安装新版本", ver)
             rc = self.install(staging, ver)
             if rc != 0:
                 shutil.rmtree(staging, ignore_errors=True)
                 return self._fail("install_failed", f"release_install rc={rc}")
             # ⑦b 健康检查（业务能力；失败自动回滚——保命路径，不受降级限制）
+            self._progress(85, "重启服务，健康检查", ver)
             if not self.health(HEALTH_TIMEOUT_S):
                 self.rollback()
                 shutil.rmtree(staging, ignore_errors=True)
                 return self._fail("health_check_failed", "已 rollback")
-            self._write_status({"state": "SUCCESS", "version": ver,
+            self._write_status({"state": "SUCCESS", "progress": 100, "version": ver,
                                 "sha256": actual, "key_id": key_id})
             return 0
         except OtaError as e:
