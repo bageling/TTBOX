@@ -16,7 +16,8 @@ Type=oneshot
 User=root
 Group=root
 ExecStart=/usr/bin/python3 /opt/ttbox/current/scripts/ttbox_ota_updater.py --from-jobs /var/lib/ttbox/ota/jobs
-# 任务处理可能含下载+30 秒健康检查，放宽超时
-TimeoutStartSec=600
+# 任务处理可能含下载（七牛隧道 ~15KB/s，3MB 包 3.5 分钟，重试最坏 3 倍）+30 秒健康检查；
+# 2026-09-19 实测 600s 会在安装中段被 systemd 杀掉（current 已切、服务没重启的半程态），放宽到 30 分钟
+TimeoutStartSec=1800
 # 失败不自动重试（任务文件已归档到 failed/，重复执行无意义；重试 = 面板重新点安装）
 RemainAfterExit=no

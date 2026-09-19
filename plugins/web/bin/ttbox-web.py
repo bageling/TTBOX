@@ -2228,12 +2228,31 @@ def api_update_check():
     pkg = str(latest.get('package_url') or '').strip()
     sig = str(latest.get('sign_url') or (pkg + '.sign.json' if pkg else '')).strip()
     update_available = bool(ver and pkg and _ota_ver_key(ver) > _ota_ver_key(cur)) if cur else bool(ver and pkg)
+    # 增量包探测（2026-09-19）：服务器若存了 ttbox-update-<ver>-delta-from-<cur>.tgz，
+    # 就把 package_url 换成增量地址（旁车 sign.json 存在才算数）。更新器侧仍 fail-closed：
+    # 基线不匹配会整包拒绝，绝不带病浇筑。全量地址保留在 full_package_url 便于排查。
+    full_pkg, full_sig = pkg, sig
+    if update_available and pkg.startswith('https://') and cur:
+        try:
+            import urllib.request as _ur2
+            name = pkg.rsplit('/', 1)[-1]
+            if name.startswith('ttbox-update-') and name.endswith('.tgz'):
+                d_url = pkg.rsplit('/', 1)[0] + '/' + name[:-4] + '-delta-from-%s.tgz' % cur
+                with _ur2.urlopen(d_url + '.sign.json', timeout=6) as r:
+                    d_sign = json.loads(r.read().decode('utf-8', 'replace'))
+                if isinstance(d_sign, dict) and d_sign.get('sha256'):
+                    pkg, sig = d_url, d_url + '.sign.json'
+        except Exception:
+            pass  # 探测不到增量 ⇒ 用全量，正常路径
     return jsonify({'ok': True, 'data': {
         'update_available': update_available,
         'current_version': cur,
         'latest_version': ver,
         'package_url': pkg,
         'sign_url': sig,
+        'full_package_url': full_pkg,
+        'full_sign_url': full_sig,
+        'delta': pkg != full_pkg,
         'key_id': OTA_DEFAULT_KEY_ID,
     }})
 

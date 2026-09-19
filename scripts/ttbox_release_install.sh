@@ -384,10 +384,14 @@ reload_and_restart() {
         warn "SKIP：未检测到 systemd（非 PID1 或无 systemctl）——跳过 daemon-reload/restart"
         return 0
     fi
+    # 2026-09-19：板端实测 r2 轮在 ensure 之后、任何 restart 日志之前沉默 6 分钟
+    # 被单元 600s 超时杀掉 ⇒ 每步加日志定位，restart 加 --job-timeout 防止单步吃满总超时
+    log "reload_and_restart：开始 daemon-reload"
     systemctl daemon-reload
+    log "reload_and_restart：daemon-reload OK"
     local u
     for u in $RESTART_UNITS; do
-        if systemctl restart "$u"; then
+        if systemctl restart --job-timeout=120 "$u"; then
             log "restart ${u} OK"
         else
             warn "restart ${u} 失败（继续，交由健康检查判定）"

@@ -339,6 +339,41 @@ class OtaUpdater:
                 return False
         return True
 
+    def _read_manifest(self, staging: str) -> dict | None:
+        try:
+            return json.loads(Path(os.path.join(staging, "RELEASE_MANIFEST.json")).read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _materialize_delta(self, staging: str, mdoc: dict, base_ver: str) -> None:
+        """增量包 → 完整 staging：payload 里的新文件 + 当前 release 树里的未变文件。
+
+        fail-closed：manifest 是 Ed25519 签过的（真实性已验），但 rel 仍拒绝 '..'；
+        任何一个文件在两边都对不上 sha256 ⇒ 整包失败，绝不带病浇筑。
+        """
+        cur_tree = os.path.join(self.releases_dir, base_ver)
+        files = mdoc.get("files_sha256") or {}
+        if not files:
+            raise OtaError("manifest_mismatch", "增量包 manifest 缺 files_sha256")
+        full = staging + ".full"
+        os.makedirs(full, exist_ok=True)
+        for rel, want in files.items():
+            if rel.startswith("/") or ".." in rel.split("/"):
+                raise OtaError("manifest_mismatch", f"manifest 出现非法路径: {rel}")
+            dst = os.path.join(full, rel)
+            os.makedirs(os.path.dirname(dst) or full, exist_ok=True)
+            src_payload = os.path.join(staging, rel)
+            if os.path.isfile(src_payload) and sha256_file(src_payload) == want:
+                shutil.copyfile(src_payload, dst)
+                continue
+            src_cur = os.path.join(cur_tree, rel)
+            if os.path.isfile(src_cur) and sha256_file(src_cur) == want:
+                shutil.copyfile(src_cur, dst)
+                continue
+            raise OtaError("delta_base_mismatch", f"增量合并缺文件（payload 与当前树都没有/哈希不符）: {rel}")
+        shutil.rmtree(staging, ignore_errors=True)
+        os.rename(full, staging)
+
     # -- 主流程 --
     def run(self, url: str, key_id: str = DEFAULT_KEY_ID, version: str | None = None) -> int:
         # ① scheme 白名单
@@ -385,6 +420,21 @@ class OtaUpdater:
             except OtaError as e:
                 shutil.rmtree(staging, ignore_errors=True)
                 return self._fail(e.state, e.detail)
+            # ⑤b 增量包（2026-09-19）：base 必须恰好等于当前版本，合并成完整树再走原流程
+            mdoc = self._read_manifest(staging)
+            if mdoc and mdoc.get("delta"):
+                base = str(mdoc.get("base_version") or "").strip()
+                cur0 = current_version()
+                if base != cur0:
+                    shutil.rmtree(staging, ignore_errors=True)
+                    return self._fail("delta_base_mismatch",
+                                      f"增量包基线 {base or '<缺>'} != 当前版本 {cur0 or '<未知>'}，请在面板改用全量包")
+                self._progress(55, "校验通过，合并增量", ver)
+                try:
+                    self._materialize_delta(staging, mdoc, base)
+                except OtaError as e:
+                    shutil.rmtree(staging, ignore_errors=True)
+                    return self._fail(e.state, e.detail)
             # ⑥ 全量复验
             if not self._verify_manifest(staging):
                 shutil.rmtree(staging, ignore_errors=True)
