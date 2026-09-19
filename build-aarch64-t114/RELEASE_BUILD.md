@@ -10,13 +10,13 @@
 
 | 字段 | 值 |
 |---|---|
-| `commit` | `a13a3bd2d4244cc347d38a098be2a65ec08c02e2` |
+| `commit` | `27311531a16f621aa0d510b2d5ac40740318829b` |
 | `toolchain` | /usr/bin/aarch64-linux-gnu-g++ (GCC 11.4.0) — aarch64-linux-gnu-g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 |
 | `build_type` | `Release` |
 | `generator` | `Ninja` |
 | `sysroot` | `/mnt/c/Users/Administrator/WorkBuddy/2026-09-15-15-04-22/sysroot-aarch64` |
 | `build_host` | Ubuntu 22.04.5 LTS @ PC-20260805NLLL |
-| `build_time_utc` | 2026-09-19T13:14:00Z |
+| `build_time_utc` | 2026-09-19T13:16:45Z |
 | `configure_args` | `cmake -S /mnt/c/ttbox-local/core -B /mnt/c/ttbox-local/build-aarch64-t114 -G Ninja -DTTBOX_SHIP=ON -DTTBOX_PROJECT_ROOT=/opt/ttbox -DTTBOX_CORE_BUILD_AUTH=OFF -DCMAKE_TOOLCHAIN_FILE=/mnt/c/ttbox-local/deploy/cmake/toolchain-aarch64.cmake -DCMAKE_SYSROOT=/mnt/c/Users/Administrator/WorkBuddy/2026-09-15-15-04-22/sysroot-aarch64 -DTTBOX_CROSS_AARCH64=ON -DCMAKE_BUILD_TYPE=Release` |
 | `product_path` | `/mnt/c/ttbox-local/build-aarch64-t114/ttbox_core_main` |
 | `md5` | `eb3032d879b9673e3dee94efb147c60f` |
@@ -29,12 +29,12 @@
 | `repro_verify` | 未执行（本脚本默认不做二次 clean build；设 TTBOX_RELEASE_VERIFY_REPRO=1 启用，判据见 build-reproducibility.md §13 V4） |
 | `librknnrt_version` | `2.3.2` / sha256 `d31fc19c85b85f6091b2bd0f6af9d962d5264a4e410bfb536402ec92bac738e8`（须 = 2.3.2 / `d31fc19c…`；基准 = 链接期=模型=板端 三重一致） |
 | `vector_hash` | `0091a7df2bbf4d427e34bfd5594ff5ca56ca1398c05beb260d1db37c06cb63eb`（**配置向量**指纹，**不含 commit**——可复现单元 = (源码 commit, 配置向量) 二元组；换任一向量项即变 ⇒ 与旧留档**不可比**） |
-| `notes` | 上次留档对照：⚠️ 配置向量与源码 commit 都相同、但 md5 不同（上次 12bc363baae5471373e50e31107c6da0 → 本次 eb3032d879b9673e3dee94efb147c60f）⇒ 存在非确定性，须查；A4①=0（期望 0）/ A4②=1（期望 >=1）；CROSS_AARCH64=ON |
+| `notes` | 上次留档对照：配置向量相同，但源码 commit 已变（a13a3bd… → 2731153…） ⇒ 本次 md5=eb3032d879b9673e3dee94efb147c60f 与上次的差异属**预期改变**（非非确定性）；A4①=0（期望 0）/ A4②=1（期望 >=1）；CROSS_AARCH64=ON |
 
 ## §5 单行记录（供仓库外备份共用）
 
 ```
-a13a3bd2d4244cc347d38a098be2a65ec08c02e2 | /usr/bin/aarch64-linux-gnu-g++ (GCC 11.4.0) — aarch64-linux-gnu-g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 | /mnt/c/Users/Administrator/WorkBuddy/2026-09-15-15-04-22/sysroot-aarch64 | /mnt/c/ttbox-local/build-aarch64-t114/ttbox_core_main | md5=eb3032d879b9673e3dee94efb147c60f | BuildID=44c10fb0872b1034fbee672bd57754c8b68d1c96 | 2026-09-19T13:14:00Z | Ubuntu 22.04.5 LTS @ PC-20260805NLLL | third=0/ip=0/cred=0
+27311531a16f621aa0d510b2d5ac40740318829b | /usr/bin/aarch64-linux-gnu-g++ (GCC 11.4.0) — aarch64-linux-gnu-g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 | /mnt/c/Users/Administrator/WorkBuddy/2026-09-15-15-04-22/sysroot-aarch64 | /mnt/c/ttbox-local/build-aarch64-t114/ttbox_core_main | md5=eb3032d879b9673e3dee94efb147c60f | BuildID=44c10fb0872b1034fbee672bd57754c8b68d1c96 | 2026-09-19T13:16:45Z | Ubuntu 22.04.5 LTS @ PC-20260805NLLL | third=0/ip=0/cred=0
 ```
 
-<!-- RELEASE_BUILD_RECORD: commit=a13a3bd2d4244cc347d38a098be2a65ec08c02e2 md5=eb3032d879b9673e3dee94efb147c60f sha256=9adf533986eaab961f437c0562f371c547b911e61ea3a6e01a8cf0236e3682cd buildid=44c10fb0872b1034fbee672bd57754c8b68d1c96 vector_hash=0091a7df2bbf4d427e34bfd5594ff5ca56ca1398c05beb260d1db37c06cb63eb -->
+<!-- RELEASE_BUILD_RECORD: commit=27311531a16f621aa0d510b2d5ac40740318829b md5=eb3032d879b9673e3dee94efb147c60f sha256=9adf533986eaab961f437c0562f371c547b911e61ea3a6e01a8cf0236e3682cd buildid=44c10fb0872b1034fbee672bd57754c8b68d1c96 vector_hash=0091a7df2bbf4d427e34bfd5594ff5ca56ca1398c05beb260d1db37c06cb63eb -->

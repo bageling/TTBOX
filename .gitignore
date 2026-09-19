@@ -232,3 +232,10 @@ tools/license/.testkeys/
 # 目录名**以点号开头 + 固定日期**，与任何现有规则无交集；写在文件**末尾**（last-match-wins）。
 # 自检：`git check-ignore -v .archive-2026-09-18/README.md`（期望命中本行）
 /.archive-2026-09-18/
+
+# ---------- 代码梳理（2026-09-19）：OTA 出包输出目录（不入库）----------
+# `scripts/ttbox_pack_ota.sh <build_dir> <out_dir>` 默认输出到 `dist/`，产物是
+# ttbox-<ver>.ota.tgz + 旁车 ttbox-<ver>.ota.tgz.sign.json（3 MB 级二进制）。
+# 出包产物属构建产物、不入库（与 build-aarch64*/ 同口径）；真值以服务器上发布的包为准。
+# 自检：`git check-ignore -v dist/ttbox-1.4.9.ota.tgz`（期望命中本行）
+/dist/
