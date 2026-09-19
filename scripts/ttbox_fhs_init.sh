@@ -143,12 +143,21 @@ else
     echo "  [=] ${TTBOX_PREFIX}/config/default.json 尚未生成（运行时创建），跳过权限收敛"
 fi
 if [ ! -f "${TTBOX_PREFIX}/config/hardware_display.json" ]; then
-    install -o root -g root -m 0644 \
+    # 属主/权限 = root:ttbox 0664（与同层的 10-device.json 一致），**不是** root:root 0644。
+    # 依据：web（User=ttbox / Group=ttbox）在 PUT /api/hardware/display 里是**原地重写**
+    # （plugins/web/bin/ttbox-web.py:「json.dump(cur, open(cpath, 'w'))」），需要的是**文件**
+    # 写权限；0644 root:root 下 ttbox 直接 EACCES ⇒ 显示器配置保存 500（板端实测 2026-09-19 P1-1）。
+    install -o root -g ttbox -m 0664 \
         "${REPO_ROOT}/deploy/config/hardware_display.json" \
         "${TTBOX_PREFIX}/config/hardware_display.json"
-    echo "  [+] ${TTBOX_PREFIX}/config/hardware_display.json（显示器身份模板，首次放置）"
+    echo "  [+] ${TTBOX_PREFIX}/config/hardware_display.json（显示器身份模板，首次放置，root:ttbox 0664）"
 else
-    echo "  [=] hardware_display.json 已存在，保留（绝不覆盖客户配置）"
+    # 幂等补刀：install/install -d 对**已存在**文件不改属主/权限（本缺陷漏网正因如此）⇒
+    # 旧版装成 root:root 0644 的存量设备重跑 fhs_init 也必须被纠正，否则升级后 500 依旧。
+    # 只纠属组/权限，**内容一字不动**（绝不覆盖客户配置）。照抄上方给 default.json 的写法。
+    chgrp ttbox "${TTBOX_PREFIX}/config/hardware_display.json" 2>/dev/null || true
+    chmod 0664 "${TTBOX_PREFIX}/config/hardware_display.json"
+    echo "  [=] hardware_display.json 已存在，内容保留；属组/权限收敛为 root:ttbox 0664（幂等补刀）"
 fi
 
 # ---- 7. sync_tree：把运行树装进 releases/<ver>/ 并激活（DEP-03 / T1.02）----

@@ -10295,7 +10295,6 @@ function renderSystemStats(payload) {
         <strong>读取失败</strong>
       </div>
     `;
-    renderStorageExpansion(null);
     return;
   }
 
@@ -10346,7 +10345,10 @@ function renderSystemStats(payload) {
       <small>${escapeHtml(payload.hostname || "Orange Pi")}</small>
     </div>
   `;
-  renderStorageExpansion(storage);
+  // 扩容面板由 /api/system/storage 单独驱动（见 refreshStorageStatus），此处**不碰**：
+  // payload.storage 是磁盘占用简表、不含 rootfs，交给 renderStorageExpansion 只会被判成
+  // "未读取"；而本函数每 2.5s 跑一次（initSystemPolling），会把刚读到的扩容状态反复抹掉 ⇒
+  // 按钮永久禁用（板端实测 2026-09-19 P1-2）。
 }
 
 function storageUsage(storage) {
@@ -10408,7 +10410,14 @@ function renderStorageExpansion(storage) {
   if (!pill && !summary && !button && !log) {
     return;
   }
-  const rootfs = (storage && storage.rootfs) || {};
+  // ★ 只认"扩容数据源"（/api/system/storage 的响应带 rootfs 对象）。其余调用方（如
+  //   /api/system 的磁盘简表、扩容接口的 {message,detail} 回执）**不含 rootfs**，此时必须
+  //   原样保留既有扩容 UI —— 否则空 rootfs 会被 storageExpandLabel 判成"未读取"、按钮
+  //   disabled=true，且 2.5s 轮询反复覆盖，用户点"刷新"读到的状态活不过一个轮询周期。
+  if (!storage || typeof storage.rootfs !== "object" || storage.rootfs === null) {
+    return;
+  }
+  const rootfs = storage.rootfs;
   const usage = storageUsage(storage || {});
   const expandable = !!rootfs.expandable;
   if (pill) {
@@ -10464,9 +10473,12 @@ async function expandStorage() {
     showToast(rootfs.message || "存储扩容完成");
     await refreshSystemStats().catch(() => {});
   } catch (error) {
-    if (error && error.payload) {
-      renderStorageExpansion({ rootfs: error.payload });
-    }
+    // 失败也要以"扩容数据源"形态渲染（必须带 rootfs），否则上面的门卫会直接返回，
+    // 界面就只剩一句"扩容中"卡在原地，用户看不到失败原因。
+    const payload = error && typeof error.payload === "object" && error.payload !== null ? error.payload : {};
+    renderStorageExpansion({
+      rootfs: Object.assign({ ok: false, message: (error && error.message) || "扩容失败" }, payload),
+    });
     throw error;
   } finally {
     state.storageExpandBusy = false;
@@ -10627,6 +10639,9 @@ async function refreshSystemStats() {
 function initSystemPolling() {
   refreshSystemStats();
   setInterval(refreshSystemStats, 2500);
+  // 扩容面板的真源是 /api/system/storage（带 rootfs 检测结果），与上面的轮询无关。
+  // 进页面时先取一次，免得面板一直停在上一次会话留下的"未读取"。
+  refreshStorageStatus().catch(() => {});
 }
 
 function renderLicensePanel(payload) {

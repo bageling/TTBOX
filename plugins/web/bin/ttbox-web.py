@@ -763,6 +763,55 @@ CONTROLLER_BOOLS = {
 }
 
 
+# ---- capture 截取尺寸：Core 合法域 = {0（全帧）} ∪ [64, 3840] ----
+# Core 侧校验见 core/src/app/Application.cpp（RuntimeProfile::validate）：
+#   "capture.width 非法（0=全帧，或需在 64~3840 之间）"
+# Web 面板的"截取尺寸"输入框 min=1，而 profile 里的全帧值 0 回填后会被夹到 1 ⇒ 面板提交 1，
+# 1 既不是 0 也不在 64~3840 之间 ⇒ Core 拒收整份 SET_CONFIG ⇒ **面板所有保存全部失败**
+# （板端实测 2026-09-19：PUT /api/config 恒 503，报错文案还被误写成"Core 未运行"）。
+# 这里做**归一化**（前后端同一套规则，前端见 index.html 的 normalizeCropSize）：
+#   <=0 → 0（全帧）；1~63 → 64（Core 下界）；>3840 → 3840。
+CROP_SIZE_FULL_FRAME = 0
+CROP_SIZE_MIN_VALID = 64
+CROP_SIZE_MAX_VALID = 3840
+
+
+def normalize_capture_crop_size(value) -> int:
+    """把面板的 crop_size 归一化为 Core 合法值（0=全帧，或 64~3840）。
+
+    非数字 / None ⇒ 0（全帧 = 不裁剪）。**绝不产生 1~63**：那是合法域之外的"夹出来"的假值，
+    正是它把整份配置送进 Core 的校验拒绝分支。
+    """
+    try:
+        v = int(round(float(value)))
+    except (TypeError, ValueError):
+        return CROP_SIZE_FULL_FRAME
+    if v <= CROP_SIZE_FULL_FRAME:
+        return CROP_SIZE_FULL_FRAME
+    if v < CROP_SIZE_MIN_VALID:
+        return CROP_SIZE_MIN_VALID
+    if v > CROP_SIZE_MAX_VALID:
+        return CROP_SIZE_MAX_VALID
+    return v
+
+
+def normalize_profile_capture_size(prof: dict) -> dict:
+    """归一化 profile.capture.width/height（就地把非法值拉回 Core 合法域）。
+
+    为什么在**合并之后**再归一一次：profile 可能来自三条路——面板全量提交、预设文件（可能是
+    旧版 RuntimeProfile 结构）、Core 当前运行配置。任何一条路上残留 1~63 的值都会让整份
+    SET_CONFIG 被 Core 拒收（连带其它本来合法的字段一起丢）。这里做最后一道闸。
+    """
+    if not isinstance(prof, dict):
+        return prof
+    cap = prof.get('capture')
+    if isinstance(cap, dict):
+        for key in ('width', 'height'):
+            if key in cap or (key == 'width' and cap.get('width') is None):
+                cap[key] = normalize_capture_crop_size(cap.get(key))
+    return prof
+
+
 def web_body_to_profile(body: dict) -> dict:
     """Web 前端保存的配置格式（collectConfig 扁平结构）→ RuntimeProfile。"""
     ctrl = (body.get('ai') or {}).get('controller') or {}
@@ -946,8 +995,10 @@ def web_body_to_profile(body: dict) -> dict:
     capture: dict = {}
     cap = body.get('capture') or {}
     if cap.get('crop_size') is not None:
-        capture['width'] = cap['crop_size']
-        capture['height'] = cap['crop_size']
+        # ★ 必须归一化：面板下界 1 落在 Core 合法域之外（见 normalize_capture_crop_size 注释）。
+        crop = normalize_capture_crop_size(cap['crop_size'])
+        capture['width'] = crop
+        capture['height'] = crop
     if cap.get('crop_offset_x') is not None:
         capture['offset_x'] = cap['crop_offset_x']
     if cap.get('crop_offset_y') is not None:
@@ -2058,11 +2109,24 @@ def update_config():
         translated.pop('model_id', None)
     base = prof
     merged = _deep_merge_profile(base, translated)
+    merged = normalize_profile_capture_size(merged)
     r = ipc_request('SET_CONFIG', {'profile': merged})
     if r.get('status') != 0:
-        # Core 不可达：**不落盘**（web 非配置写入者，C-CFG-3），如实报错（fail-loud）。
-        return jsonify({'ok': False,
-                        'error': 'Core 未运行，配置未保存（请先启动 ttbox-core）'}), 503
+        # 不落盘（web 非配置写入者，C-CFG-3），按要求如实报错（fail-loud）。
+        # ★ 必须把 Core 的原话带出来：status != 0 有两个完全不同的原因，靠状态码区分
+        #   （core/src/ipc/IpcServer.hpp 的 IpcError：1=参数错 2=未找到 3=内部 4=不支持；
+        #     lib/ipc.py 的传输失败也统一归 3）：
+        #     ① status==3 ⇒ Core 不在 / 传输异常；
+        #     ② status∈{1,2,4} ⇒ Core 在，但拒收这份配置（带具体原因，如 "capture.width 非法"）。
+        #   以前一律写成"Core 未运行"，把 ② 的真实原因吞掉——板端实测就是这样把
+        #   "面板所有保存都失败"指错了方向（详见 docs/交付前Web实测报告-2026-09-19.md P0-1）。
+        core_error = str(r.get('error') or '').strip()
+        if r.get('status') == 3:
+            detail = f'；{core_error}' if core_error else ''
+            return jsonify({'ok': False, 'core_offline': True,
+                            'error': 'Core 未运行，配置未保存（请先启动 ttbox-core）' + detail}), 503
+        return jsonify({'ok': False, 'core_error': core_error or '未知原因',
+                        'error': f'配置被 Core 拒绝：{core_error or "未知原因"}'}), 400
     rr = _get_runtime_profile()
     return jsonify({'ok': True, 'data': profile_to_web(rr)})
 
@@ -2871,11 +2935,18 @@ def load_preset():
     else:
         translated = web_body_to_profile(config)
     prof = _deep_merge_profile(_get_runtime_profile(), translated)
+    prof = normalize_profile_capture_size(prof)
     r = ipc_request('SET_CONFIG', {'profile': prof})
     if r.get('status') != 0:
-        # Core 不可达：不落盘（web 非配置写入者），如实报错（fail-loud）。
-        return jsonify({'ok': False,
-                        'error': 'Core 未运行，配置未应用（请先启动 ttbox-core）'}), 503
+        # 不落盘（web 非配置写入者），如实报错（fail-loud）。
+        # 状态码语义与 /api/config 一致：3=Core 不在/传输异常，1/2/4=Core 拒收（带真实原因）。
+        core_error = str(r.get('error') or '').strip()
+        if r.get('status') == 3:
+            detail = f'；{core_error}' if core_error else ''
+            return jsonify({'ok': False, 'core_offline': True,
+                            'error': 'Core 未运行，配置未应用（请先启动 ttbox-core）' + detail}), 503
+        return jsonify({'ok': False, 'core_error': core_error or '未知原因',
+                        'error': f'预设被 Core 拒绝：{core_error or "未知原因"}'}), 400
     return jsonify({'ok': True, 'data': {'message': '已加载'}})
 
 
