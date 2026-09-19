@@ -48,6 +48,19 @@ if ! getent passwd ttbox >/dev/null; then
 else
     echo "  [=] 用户 ttbox 已存在"
 fi
+# V-EDID-1（板端实测 2026-09-19）：web（User=ttbox）在「显示器与鼠标」页读 EDID 现状
+# 走 hdmirx_edid.py --status → v4l2-ctl --get-edid；/dev/video0 是 root:video 0660，
+# ttbox 不在 video 组 ⇒ open Permission denied ⇒ 面板显示「EDID 状态读取失败」。
+# 幂等：已在组内则跳过。注意：组变更只影响**新进程**——存量设备跑完本脚本后需
+# restart ttbox-web（fhs_init 开机自举时天然满足：web 尚未启动）。
+if id -nG ttbox 2>/dev/null | tr ' ' '\n' | grep -qx video; then
+    echo "  [=] 用户 ttbox 已在 video 组"
+elif getent group video >/dev/null; then
+    usermod -aG video ttbox
+    echo "  [+] 用户 ttbox 加入 video 组（/dev/video0 root:video 0660 可读写）"
+else
+    echo "  [=] 系统无 video 组（无 V4L2 视频设备机型），跳过"
+fi
 
 # ---- 2. /etc/ttbox：配置（升级保留）----
 # F9：/etc/ttbox 本体必须 root:ttbox 0775（组可写）——web（User=ttbox）的
@@ -159,6 +172,27 @@ else
     chmod 0664 "${TTBOX_PREFIX}/config/hardware_display.json"
     echo "  [=] hardware_display.json 已存在，内容保留；属组/权限收敛为 root:ttbox 0664（幂等补刀）"
 fi
+
+# V-EDID-2（板端实测 2026-09-19）：web「保存并应用」以 ttbox 身份直跑 edid_apply.sh——
+# 应用后的 HPD rehandshake 要**写** /sys/class/hdmirx/hdmirx/status，builtin 组切换要
+# **写**同目录 edid 节点；两节点内核默认 root:root 0644 ⇒ ttbox 写不进 ⇒ EDID 应用失败
+# ⇒ 上位机源端永不重新枚举（用户实测「保存后没有重新枚举」）。sysfs 节点每次开机由
+# 内核重建（权限归零），故 fhs_init 每次开机幂等收敛为 root:ttbox 0660。
+# debugfs 的 /sys/kernel/debug/hdmirx/status 仅是显示增强（Actual RX），读不到已有
+# 容错降级，**不放开**（debugfs 放权面太大）。
+for _hx in /sys/class/hdmirx/hdmirx \
+           /sys/devices/platform/fdee0000.hdmirx-controller/hdmirx/hdmirx; do
+    if [ -e "$_hx/status" ] || [ -e "$_hx/edid" ]; then
+        for _n in status edid; do
+            if [ -e "$_hx/$_n" ]; then
+                chown root:ttbox "$_hx/$_n" 2>/dev/null || true
+                chmod 0660 "$_hx/$_n" 2>/dev/null || true
+            fi
+        done
+        echo "  [+] $_hx/{status,edid} 收敛为 root:ttbox 0660（EDID 应用与 HPD 重握手）"
+        break
+    fi
+done
 
 # ---- 7. sync_tree：把运行树装进 releases/<ver>/ 并激活（DEP-03 / T1.02）----
 # 精确定位交叉编译产物目录（显式指定优先，否则自动探测）。

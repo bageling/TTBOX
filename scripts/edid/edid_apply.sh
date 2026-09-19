@@ -40,6 +40,34 @@ fi
 
 mkdir -p "$EDID_DIR" || { echo '{"ok": false, "error": "无法创建 EDID 输出目录: '"$EDID_DIR"'"}'; exit 1; }
 
+# V-EDID-3（板端实测 2026-09-19）：web「保存并应用」以 ttbox 身份跑本脚本，需要：
+#   a) 写 $EDID_DIR/current.bin —— 开机 ttbox-edid.service 以 root 重写后属主归
+#      root:root，ttbox 写不进（PermissionError 实录）；
+#   b) 写 HPD 节点触发重协商 —— sysfs 节点内核默认 root:root 0644。
+# 本脚本开机以 root 跑，正好在此时收敛：目录 root:ttbox 0775、current.bin
+# root:ttbox 0664、HPD/status 与 edid 节点 root:ttbox 0660（全部幂等）。
+# 非 root（ttbox 的 web 路径）跳过 —— 那时只依赖开机时 root 已收敛好的权限。
+if [ "$(id -u)" = "0" ]; then
+  chgrp ttbox "$EDID_DIR" 2>/dev/null || true
+  chmod 0775 "$EDID_DIR" 2>/dev/null || true
+  if [ -f "$EDID_OUTPUT" ]; then
+    chgrp ttbox "$EDID_OUTPUT" 2>/dev/null || true
+    chmod 0664 "$EDID_OUTPUT" 2>/dev/null || true
+  fi
+  for _hx in /sys/class/hdmirx/hdmirx \
+             /sys/devices/platform/fdee0000.hdmirx-controller/hdmirx/hdmirx; do
+    if [ -e "$_hx/status" ] || [ -e "$_hx/edid" ]; then
+      for _n in status edid; do
+        if [ -e "$_hx/$_n" ]; then
+          chown root:ttbox "$_hx/$_n" 2>/dev/null || true
+          chmod 0660 "$_hx/$_n" 2>/dev/null || true
+        fi
+      done
+      break
+    fi
+  done
+fi
+
 # 1. 生成 + 校验 EDID
 python3 - "$CONFIG" "$EDID_OUTPUT" <<'PYEOF' || exit 1
 import json, os, struct, sys
@@ -130,14 +158,23 @@ wait_for_lock() {
   local status timing
   while [ "$(date +%s)" -lt "$deadline" ]; do
     status="$(cat /sys/kernel/debug/hdmirx/status 2>/dev/null || true)"
-    if printf '%s\n' "$status" | grep -qE 'Clk-Ch:Lock[[:space:]]+Ch0:Lock[[:space:]]+Ch1:Lock[[:space:]]+Ch2:Lock'; then
-      timing="$(mktemp)"
-      if v4l2-ctl -d "$VIDEO_DEV" --query-dv-timing >"$timing" 2>&1 && ! grep -qE 'failed|No locks' "$timing"; then
-        rm -f "$timing"
-        return 0
+    if [ -n "$status" ]; then
+      if ! printf '%s\n' "$status" | grep -qE 'Clk-Ch:Lock[[:space:]]+Ch0:Lock[[:space:]]+Ch1:Lock[[:space:]]+Ch2:Lock'; then
+        # debugfs 可读但未锁：继续等（root 路径，语义不变）
+        sleep 1
+        continue
       fi
-      rm -f "$timing"
     fi
+    # V-EDID-4（板端实测 2026-09-19）：debugfs 仅 root 可读——ttbox（web 路径）读不到
+    # status（空串）时若也走上面的「未锁则等」，锁永远判不上 ⇒ 重试打满 12 轮 ⇒
+    # 必然超 web subprocess 60s ⇒ Flask 500（用户实测「保存后没有重新枚举」）。
+    # 降级：status 读不到时仅用 v4l2 --query-dv-timing 判锁（走 /dev/video0，video 组即可）。
+    timing="$(mktemp)"
+    if v4l2-ctl -d "$VIDEO_DEV" --query-dv-timing >"$timing" 2>&1 && ! grep -qE 'failed|No locks' "$timing"; then
+      rm -f "$timing"
+      return 0
+    fi
+    rm -f "$timing"
     sleep 1
   done
   return 1
@@ -196,10 +233,16 @@ fi
 if [ "$REHANDSHAKE" = "1" ] && [ "$LOCKED" = "1" ]; then
   # 持久化 firmware（TTBOX 独立路径，供下一次启动恢复）
   FIRMWARE_DIR="/lib/firmware/ttbox"
-  mkdir -p "$FIRMWARE_DIR"
-  if ! cp "$EDID_OUTPUT" "$FIRMWARE_DIR/hdmirx_edid.bin" 2>/dev/null || ! chmod 644 "$FIRMWARE_DIR/hdmirx_edid.bin"; then
-    echo '{"ok": false, "error": "EDID 已写入驱动，但固件副本保存失败"}'
-    exit 1
+  mkdir -p "$FIRMWARE_DIR" 2>/dev/null || true
+  if ! cp "$EDID_OUTPUT" "$FIRMWARE_DIR/hdmirx_edid.bin" 2>/dev/null || ! chmod 644 "$FIRMWARE_DIR/hdmirx_edid.bin" 2>/dev/null; then
+    # V-EDID-5（板端实测 2026-09-19）：web（User=ttbox）路径写不了 /lib/firmware ——
+    # 持久化本就是开机 ttbox-edid.service（root）的职责（每次开机重写）。非 root
+    # 时降级为警告，不得把已成功的「注入+HPD 重握手」整体判死（面板保存会永远失败）。
+    if [ "$(id -u)" = "0" ]; then
+      echo '{"ok": false, "error": "EDID 已写入驱动，但固件副本保存失败"}'
+      exit 1
+    fi
+    echo '{"warn": "固件副本保存失败（非 root；开机 edid 服务会代为持久化）"}'
   fi
   echo "Persisted firmware EDID: $FIRMWARE_DIR/hdmirx_edid.bin"
   # T1.04（DEP-02）：此处只是"已成功应用并锁定"之后的诊断性回读计数。
@@ -212,10 +255,14 @@ fi
 
 # 非重协商模式注入成功后同样持久化，保持原有行为。
 FIRMWARE_DIR="/lib/firmware/ttbox"
-mkdir -p "$FIRMWARE_DIR"
-if ! cp "$EDID_OUTPUT" "$FIRMWARE_DIR/hdmirx_edid.bin" 2>/dev/null || ! chmod 644 "$FIRMWARE_DIR/hdmirx_edid.bin"; then
-  echo '{"ok": false, "error": "EDID 已写入驱动，但固件副本保存失败"}'
-  exit 1
+mkdir -p "$FIRMWARE_DIR" 2>/dev/null || true
+if ! cp "$EDID_OUTPUT" "$FIRMWARE_DIR/hdmirx_edid.bin" 2>/dev/null || ! chmod 644 "$FIRMWARE_DIR/hdmirx_edid.bin" 2>/dev/null; then
+  # V-EDID-5 同上：非 root（web 路径）降级为警告，root 保持严格。
+  if [ "$(id -u)" = "0" ]; then
+    echo '{"ok": false, "error": "EDID 已写入驱动，但固件副本保存失败"}'
+    exit 1
+  fi
+  echo '{"warn": "固件副本保存失败（非 root；开机 edid 服务会代为持久化）"}'
 fi
 echo "Persisted firmware EDID: $FIRMWARE_DIR/hdmirx_edid.bin"
 # T1.04（DEP-02）：同上一处——诊断性回读失败不得把已成功的结局误报成致命错误。
