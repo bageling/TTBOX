@@ -390,8 +390,10 @@ reload_and_restart() {
     systemctl daemon-reload
     log "reload_and_restart：daemon-reload OK"
     local u
+    # 2026-09-20 教训：板上 systemctl 不认 --job-timeout 选项 ⇒ 1.5.4~1.5.6 三轮安装
+    # 重启全部静默失败，web 一直是孤儿老进程（cwd 被清理后面板 500）。改用 GNU timeout 包裹。
     for u in $RESTART_UNITS; do
-        if systemctl restart --job-timeout=120 "$u"; then
+        if timeout 90 systemctl restart "$u"; then
             log "restart ${u} OK"
         else
             warn "restart ${u} 失败（继续，交由健康检查判定）"

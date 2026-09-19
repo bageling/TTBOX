@@ -11099,7 +11099,9 @@ async function installUpdatePlan(plan) {
     return await api("/api/update/install", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: packageUrl, key_id: keyId }),
+      // 显式带 version：更新器以此为准浇筑 releases/<ver>，避免 delta 场景
+      // 从旁车签名取到 "x.y.z-delta-from-a.b.c" 污染目录名（2026-09-20 板端教训）
+      body: JSON.stringify({ url: packageUrl, key_id: keyId, version: (plan && plan.latest_version) || "" }),
     });
   } catch (error) {
     stopUpdateStatusPolling();

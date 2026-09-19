@@ -427,6 +427,11 @@ class OtaUpdater:
                 return self._fail(e.state, e.detail)
             # ⑤b 增量包（2026-09-19）：base 必须恰好等于当前版本，合并成完整树再走原流程
             mdoc = self._read_manifest(staging)
+            if mdoc and str(mdoc.get("version") or "").strip():
+                # 包内 manifest 的 version 是安装版本号的唯一真源（2026-09-20 板端教训：
+                # 面板发起的 delta 安装 job 无 version 字段，从旁车签名取到
+                # "1.5.6-delta-from-1.5.5" ⇒ releases 目录名被污染）。
+                ver = str(mdoc["version"]).strip()
             if mdoc and mdoc.get("delta"):
                 base = str(mdoc.get("base_version") or "").strip()
                 cur0 = current_version()
