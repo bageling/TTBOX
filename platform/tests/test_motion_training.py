@@ -35,8 +35,10 @@ def test_validate_motion_sample_accepts_ttbox_sample():
 
 
 def test_validate_motion_sample_rejects_external_schema():
+    # "外部 schema" 指**不是本仓契约值**的 schema。本用例原先把它赋成了本仓合法值
+    # （ttbox.motion-sample.v1）却断言必须被拒 —— 自相矛盾，故永远红。
     payload = sample()
-    payload["schema"] = "ttbox.motion-sample.v1"
+    payload["schema"] = "external.motion-sample.v1"
     with pytest.raises(MotionSampleError, match="schema"):
         validate_motion_sample(payload)
 
@@ -108,7 +110,10 @@ def test_profile_can_be_renamed_and_deleted(tmp_path):
     assert renamed["name"] == "新名称"
     assert (tmp_path / profile["id"] / "profile.json").exists()
     assert store.delete(profile["id"])["deleted"] is True
-    with pytest.raises(MotionTrainingError, match="exist"):
+    # 读不存在档案时的错误文案由 _read() 统一给出："failed to open <path>"
+    # （ttbox_motion/training.py:133 的注释表明这是有意为之，与 Web 侧 /api/presets/load 的
+    #  "failed to open {pf}" 同口径）⇒ 断言对这句，而不是 "exist"。
+    with pytest.raises(MotionTrainingError, match="failed to open"):
         store.list_profile(profile["id"])
 
 
