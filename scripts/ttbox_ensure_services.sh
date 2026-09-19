@@ -176,6 +176,15 @@ fi
 # ---------------------------------------------------------------------------
 if have_systemd; then
     for unit in $installed; do
+        # 2026-09-19 板端死锁实证：OTA 浇筑流程（ttbox-ota.service ExecStart 里）对自己
+        # enable --now ⇒ start 任务排在当前 oneshot 运行之后 ⇒ 互相等待，安装卡死。
+        # 检测到 ttbox-ota.service 的 start 任务正在运行（= 我们就在它里面）时跳过。
+        if [[ "$unit" == "ttbox-ota.service" ]]; then
+            if systemctl list-jobs --no-pager 2>/dev/null | grep -q 'ttbox-ota\.service[[:space:]]*start[[:space:]]*running'; then
+                log "SKIP：enable --now ttbox-ota.service（其 start 任务运行中＝本脚本由它拉起，自启会死锁）"
+                continue
+            fi
+        fi
         if systemctl enable --now "$unit" >/dev/null 2>&1; then
             log "enable --now ${unit} OK"
         else
