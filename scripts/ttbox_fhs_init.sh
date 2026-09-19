@@ -415,60 +415,62 @@ sync_tree() {
         exit 1
     }
 
-    # plugins/：完整 Python 包整树交付。★ 2026-09-17 板端实测订正：web 的 framework_api.py
+    # ---- 白名单单一真源：deploy/pack_manifest.txt（S3 / 2026-09-19 交付方案批 1）----
+    # sync_tree（首次装机）与 scripts/ttbox_pack_ota.sh（OTA 打包）读同一份清单，
+    # 改清单一处、装机树与出货包一起变。此前装机走本函数硬编码清单、而 OTA 包
+    # 是手工整树 tar，两套口径无机制保证一致 ⇒ 1.4.7 出货树 368 文件混入
+    # docs(123)/tools(8)/platform(25)/modules(10)。现收敛为单一真源。
+    # 条目语义见清单头注释：目录=tcopy 整树；文件/glob=install（.sh/.py=0755，余 0644）。
+    # bin/ 与 lib/ 属构建产物，不进清单（上方已按闭集规则安装）。
+    local manifest="${REPO_ROOT}/deploy/pack_manifest.txt"
+    if [ ! -f "$manifest" ]; then
+        echo "  [✗] 缺打包白名单 ${manifest} —— 中止" >&2
+        exit 1
+    fi
+    local entry src rel mode
+    while IFS= read -r entry <&3; do
+        case "$entry" in ''|'#'*) continue ;; esac
+        case "$entry" in
+            *[[:space:]]*)
+                echo "  [✗] 白名单条目含空白：${entry}" >&2; exit 1 ;;
+        esac
+        # ★ $entry 必须裸奔（不加引号）glob 才会展开；REPO_ROOT 引号保留防分词
+        for src in "${REPO_ROOT}"/$entry; do
+            if [ ! -e "$src" ]; then
+                echo "  [✗] 白名单条目不存在（或 glob 展开为空）：${entry}" >&2
+                exit 1
+            fi
+            rel="${src#${REPO_ROOT}/}"   # glob 展开后的真实相对路径，不能拿原串当目标
+            if [ -d "$src" ]; then
+                tcopy "$src" "${payload}/${rel}"
+            else
+                mode=0644
+                case "$src" in *.sh|*.py) mode=0755 ;; esac
+                install -D -m "$mode" "$src" "${payload}/${rel}"
+            fi
+        done
+    done 3< "$manifest"
+
+    # ---- 清单后的定向修剪/修正（只做减法或权限修正，不新增文件）----
+    # plugins/：★ 2026-09-17 板端实测订正：web 的 framework_api.py
     #   `from plugins.system_host import SystemPluginHost`（以及 system_common / fan / wifi 等
     #   顶层模块与子包）——只拷 web/preview 两个子目录会让 release 树里 `plugins` 包残缺，
     #   web 启动即 ModuleNotFoundError。bin/ 闭集（A7）不受影响（那是 bin/ 的白名单）。
-    tcopy "${REPO_ROOT}/plugins" "${payload}/plugins"
-    # S1-2026-09-18（A0-3c/A0-3d/C04）：死路由文件与旧版静态资产移出出货包（仓库内保留）。
-    #   api_v1.py / framework_api.py：死路由，且 ttbox-web.py 已同步摘除注册点；
-    #   static/legacy：旧版面板资产，现役 index.html 自包含零引用（E01 断言已改指 legacy）。
+    #   S1-2026-09-18（A0-3c/A0-3d/C04）：死路由文件与旧版静态资产移出出货包（仓库内保留）。
+    #     api_v1.py / framework_api.py：死路由，且 ttbox-web.py 已同步摘除注册点；
+    #     static/legacy：旧版面板资产，现役 index.html 自包含零引用（E01 断言已改指 legacy）。
     rm -f "${payload}/plugins/web/api_v1.py" \
           "${payload}/plugins/web/framework_api.py"
     rm -rf "${payload}/plugins/web/static/legacy"
 
-    # Web 运行期硬依赖领域包（ttbox-web.py:37 sys.path.append(parents[3])）
-    tcopy "${REPO_ROOT}/framework" "${payload}/framework"
-    tcopy "${REPO_ROOT}/ttbox_motion" "${payload}/ttbox_motion"
-    # S1-2026-09-18（C04/C05）：platform/ 移出出货包（与 stdlib `platform` 同名，
-    # 留在 payload 根 = PYTHONPATH 阴影隐患；现役代码零消费，仓库内保留）。
-
-    # usbproxy/：含 board 脚本 + 预编译二进制（DEP-04④）
-    tcopy "${REPO_ROOT}/usbproxy" "${payload}/usbproxy"
+    # usbproxy/：预编译 ELF（DEP-04④）
     # ★ 2026-09-17 板端实测订正：预编译 ELF `usb-proxy` 无 shebang ⇒ MSYS/Git-Bash 判定其
     #   非可执行（源侧 0644）⇒ tar 原样把 0644 带进 payload ⇒ release 树里 usb-proxy 不可执行
     #   ⇒ run-ttbox-usb-proxy.sh 预检直接 exit 1（ttbox-usbproxy.service 反复重启后 failed）。
     #   为何能穿过发布门禁：step5b 的 unit 断言只查 ExecStart 首 token
     #   （= usbproxy/board/run-ttbox-usb-proxy.sh，has shebang ⇒ 0755），**不查**它内部
     #   `exec "$PROJECT_DIR/usb-proxy"` 的那个二进制 ⇒ 该缺陷在门禁下静默通过。
-    #   （对照：同批 tcopy 的 plugins/*/bin/* 与 scripts/*.sh 都有 shebang，故未被波及。）
     chmod 0755 -- "${payload}/usbproxy/usb-proxy"
-
-    # scripts/：edid 工具链 + ensure 脚本（Web/EDID 硬依赖）
-    # S1-2026-09-18（A903/C 组）：wifi_manager.py 随无线功能整体移出出货包（仓库内保留）。
-    # 2026-09-18 更新功能定案（A-1/O13/O14）：OTA 更新器 + 运维六件 + 恢复凭据脚本进 payload。
-    tcopy "${REPO_ROOT}/scripts/edid" "${payload}/scripts/edid"
-    install -m 0755 "${ENSURE_SCRIPT}" "${payload}/scripts/ttbox_ensure_services.sh"
-    install -m 0755 "${REPO_ROOT}/scripts/ttbox_ota_updater.py" \
-                    "${payload}/scripts/ttbox_ota_updater.py"
-    install -m 0755 "${REPO_ROOT}/scripts/ttbox-web-reset-credentials.sh" \
-                    "${payload}/scripts/ttbox-web-reset-credentials.sh"
-    for op in ttbox.sh ttbox_backup.sh ttbox_restore.sh ttbox_uninstall.sh ttbox_doctor.sh; do
-        install -m 0755 "${REPO_ROOT}/scripts/${op}" "${payload}/scripts/${op}"
-    done
-
-    # deploy/keys/：OTA 验签公钥随包（定案 A-2；私钥永不入包）
-    mkdir -p -- "${payload}/deploy/keys"
-    install -m 0644 "${REPO_ROOT}"/deploy/keys/*.pub "${payload}/deploy/keys/"
-
-    # deploy/systemd/：unit 随版本走（DEP-07 前置）；.path（OTA 特权通道）一并交付
-    install -m 0644 "${REPO_ROOT}"/deploy/systemd/*.service "${payload}/deploy/systemd/"
-    install -m 0644 "${REPO_ROOT}"/deploy/systemd/*.timer "${payload}/deploy/systemd/"
-    install -m 0644 "${REPO_ROOT}"/deploy/systemd/*.path "${payload}/deploy/systemd/"
-
-    # deploy/config/：出厂基线（10-device.json 属设备层，绝不拷）
-    install -m 0644 "${REPO_ROOT}/deploy/config/00-factory.json" "${payload}/deploy/config/00-factory.json"
-    install -m 0644 "${REPO_ROOT}/deploy/config/hardware_display.json" "${payload}/deploy/config/hardware_display.json"
 
     gen_manifest "$payload" "$ver"
 

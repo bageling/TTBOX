@@ -2,8 +2,10 @@
 # ttbox_uninstall.sh — TTBOX 卸载（D08，2026-09-18 定案 O14/I-28）
 #
 # 清单（逐项核对，缺什么跳什么）：
-#   7 个 unit（含 ttbox-ensure.timer 与 ttbox-ota.path/service）+ unit 文件
+#   9 个 unit（含 ttbox-ensure.timer 与 ttbox-ota.path/service）+ unit 文件
 #   /opt/ttbox  /etc/ttbox  /var/lib/ttbox  /var/log/ttbox  /run/ttbox
+#   /run/ttbox-mouse-passthrough（usbproxy cmd.sock/event.sock 的 RuntimeDirectory）
+#   /lib/firmware/ttbox（hdmirx_edid.bin，edid 服务装载）
 #   ttbox 用户与组
 #
 # ⚠ 本脚本不可逆：授权（/var/lib/ttbox/license）、模型、配置全删。
@@ -24,7 +26,7 @@ DIRS=(/opt/ttbox /etc/ttbox /var/lib/ttbox /var/log/ttbox /run/ttbox)
 plan() {
     echo "== 将执行 =="
     for u in "${UNITS[@]}"; do echo "  disable --now  $u"; done
-    echo "  rm -f          /etc/systemd/system/{${UNITS[*]}}"
+    for u in "${UNITS[@]}"; do echo "  rm -f          /etc/systemd/system/$u"; done
     for d in "${DIRS[@]}"; do echo "  rm -rf --one-file-system  $d"; done
     echo "  userdel/groupdel ttbox"
 }
@@ -56,4 +58,4 @@ done
 userdel ttbox 2>/dev/null && log "已删除用户 ttbox" || log "用户 ttbox 不存在，跳过"
 groupdel ttbox 2>/dev/null && log "已删除组 ttbox" || log "组 ttbox 不存在，跳过"
 
-log "卸载完成。核对残留: ls /opt/ttbox /etc/ttbox /var/lib/ttbox /var/log/ttbox 2>&1; systemctl list-units 'ttbox-*'"
+log "卸载完成。核对残留: ls /opt/ttbox /etc/ttbox /var/lib/ttbox /var/log/ttbox /run/ttbox-mouse-passthrough /lib/firmware/ttbox 2>&1; systemctl list-units 'ttbox-*'; ls /etc/systemd/system/ttbox-* 2>&1"
