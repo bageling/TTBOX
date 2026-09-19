@@ -6543,6 +6543,7 @@ const state = {
   updateStatus: null,
   updateStatusTimer: null,
   updateStatusInFlight: false,
+  updateCompletionTimer: null,
   updateRefreshScheduled: false,
   licenseRecoveryInProgress: false,
   lastLicenseRecoveryMessage: "",
@@ -10989,6 +10990,44 @@ function scheduleUpdatePageRefresh(delayMs = 2600) {
   }, delayMs);
 }
 
+// 2026-09-20：OTA 完成监视器。原「成功→自动刷新」只挂在「本页发起安装」的轮询上；
+// 更新在页面外完成（业主自装/另一端发起）或轮询因服务重启中断后，开着的面板
+// 永远不会主动发现状态变化。此监视器每 5s 静默读一次状态：发现未确认的 SUCCESS
+// 就提示并自动刷新（sessionStorage 按版本去重，防止刷新循环）。
+function startUpdateCompletionWatcher() {
+  if (state.updateCompletionTimer) {
+    return;
+  }
+  state.updateCompletionTimer = window.setInterval(async () => {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+    if (state.updateStatus && state.updateStatus.status === "running") {
+      return; // 安装进行中，交给既有轮询（1s）处理
+    }
+    if (state.updateRefreshScheduled) {
+      return;
+    }
+    try {
+      const status = await fetchUpdateStatus({ silent: true });
+      if (!status || status.status !== "success" || !status.version) {
+        return;
+      }
+      const key = "ota_success_seen_" + status.version;
+      if (window.sessionStorage.getItem(key)) {
+        return; // 本标签页已确认过该版本，刷新后不再弹
+      }
+      window.sessionStorage.setItem(key, "1");
+      stopUpdateStatusPolling();
+      renderUpdateStatus(status);
+      showToast("检测到更新已完成（" + status.version + "），页面即将刷新");
+      scheduleUpdatePageRefresh();
+    } catch (error) {
+      /* 静默：网络抖动/服务重启期间读不到就等下一轮 */
+    }
+  }, 5000);
+}
+
 function startUpdateStatusPolling() {
   if (state.updateStatusTimer) {
     return;
@@ -13814,6 +13853,7 @@ async function main() {
 
   maybeShowDisclaimer();
   refreshInitialUpdateStatus().catch(() => {});
+  startUpdateCompletionWatcher();
   initLiveStatePolling();
 }
 
