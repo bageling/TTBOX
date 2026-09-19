@@ -1,120 +1,84 @@
 # TTBOX 文档中心
 
-这里是 TTBOX 模块版的全部中文说明。**文档分类规则与命名约定见 [`CONVENTIONS.md`](CONVENTIONS.md)。**
+这里是 TTBOX 模块版**现存**的中文文档。分类规则与命名约定见 [`CONVENTIONS.md`](CONVENTIONS.md)。
 
-```text
-本文 → 小白教程(guide/) → 架构(architecture/) → 完整链路 → 测试 → 问题排查
-```
-
-> **2026-09-17 代码梳理批次 0**：`docs/` 已按「消费方 + 生命周期」重新分类（架构真源 / 协议 / 运维 / 教程 / 分域）。
-> **2026-09-18 文档清理**：被新版取代的旧文档（根目录 `架构总览.md` / `模块说明.md` / `完整数据链路.md`）、四个旧路径
-> 指针目录（`架构/` / `开发/` / `规划/` / `验证/`）与历史归档 `archive/`（41 个文件）已删除，仅保留活真源。
-> 旧目录 `docs/架构/` 已改名 `docs/architecture/`；历史交接见下方「五、历史交接」。
+> **2026-09-19 清理**：按业主指示（"不能影响程序源码运行，清理没用的，README.md 要重新写"），
+> 移除与代码无关的过程报告、历史交接与介绍类文档共 **100 份 / 763 KB**，只保留
+> **被源码/脚本/测试/部署描述引用**的文件，以及必要的规约、协议与索引。
+> 处置清单见 `.workbuddy/artifacts/待清理文档清单-2026-09-19.md`。
+> 被移除的文件仍在 git 历史里，`git restore --source=HEAD -- <路径>` 即可取回（本次未提交）。
 
 ---
 
 ## 一、唯一真源表（★ 只信这一张表）
 
-> 口径：**同一主题只允许一个"活真源"**；其余同主题文档一律为历史归档（只读）。若两张表冲突，**以本表为准**。
-
 | 主题 | 唯一真源 | 说明 |
 |---|---|---|
-| 项目总入口 | [`../README.md`](../README.md) | 目录结构、链路、构建、部署 |
-| 文档入口 / 分类规则 | 本文件 + [`CONVENTIONS.md`](CONVENTIONS.md) | 放哪判定树 + 命名约定 |
-| 系统架构 | [`architecture/系统总览.md`](architecture/系统总览.md) | 分层全景 |
-| 完整链路 | [`architecture/完整链路.md`](architecture/完整链路.md) | 画面→鼠标全链路 |
-| 核心模块 | [`architecture/核心模块.md`](architecture/核心模块.md) | 每模块详解 |
-| 数据流 | [`architecture/数据流.md`](architecture/数据流.md) | 每环节数据形态 |
-| 插件系统 | [`architecture/插件系统.md`](architecture/插件系统.md) | 插件机制 |
-| 目录结构 | [`architecture/目录结构.md`](architecture/目录结构.md) | 顶层树 + 是否进 payload |
-| IPC 协议 | [`protocols/ipc-protocol.md`](protocols/ipc-protocol.md) | 网页↔核心通信（真值以源码为准） |
+| 项目总入口 | [`../README.md`](../README.md) | 接线、服务、目录结构、链路、构建、测试 |
+| 文档分类规则 | 本文件 + [`CONVENTIONS.md`](CONVENTIONS.md) | 放哪判定树 + 命名约定 |
+| IPC 协议 | [`protocols/ipc-protocol.md`](protocols/ipc-protocol.md) | 网页 ↔ 核心通信（真值以源码为准） |
+| 旧路径指针桩 | [`ipc-protocol.md`](ipc-protocol.md) | `core/src/ipc/IpcServer.hpp` 按旧路径引用，故保留 |
 | 母版规格 | [`protocols/image-spec.md`](protocols/image-spec.md) | Ubuntu RK3588 母版规格 |
-| **口径登记表** | [`protocols/config-path-env-registry.md`](protocols/config-path-env-registry.md) | 配置·常量·路径唯一真源：RUNTIME env allowlist + 跨语言同值常量（门禁 `scripts/ttbox_conventions_gate.sh` 断言） |
-| RK3588 开发流程（强制） | [`ops/RK3588开发流程.md`](ops/RK3588开发流程.md) | 本机→交叉→上板强制流程 |
-| 测试说明 | [`ops/测试说明.md`](ops/测试说明.md) | 怎么编译、怎么测试 |
-| 修改指南 | [`ops/修改指南.md`](ops/修改指南.md) | 改代码前必读（"我要改 X 看哪里"） |
-| 问题排查 | [`ops/问题排查.md`](ops/问题排查.md) | 常见问题与排查 |
-| 出货硬约束护栏 | [`ops/release-constraints.md`](ops/release-constraints.md) | 「动哪条会炸什么」 |
-| 构建目录规约 | [`ops/build-dirs.md`](ops/build-dirs.md) | detect_build_dir 判据与命名 |
-| 构建可复现 | [`build/build-reproducibility.md`](build/build-reproducibility.md) | 可复现锚 |
-| 真实 HDMI 闭环验证 | [`verification/真实HDMI闭环验证.md`](verification/真实HDMI闭环验证.md) | 性能基线数据出处（141FPS 等） |
-| 死代码唯一判据 | [`废弃代码清单.md`](废弃代码清单.md) | ★ 唯一"死代码"判据表（吸收 stage1 清单结论） |
+| **口径登记表** | [`protocols/config-path-env-registry.md`](protocols/config-path-env-registry.md) | 配置·常量·路径唯一真源：RUNTIME env allowlist + 跨语言同值常量 |
+| OTA 服务端契约 | [`protocols/ota-server-contract.md`](protocols/ota-server-contract.md) | 分发服务器查询契约 |
+| 输出后端设计 | [`research/OUTPUT_BACKEND_DESIGN.md`](research/OUTPUT_BACKEND_DESIGN.md) | `core/src/output/OutputBackend.hpp` 的设计依据 |
+| 构建可复现 | [`build/build-reproducibility.md`](build/build-reproducibility.md) | 可复现锚（CMake / 发布脚本按 §N 引用） |
 | 板端依赖 | [`../deploy/DEPENDENCIES.md`](../deploy/DEPENDENCIES.md) | 板端依赖清单 |
-| 库作用域裁决 | [`../lib/README.md`](../lib/README.md) | 库作用域不变量锚 |
-| AI 交接 | [`AI_HANDOFF.md`](AI_HANDOFF.md) | 接手阅读顺序 |
-| 用户教程 | [`guide/小白教程/`](guide/小白教程/) + [`guide/小白使用说明.md`](guide/小白使用说明.md) | 面向使用者，活文档 |
-| Web / 产品 / 研究 | [`web/`](web/)、[`product/`](product/)、[`research/`](research/) | 分域文档 |
-| 历史交接（只读） | [`handover/`](handover/) | ★ 只能追加/归档，禁改写 |
+| 服务用户/组约定 | [`../platform/supervisor/README.md`](../platform/supervisor/README.md) | `scripts/ttbox_fhs_init.sh` 按此约定建号 |
+
+### 交付前过程报告（被源码或测试引用，故保留）
+
+| 文档 | 内容 |
+|---|---|
+| [`交付前更新功能定案-2026-09-18.md`](交付前更新功能定案-2026-09-18.md) | OTA 线 35 条实施清单与定案 |
+| [`交付前Web实测报告-2026-09-19.md`](交付前Web实测报告-2026-09-19.md) | 面板真机实测结论与复现要点 |
+| [`交付前Web按钮落实审计-2026-09-19.md`](交付前Web按钮落实审计-2026-09-19.md) | 95 控件端到端追线，A/B/C/D 四档 |
+| [`面板功能补齐实施计划-2026-09-19.md`](面板功能补齐实施计划-2026-09-19.md) | T2 系列功能补齐计划与状态 |
+
+### 历史交接（只读，禁改写）
+
+| 文档 | 内容 |
+|---|---|
+| [`handover/2026-09-17/RELEASE.md`](handover/2026-09-17/RELEASE.md) | 发布记录 |
+| [`handover/2026-09-17/控制台布局冻结基线-2026-09-18.md`](handover/2026-09-17/控制台布局冻结基线-2026-09-18.md) | 控制台布局冻结基线 |
+| [`handover/2026-09-17/控制台1比1采用-架构设计-2026-09-18.md`](handover/2026-09-17/控制台1比1采用-架构设计-2026-09-18.md) | 控制台 1:1 采用架构设计 |
+| [`handover/2026-09-17/配置常量路径口径-基线与整改方案-2026-09-17.md`](handover/2026-09-17/配置常量路径口径-基线与整改方案-2026-09-17.md) | 口径门禁的判定依据 |
 
 ---
 
-## 二、你应该从哪条路开始
+## 二、这些文档谁在引用（改名或删除前先看这张表）
 
-| 你是谁 | 推荐路线 |
+`docs/check_links.py` 只查文档之间的相对链接，**查不到代码里的引用**。下表是代码侧的引用关系，
+从全仓逐个字面量扫出来后核对过；动这些文件前请先确认引用方。
+
+| 文档 | 引用方 |
 |---|---|
-| 完全不懂代码 | [guide/小白教程/01-TTBOX是什么.md](guide/小白教程/01-TTBOX是什么.md) 开始，一路看到 10 |
-| 要操作板子 | [guide/小白使用说明.md](guide/小白使用说明.md) + [ops/问题排查.md](ops/问题排查.md) |
-| 要改 C++ 核心 | [architecture/核心模块.md](architecture/核心模块.md) + [ops/修改指南.md](ops/修改指南.md) |
-| RK3588 开发流程（强制） | [ops/RK3588开发流程.md](ops/RK3588开发流程.md) |
-| 要接网页/API | [web/architecture/INDEX.md](web/architecture/INDEX.md) + [protocols/ipc-protocol.md](protocols/ipc-protocol.md) |
-| 要部署新板 | [../deploy/DEPENDENCIES.md](../deploy/DEPENDENCIES.md) + [../README.md](../README.md) |
-| 要清理旧代码 | [废弃代码清单.md](废弃代码清单.md) |
+| `CONVENTIONS.md` | `scripts/ttbox_m207_accept.py:991` |
+| `ipc-protocol.md` | `core/src/ipc/IpcServer.hpp:3,24`、`plugins/web/api_v1.py` |
+| `protocols/config-path-env-registry.md` | `core/src/common/Paths.hpp:7`、`plugins/web/bin/ttbox-web.py`、`plugins/web/lib/paths.py`、`scripts/edid/edid_apply.sh:14`、`scripts/ttbox_conventions_gate.sh:11,291` |
+| `protocols/ota-server-contract.md` | `plugins/web/bin/ttbox-web.py`、`tools/ota/fake_ota_server.py` |
+| `交付前更新功能定案-2026-09-18.md` | `deploy/systemd/ttbox-ota.path` |
+| `交付前Web实测报告-2026-09-19.md` | `plugins/web/bin/ttbox-web.py`、`plugins/web/tests/test_web_config_crop_normalize.py`、`test_web_storage_expand_poll.py` |
+| `交付前Web按钮落实审计-2026-09-19.md` | `plugins/web/tests/` 下 4 个测试文件 |
+| `面板功能补齐实施计划-2026-09-19.md` | `plugins/web/tests/test_web_hotkey_guard.py`、`test_web_presets_roundtrip.py` |
+| `build/build-reproducibility.md` | `core/CMakeLists.txt`（2 处）、`scripts/ttbox_build_release.sh`（7 处） |
+| `research/OUTPUT_BACKEND_DESIGN.md` | `core/src/output/OutputBackend.hpp:6` |
+| `handover/2026-09-17/RELEASE.md` | `scripts/ttbox_m207_accept.py:498` |
+| `handover/2026-09-17/配置常量路径口径-基线与整改方案-2026-09-17.md` | `scripts/ttbox_conventions_gate.sh:4` |
+| `handover/2026-09-17/控制台布局冻结基线-2026-09-18.md` | `plugins/web/tests/test_web_console_parity.py` |
+| `handover/2026-09-17/控制台1比1采用-架构设计-2026-09-18.md` | `scripts/ttbox_m2xx_console_accept.py:5` |
+| `../deploy/DEPENDENCIES.md` | `deploy/systemd/ttbox-edid.service` |
+| `../platform/supervisor/README.md` | `scripts/ttbox_fhs_init.sh:38` |
 
-## 三、小白路线（必须按顺序）
-
-| 顺序 | 文档 | 讲什么 |
-|---|---|---|
-| 1 | [guide/小白教程/01-TTBOX是什么.md](guide/小白教程/01-TTBOX是什么.md) | TTBOX 是什么 |
-| 2 | [guide/小白教程/02-TTBOX怎么工作.md](guide/小白教程/02-TTBOX怎么工作.md) | 整体怎么工作 |
-| 3 | [guide/小白教程/03-电脑画面怎么进入盒子.md](guide/小白教程/03-电脑画面怎么进入盒子.md) | HDMI 画面 |
-| 4 | [guide/小白教程/04-AI是怎么识别目标的.md](guide/小白教程/04-AI是怎么识别目标的.md) | AI 识别 |
-| 5 | [guide/小白教程/05-模型是什么.md](guide/小白教程/05-模型是什么.md) | 模型概念 |
-| 6 | [guide/小白教程/06-检测框是什么.md](guide/小白教程/06-检测框是什么.md) | 检测框 |
-| 7 | [guide/小白教程/07-坐标是怎么计算的.md](guide/小白教程/07-坐标是怎么计算的.md) | 坐标计算 |
-| 8 | [guide/小白教程/08-插件是什么.md](guide/小白教程/08-插件是什么.md) | 插件 |
-| 9 | [guide/小白教程/09-如何添加模型.md](guide/小白教程/09-如何添加模型.md) | 加模型 |
-| 10 | [guide/小白教程/10-如何排查问题.md](guide/小白教程/10-如何排查问题.md) | 排查问题 |
-
-## 四、开发 / 运维 / 分域
-
-### 开发路线
-
-| 文档 | 讲什么 |
-|---|---|
-| [architecture/系统总览.md](architecture/系统总览.md) | 系统分层全景 |
-| [architecture/完整链路.md](architecture/完整链路.md) | 从画面到鼠标的完整链路 |
-| [architecture/核心模块.md](architecture/核心模块.md) | 每个核心模块详解 |
-| [architecture/数据流.md](architecture/数据流.md) | 数据在每个环节长什么样 |
-| [architecture/插件系统.md](architecture/插件系统.md) | 插件怎么工作 |
-| [ops/修改指南.md](ops/修改指南.md) | 改代码前必读 |
-| [ops/测试说明.md](ops/测试说明.md) | 怎么编译、怎么测试 |
-| [ops/RK3588开发流程.md](ops/RK3588开发流程.md) | RK3588 强制开发流程 |
-| [protocols/ipc-protocol.md](protocols/ipc-protocol.md) | 网页与核心的通信协议 |
-| [../modules/README.md](../modules/README.md) | 模块化语义视图（旧层，待出清） |
-
-### 运维路线
-
-| 文档 | 讲什么 |
-|---|---|
-| [ops/问题排查.md](ops/问题排查.md) | 常见问题与排查步骤 |
-| [ops/release-constraints.md](ops/release-constraints.md) | 出货硬约束护栏 |
-| [ops/build-dirs.md](ops/build-dirs.md) | 构建目录命名规约 |
-| [../deploy/DEPENDENCIES.md](../deploy/DEPENDENCIES.md) | 板端依赖清单 |
-| [../deploy/systemd/](../deploy/systemd/) | systemd 服务文件 |
-
-### 模型 / 性能 / 平台
-
-- [AI/模型系统.md](AI/模型系统.md)、[AI/模型输入格式.md](AI/模型输入格式.md)、[web/model/INDEX.md](web/model/INDEX.md)
-- [build/build-reproducibility.md](build/build-reproducibility.md)
-- [web/e2e/INDEX.md](web/e2e/INDEX.md)、[verification/真实HDMI闭环验证.md](verification/真实HDMI闭环验证.md)
-
-## 五、历史交接（只读，不再更新）
-
-- [`handover/`](handover/) —— ★ 历史交接记录（**只能追加/归档，禁改写**）
-
-> **2026-09-18 清理**：原 `docs/archive/`（整理前快照 / 旧性能报告 / 阶段报告，共 41 个文件）已删除；
-> 重叠结论已归并到上表「唯一真源」。如需追溯，可从 git 历史（提交 `45321eb` 及更早）检出。
+> 注：`core/src/output/OutputBackend.hpp:6` 与 `scripts/ttbox_m2xx_console_accept.py:5` 里写的文件名
+> 与磁盘上的实际名有出入（`OUTPUT_BACKEND_RESEARCH.md` / `控制台1:1采用`），按精确路径匹配抓不到，
+> 是靠人工核对补上的。**修注释比删文档更合适**，但那属于改源码，本次未动。
 
 ---
 
-如果你只想看懂一件事，先读 [guide/小白教程/01-TTBOX是什么.md](guide/小白教程/01-TTBOX是什么.md)。
+## 三、链接自检（改完文档后必跑）
+
+```bash
+python docs/check_links.py
+# 递归覆盖 docs/** + modules/** + 根 README.md；期望 broken_count=0
+```

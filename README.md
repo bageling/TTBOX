@@ -2,8 +2,6 @@
 
 一台用 **AI 看画面、自动动鼠标** 的边缘计算盒子。
 
-它的完整能力是：
-
 ```text
 电脑画面 ──HDMI 线──▶ TTBOX 盒子（RK3588）
                           │
@@ -22,11 +20,11 @@
 
 ## 一、新人三步看懂这个仓库
 
-1. **先看目录**：`core/` 是真正跑 AI 的 C++ 程序，`usbproxy/` 是鼠标注入代理，`plugins/` 是网页控制台，`docs/` 是所有中文说明。
+1. **先看目录**：`core/` 是真正跑 AI 的 C++ 程序，`usbproxy/` 是鼠标注入代理，`plugins/` 是网页控制台。
 2. **再看链路**：画面采集 → 图像缩放 → AI 推理 → 目标选择 → 位移计算 → 鼠标注入。
-3. **最后动手**：按本文"快速上手"把盒子接好，打开网页控制台就能看状态。
+3. **最后动手**：按下面"快速上手"把盒子接好，打开网页控制台就能看状态。
 
-看完本文还不会？直接看 [docs/README.md](docs/README.md) 的"小白路线"，全部是中文。
+接口协议、口径登记表、构建可复现等约束类文档见 [`docs/README.md`](docs/README.md)。
 
 ---
 
@@ -38,8 +36,6 @@
 电脑 HDMI 输出  ──▶  盒子 HDMI 输入口
 盒子 USB 输出口 ──▶  电脑 USB 口
 ```
-
-两条线各干各的：
 
 | 线 | 方向 | 作用 |
 |---|---|---|
@@ -103,8 +99,6 @@ http://<盒子IP>:8000
 | `ttbox-usbproxy` | 鼠标注入代理 |
 | `ttbox-edid` | HDMI 身份注入（默认关闭，需要时才开） |
 
-查看服务状态：
-
 ```bash
 systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 ```
@@ -121,14 +115,14 @@ systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 └── src/core/                   源码和构建目录
 ```
 
-> 板端只运行 TTBOX 自己的服务和 `/opt/ttbox` 目录，所有操作都以 TTBOX 为准。
+系统用户与用户组的约定见 [`platform/supervisor/README.md`](platform/supervisor/README.md)；
+板端依赖清单见 [`deploy/DEPENDENCIES.md`](deploy/DEPENDENCIES.md)。
 
 ---
 
 ## 四、仓库目录结构
 
 ```text
-TTBOX-Module-Edition/
 ├── core/               AI 核心 C++ 源码 + 单元测试
 │   ├── src/            生产源码（采集/推理/瞄准/输出）
 │   ├── tests/          C++ 测试 + 真机调试脚本
@@ -140,8 +134,7 @@ TTBOX-Module-Edition/
 ├── framework/          Python 框架（插件管理）
 ├── config/             配置模板
 ├── deploy/             systemd 服务文件和依赖说明
-├── docs/               中文文档中心
-├── modules/            模块讲解 README（只读视图，不是源码）
+├── docs/               文档中心（现行 20 份，见 docs/README.md）
 ├── platform/           V1 实验骨架（未接入运行链路）
 ├── tools/              模型转换工具
 ├── ttbox_motion/       运动控制（校准/训练）
@@ -162,14 +155,11 @@ TTBOX-Module-Edition/
 | `scripts/` | 构建/发布/运维脚本 + edid 工具链（★FHS 锚定，**不可移动**） | 仅 `edid/` + `wifi_manager.py` + `ttbox_ensure_services.sh` |
 | `tools/` | 离线开发工具（模型转换 / 许可/OTA 签发） | ❌ |
 | `tests/` | 板端集成/监控/API 验收脚本 | ❌ |
-| `docs/` | 唯一文档中心（分类见 [docs/CONVENTIONS.md](docs/CONVENTIONS.md)） | ❌ |
-| `lib/` | 库作用域裁决锚（README 即不变量） | ❌（真值来自构建机 sysroot） |
-| `modules/` | 模块化语义视图（纯 README，**旧层·待出清**） | ❌ |
+| `docs/` | 文档中心（分类规则见 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)） | ❌ |
 | `platform/` | V1 实验骨架（随包但代码级不可达，**待实测出清**） | ✅（当前随包） |
-| `third_party/`（根） | RKNN 头重复残留（CMake 不认根副本，**待出清**） | ❌ |
 
-> 「是否进 payload」= 是否被 `scripts/ttbox_fhs_init.sh` 的 `sync_tree` 收入 release 树；
-> 唯一真源以该脚本的白名单闭集为准。硬约束见 [docs/ops/release-constraints.md](docs/ops/release-constraints.md)。
+> 「是否进 payload」= 是否被 `scripts/ttbox_fhs_init.sh` 的 `sync_tree` 收入 release 树。
+> **唯一真源以该脚本的白名单闭集为准**，本表只是说明。
 
 `core/src/` 里每个目录的职责：
 
@@ -214,11 +204,13 @@ HDMI 画面
 采集帧 → OpenCV 画检测框 → JPEG → 8001 端口 → 网页显示
 ```
 
-> ★ **构建依赖（T1.18）**：该预览链路的 `PreviewModule` **同时**依赖 libjpeg 与 OpenCV。
+> **构建依赖（T1.18）**：该预览链路的 `PreviewModule` **同时**依赖 libjpeg 与 OpenCV。
 > 构建时**两者都齐**才编译真实现；缺任一（或双缺）则自动改链空实现
 > `core/src/preview/PreviewModule_stub.cpp`——`ttbox_core` / `ttbox_core_main` 仍可编译链接
 > （消费端零改动），但**预览功能整体禁用**，且该产物**不得出货**（板端基础镜像必带
-> libjpeg + OpenCV 4.5.4）。详见 [deploy/DEPENDENCIES.md](deploy/DEPENDENCIES.md) §六·1。
+> libjpeg + OpenCV 4.5.4）。详见 [`deploy/DEPENDENCIES.md`](deploy/DEPENDENCIES.md) §六·1。
+
+输出后端的设计依据见 [`docs/research/OUTPUT_BACKEND_DESIGN.md`](docs/research/OUTPUT_BACKEND_DESIGN.md)。
 
 ---
 
@@ -247,15 +239,20 @@ PUT /api/config
 | `output_enabled` | 总开关，是否允许鼠标输出 |
 | `mouse.enabled` | 鼠标注入开关 |
 | `mouse.aim_hotkey` / `aim_hotkey2` | 注入热键 |
-| `rknn_external_dma_input` | 是否让 RGA 的 DMA-BUF 直连 NPU（**当前默认关**）。XOR `0x80` 重映射**已实现并有单测**（`core/src/rknn/InputQuant.hpp`，判定谓词 = INT8 ∧ NHWC ∧ AFFINE ∧ `zp == -128`；`core/tests/test_input_quant.cpp`）。默认仍关的原因**不是**缺代码，而是**尚无通过板端实测的合格模型**：该快路径只对满足上述谓词的 INT8 模型生效，当前主用模型是 FP16（分类为 `kCompatible`，零拷贝结构性不可用），打开开关对它没有任何效果。换 INT8 模型并经板端实测后再开。 |
+| `rknn_external_dma_input` | 是否让 RGA 的 DMA-BUF 直连 NPU（**当前默认关**）。XOR `0x80` 重映射已实现并有单测（`core/src/rknn/InputQuant.hpp`，判定谓词 = INT8 ∧ NHWC ∧ AFFINE ∧ `zp == -128`；`core/tests/test_input_quant.cpp`）。默认仍关的原因不是缺代码，而是尚无通过板端实测的合格模型：该快路径只对满足上述谓词的 INT8 模型生效，当前主用模型是 FP16（分类为 `kCompatible`，零拷贝结构性不可用），打开开关对它没有任何效果。换 INT8 模型并经板端实测后再开。 |
 | `model_id` | 当前激活模型 |
 | `worker_cores` | 推理线程绑定的 CPU 核心 |
 
+路径 / 常量 / 配置键 / 环境变量的**唯一真源**是 [`docs/protocols/config-path-env-registry.md`](docs/protocols/config-path-env-registry.md)，
+由 `bash scripts/ttbox_conventions_gate.sh` 断言（退出码 0 = PASS）。
+
 ---
 
-## 七、开发者怎么编译
+## 七、开发与构建
 
-> 强制流程：本机开发 → 本机测试 → 本机修 Bug → 本机全部测试通过 → 交叉编译 → 打包 → 上板 → 最终真机验证。本机未全 PASS 前不允许交叉编译，不允许上板；完整规则见 [docs/ops/RK3588开发流程.md](docs/ops/RK3588开发流程.md)。
+> **强制流程（不可裁剪）**：本机开发 → 本机测试 → 本机修 Bug → 本机全部测试通过 → 交叉编译 → 打包 → 上板 → 最终真机验证。
+> **本机未全 PASS 前不允许交叉编译，不允许上板**；板端发现问题必须回本机改，改完重跑本机测试再重新交叉编译。
+> 板端只运行交叉编译后的二进制，只重点验证真实硬件（HDMI / V4L2 / DMA-BUF / RGA / RKNN / USB / DRM / 分辨率 / 稳定性）。
 
 ### Windows 本机（开发 + 单元测试）
 
@@ -298,15 +295,17 @@ cmake --build build-win -j8
 ctest --test-dir build-win --output-on-failure
 ```
 
-当前状态：**27 个 CTest 全绿**（`ctest -N` 注册数，**Linux host，2026-09-17**）；`ttbox_core_tests` 聚合断言同批全过（聚合数随实现演进，**不写死**）。
+当前状态（2026-09-19 本机实测）：
 
-> ★ **计数锚定**（2026-09-17）：本仓历史存在多份互相陈旧的 CTest 计数（README / 测试说明 / 各阶段报告）。**权威锚 = `ctest -N`（Linux host）**；详见 `ttbox-vs-yu-program/m1-acceptance-checklist.md` §0 规则 5。
+| 套件 | 结果 |
+|---|---|
+| Core CTest | **29 / 29 passed** |
+| `plugins/web/tests`（pytest） | **267 passed** |
+| `framework` + `platform`（pytest，需 `--import-mode=importlib`） | **92 passed** |
+| `scripts/ttbox_conventions_gate.sh` | **PASS**（退出码 0） |
+| `python docs/check_links.py` | **broken_count=0** |
 
-### 网页后端测试
-
-```bash
-.venv-win/Scripts/python.exe -m pytest framework/tests/test_web_plugin.py -q
-```
+> 计数以命令实际输出为权威锚，本表不写死历史数字。
 
 ### 板端常用验证
 
@@ -314,18 +313,16 @@ ctest --test-dir build-win --output-on-failure
 # 服务健康
 systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 
-# 实时指标（网页 8000 端口）
-python3 /tmp/monitor_board_runtime.py --seconds 30
-
 # usbproxy 按键/移动测试
 python3 /opt/ttbox/src/core/tests/usbproxy_buttontest.py
 ```
 
 ---
 
-## 九、当前真实状态（2026-09-13）
+## 九、当前真实状态（2026-09-13 实测快照）
 
-> 注意：本表是 **2026-09-13 的一次实测快照**，不等于当前默认值。之后有过变更的条目已在表内直接标注（例如 RKNN 输入项）。若与配置默认值或代码冲突，以 `config/default.json`、`deploy/config/` 与源码为准。
+> 注意：本表是 **2026-09-13 的一次实测快照**，不等于当前默认值。之后有过变更的条目已在表内直接标注。
+> 若与配置默认值或代码冲突，以 `config/default.json`、`deploy/config/` 与源码为准。
 
 | 项目 | 数据 |
 |---|---|
@@ -333,24 +330,31 @@ python3 /opt/ttbox/src/core/tests/usbproxy_buttontest.py
 | 推理（空闲态聚合） | 约 30 FPS |
 | 端到端延迟 | 约 5.8 ms |
 | 预览 | 30 FPS，丢帧 0 |
-| RKNN 输入 | external DMA 直连已开启（**2026-09-13 的历史取值，现已变更**）→ 现默认**关闭**：`rknn_external_dma_input` 已在三份配置中全部置为 false。**订正（2026-09-17）**：关闭原因不再是"缺 XOR `0x80` 重映射"——重映射已实现并单测通过；真实原因是当前主用模型为 FP16（`kCompatible`），零拷贝结构性不可用，开关无效。需换 INT8（`zp == -128`）模型并经板端实测后再开 |
+| RKNN 输入 | external DMA 直连（2026-09-13 的历史取值）→ 现默认**关闭**：`rknn_external_dma_input` 已在三份配置中全部置为 false。订正（2026-09-17）：关闭原因不是"缺 XOR `0x80` 重映射"——重映射已实现并单测通过；真实原因是当前主用模型为 FP16（`kCompatible`），零拷贝结构性不可用。需换 INT8（`zp == -128`）模型并经板端实测后再开 |
 | 授权 features 门控 | `LicenseSnapshot.features` / `ui_brand` 已由签名卡驱动（M2）：可信态（kValid/kFallback/kExpired 宽限内）才投影；未激活与权威否定一律清空且品牌回落 `ttbox`。闭集 = `capture/inference/aim/ota`，闭集外名字丢弃；`ui_brand` 过 `[A-Za-z0-9_-]` 字符集闸门 |
 | 模型热切换 | EP ↔ 320dawan 连续切换通过 |
 | 板端服务 | core/web/preview/usbproxy 全部 active |
 
-## 十、文档导航
+---
 
-全部是中文，推荐阅读顺序：
+## 十、文档
 
-| 顺序 | 文档 | 内容 |
-|---|---|---|
-| 1 | [docs/README.md](docs/README.md) | 文档总入口 |
-| 2 | [docs/guide/小白教程/01-TTBOX是什么.md](docs/guide/小白教程/01-TTBOX是什么.md) | 用大白话讲 TTBOX |
-| 3 | [docs/guide/小白教程/02-TTBOX怎么工作.md](docs/guide/小白教程/02-TTBOX怎么工作.md) | 工作流程 |
-| 4 | [docs/architecture/系统总览.md](docs/architecture/系统总览.md) | 系统分层 |
-| 5 | [docs/architecture/完整链路.md](docs/architecture/完整链路.md) | 完整数据链路 |
-| 6 | [docs/ops/问题排查.md](docs/ops/问题排查.md) | 常见问题排查 |
-| 7 | [docs/废弃代码清单.md](docs/废弃代码清单.md) | 已废弃/不再接线的代码清单 |
+文档中心只保留**与代码有引用关系**的文档，共 20 份。入口与"谁引用谁"的对照表见
+[`docs/README.md`](docs/README.md)；分类规则见 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)。
+
+| 想了解 | 看哪里 |
+|---|---|
+| 协议与规格 | [`docs/protocols/`](docs/protocols/) |
+| 配置/常量/路径口径 | [`docs/protocols/config-path-env-registry.md`](docs/protocols/config-path-env-registry.md) |
+| 构建可复现 | [`docs/build/build-reproducibility.md`](docs/build/build-reproducibility.md) |
+| 板端依赖与出货约束 | [`deploy/DEPENDENCIES.md`](deploy/DEPENDENCIES.md) |
+| 服务账号约定 | [`platform/supervisor/README.md`](platform/supervisor/README.md) |
+| 历史交接 | [`docs/handover/`](docs/handover/) |
+
+> 2026-09-19 一次清理移除了 100 份与代码无关的过程报告与介绍文档（763 KB）。
+> 被移除的文件仍在 git 历史中，`git restore --source=HEAD -- <路径>` 即可取回。
+
+---
 
 ## 十一、常见问题
 

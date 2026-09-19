@@ -62,7 +62,9 @@ cat /sys/devices/platform/fdee0000.hdmirx-controller/hdmirx/hdmirx/edid  # 应�
 > **唯一权威源 = `deploy/systemd/`**（DEP-07 / T1.05 收敛）：仓库内每 unit 有且仅有一份。
 > 历史副本 `plugins/web/config/ttbox-web.service`、`plugins/preview/config/ttbox-preview.service`、
 > `usbproxy/systemd/ttbox-usbproxy.service` **已删除**，各目录只留一份 `README.md` 指向本表。
-> 收敛动作不是"挑一份对的留下"——两份现存副本各有不同的病（详见 usbproxy/systemd/README.md）。
+> 收敛动作不是"挑一份对的留下"——两份现存副本各有不同的病；记录该病历的
+> `usbproxy/systemd/README.md` 已于 2026-09-19 文档清理中移除，
+> 需追溯用 `git show HEAD:usbproxy/systemd/README.md`。
 >
 > 部署时 unit 是**版本产物的一部分**：随发布树交付于 `/opt/ttbox/current/deploy/systemd/`，
 > 由 `scripts/ttbox_release_install.sh`（原子切换/回切）与 `scripts/ttbox_ensure_services.sh`

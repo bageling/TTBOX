@@ -10,31 +10,31 @@
 
 | 字段 | 值 |
 |---|---|
-| `commit` | `e0474b1679d78a8e3d0f98b78b3939b95fee7afe` |
+| `commit` | `45870f6b91a74364dca5825d7678e5524a08c3c7` |
 | `toolchain` | /usr/bin/aarch64-linux-gnu-g++ (GCC 11.4.0) — aarch64-linux-gnu-g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 |
 | `build_type` | `Release` |
 | `generator` | `Ninja` |
 | `sysroot` | `/mnt/c/Users/Administrator/WorkBuddy/2026-09-15-15-04-22/sysroot-aarch64` |
 | `build_host` | Ubuntu 22.04.5 LTS @ PC-20260805NLLL |
-| `build_time_utc` | 2026-09-18T14:33:54Z |
+| `build_time_utc` | 2026-09-19T07:32:40Z |
 | `configure_args` | `cmake -S /mnt/c/ttbox-local/core -B /mnt/c/ttbox-local/build-aarch64-t114 -G Ninja -DTTBOX_SHIP=ON -DTTBOX_PROJECT_ROOT=/opt/ttbox -DTTBOX_CORE_BUILD_AUTH=OFF -DCMAKE_TOOLCHAIN_FILE=/mnt/c/ttbox-local/deploy/cmake/toolchain-aarch64.cmake -DCMAKE_SYSROOT=/mnt/c/Users/Administrator/WorkBuddy/2026-09-15-15-04-22/sysroot-aarch64 -DTTBOX_CROSS_AARCH64=ON -DCMAKE_BUILD_TYPE=Release` |
 | `product_path` | `/mnt/c/ttbox-local/build-aarch64-t114/ttbox_core_main` |
-| `md5` | `c9bf7678ea00d94554ad21b52dc9fccb` |
-| `sha256` | `af2423d193168defe8e6dfe9a314d71f237b9010a0dac38452d0babc124d5f67` |
-| `size` | 1059760 B |
-| `buildid` | `a45f00eabe8a4ed4a42ae9654f99b88dad1ed9ac` |
+| `md5` | `4e2d1bc9a1c65fade6e048b31bf9db08` |
+| `sha256` | `9343b6e308a8137277456ba66111e444119225b5b21c17a44db196fc84bb1875` |
+| `size` | 1051520 B |
+| `buildid` | `d69c7b15c467ab014a52434db39ce3195aaab883` |
 | `strings_gate` | `third=0/ip=0/cred=0`（(a)第三方域名=0 硬门禁 PASS / (b)凭据字面量=0 硬门禁 PASS / (c)自有端点=0 登记〔M1 期望 0，不判 FAIL〕） |
 | `selfcheck` | RUNPATH 逐段 PASS / NEEDED 覆盖 PASS（10 项 NEEDED 全部覆盖：随包 1 + 基础镜像白名单） / librknnrt 同源 PASS / lib 闭集 1（host 侧 `readelf` 静态；★ 交叉产物 host **不能** `ldd`，运行期 `ldd` 归板端 T1.13） |
 | `usbproxy` | sha256 `bf8b98c6d4bbdd86bcb122d6bfef62d4734a06524c675a6c3409fb9e3efcff25`（= `.sha256` 声明值 ✅）；旧目录字面量=0 ✅；重建：未执行（本脚本默认不做 usbproxy 重建；设 TTBOX_RELEASE_VERIFY_USBPROXY_REBUILD=1 启用，判据见 build-reproducibility.md §11②） |
 | `repro_verify` | 未执行（本脚本默认不做二次 clean build；设 TTBOX_RELEASE_VERIFY_REPRO=1 启用，判据见 build-reproducibility.md §13 V4） |
 | `librknnrt_version` | `2.3.2` / sha256 `d31fc19c85b85f6091b2bd0f6af9d962d5264a4e410bfb536402ec92bac738e8`（须 = 2.3.2 / `d31fc19c…`；基准 = 链接期=模型=板端 三重一致） |
 | `vector_hash` | `0091a7df2bbf4d427e34bfd5594ff5ca56ca1398c05beb260d1db37c06cb63eb`（**配置向量**指纹，**不含 commit**——可复现单元 = (源码 commit, 配置向量) 二元组；换任一向量项即变 ⇒ 与旧留档**不可比**） |
-| `notes` | 上次留档对照：配置向量相同，但源码 commit 已变（5b2b4b3… → e0474b1…） ⇒ 本次 md5=c9bf7678ea00d94554ad21b52dc9fccb 与上次的差异属**预期改变**（非非确定性）；A4①=0（期望 0）/ A4②=1（期望 >=1）；CROSS_AARCH64=ON |
+| `notes` | 上次留档对照：配置向量相同，但源码 commit 已变（e0474b1… → 45870f6…） ⇒ 本次 md5=4e2d1bc9a1c65fade6e048b31bf9db08 与上次的差异属**预期改变**（非非确定性）；A4①=0（期望 0）/ A4②=1（期望 >=1）；CROSS_AARCH64=ON |
 
 ## §5 单行记录（供仓库外备份共用）
 
 ```
-e0474b1679d78a8e3d0f98b78b3939b95fee7afe | /usr/bin/aarch64-linux-gnu-g++ (GCC 11.4.0) — aarch64-linux-gnu-g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 | /mnt/c/Users/Administrator/WorkBuddy/2026-09-15-15-04-22/sysroot-aarch64 | /mnt/c/ttbox-local/build-aarch64-t114/ttbox_core_main | md5=c9bf7678ea00d94554ad21b52dc9fccb | BuildID=a45f00eabe8a4ed4a42ae9654f99b88dad1ed9ac | 2026-09-18T14:33:54Z | Ubuntu 22.04.5 LTS @ PC-20260805NLLL | third=0/ip=0/cred=0
+45870f6b91a74364dca5825d7678e5524a08c3c7 | /usr/bin/aarch64-linux-gnu-g++ (GCC 11.4.0) — aarch64-linux-gnu-g++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0 | /mnt/c/Users/Administrator/WorkBuddy/2026-09-15-15-04-22/sysroot-aarch64 | /mnt/c/ttbox-local/build-aarch64-t114/ttbox_core_main | md5=4e2d1bc9a1c65fade6e048b31bf9db08 | BuildID=d69c7b15c467ab014a52434db39ce3195aaab883 | 2026-09-19T07:32:40Z | Ubuntu 22.04.5 LTS @ PC-20260805NLLL | third=0/ip=0/cred=0
 ```
 
-<!-- RELEASE_BUILD_RECORD: commit=e0474b1679d78a8e3d0f98b78b3939b95fee7afe md5=c9bf7678ea00d94554ad21b52dc9fccb sha256=af2423d193168defe8e6dfe9a314d71f237b9010a0dac38452d0babc124d5f67 buildid=a45f00eabe8a4ed4a42ae9654f99b88dad1ed9ac vector_hash=0091a7df2bbf4d427e34bfd5594ff5ca56ca1398c05beb260d1db37c06cb63eb -->
+<!-- RELEASE_BUILD_RECORD: commit=45870f6b91a74364dca5825d7678e5524a08c3c7 md5=4e2d1bc9a1c65fade6e048b31bf9db08 sha256=9343b6e308a8137277456ba66111e444119225b5b21c17a44db196fc84bb1875 buildid=d69c7b15c467ab014a52434db39ce3195aaab883 vector_hash=0091a7df2bbf4d427e34bfd5594ff5ca56ca1398c05beb260d1db37c06cb63eb -->

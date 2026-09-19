@@ -3,7 +3,7 @@
 > **归属**：代码梳理批次 0（2026-09-17）
 > **依据**：`docs/handover/2026-09-17/代码梳理方案-2026-09-17.md` §2 / §3 / §6
 > **用途**：**新增文件时"放哪"的判定表** + **命名约定**。命中即停，不必纠结。
-> 出货硬约束见 [`ops/release-constraints.md`](ops/release-constraints.md)；文档总入口见 [`README.md`](README.md)。
+> 文档总入口见 [`README.md`](README.md)；出货硬约束以 `scripts/ttbox_fhs_init.sh` 的 payload 白名单闭集为准。
 
 ---
 
@@ -66,7 +66,7 @@ flowchart TD
 | pytest 文件 | `test_*.py`，就近包内 `tests/` | ✅ `framework/tests/` |
 | C++ 测试 | `test_*.cpp`（CTest 注册名 = 去掉 `test_`） | ✅ `core/tests/test_pipeline.cpp` |
 | shell 测试 | `test_*.sh`；集成脚本按域分目录 `tests/<域>/` | ✅ `tests/api/`、`tests/monitor/` |
-| 文档命名 | **活真源**：`主题.md`；**一次性报告**：`主题-YYYY-MM-DD.md`；**版本化**：`主题-vX.Y.Z.md` | ✅ `M2.07.1-交付总结-2026-09-17.md` |
+| 文档命名 | **活真源**：`主题.md`；**一次性报告**：`主题-YYYY-MM-DD.md`；**版本化**：`主题-vX.Y.Z.md` | ✅ `交付前Web实测报告-2026-09-19.md` |
 | 日期格式 | `YYYY-MM-DD`（ISO，本地日） | ✅ |
 | 私有/临时 | 一律不入库（`.testkeys/`、`_*`、`*.local.json`、`*.log`） | ✅ `.gitignore` 已覆盖 |
 
@@ -76,26 +76,33 @@ flowchart TD
 
 ```text
 docs/
-├── README.md            # 文档总入口 + 唯一真源表
+├── README.md            # 文档总入口 + 唯一真源表 + 代码侧引用关系表
 ├── CONVENTIONS.md       # 本文件
-├── architecture/        # 活·架构真源（系统总览/完整链路/核心模块/数据流/插件系统/目录结构）
-├── protocols/           # 活·协议与规格（ipc-protocol、image-spec）
-├── ops/                 # 活·运维（问题排查/RK3588开发流程/测试说明/release-constraints/build-dirs）
-├── guide/               # 活·面向使用者（小白教程/、小白使用说明）
-├── web/                 # 分域（architecture/ e2e/ model/ preview/ verification/）
-├── product/             # 产品/蓝图/特性/路线（含 项目路线图.md）
-├── research/            # 研究
-├── verification/        # 验证证据（真实HDMI闭环验证 —— 性能基线数据出处）
+├── ipc-protocol.md      # 旧路径指针桩（被 core/src/ipc/IpcServer.hpp 引用，保留）
+├── protocols/           # 活·协议与规格（ipc-protocol / image-spec / config-path-env-registry / ota-server-contract）
+├── research/            # 研究（OUTPUT_BACKEND_DESIGN.md）
 ├── build/               # 构建可复现（build-reproducibility.md）
-├── AI/                  # 模型系统说明
-└── handover/YYYY-MM-DD/ # ★历史交接（只追加，禁改写）
+├── handover/YYYY-MM-DD/ # ★历史交接（只追加，禁改写）
+└── 主题-YYYY-MM-DD.md    # 一次性过程报告（仅当被源码/脚本/测试引用时入库）
 ```
 
-**文档放哪的判定**：消费方是"架构读者/协议实现者/运维/使用者/产品" → 对应 `architecture|protocols|ops|guide|product/`；
-历史交接 → `handover/`（**禁改写，只追加**）。
+**文档放哪的判定**：消费方是"协议实现者 / 构建维护者 / 运维" → 对应 `protocols|research|build/`；
+历史交接 → `handover/`（**禁改写，只追加**）；被代码引用的过程报告 → `docs/` 根。
+
+### 入库硬线（2026-09-19 起）
+
+**一份文档是否入库，取决于有没有"非文档的引用方"** —— 源码、脚本、测试、systemd/CMake/HTML 都算。
+没有任何代码引用的介绍类、盘点类、过程类文档一律不入库。
+
+现状（2026-09-19 清理后）：`docs/` 下 17 份 + `deploy/DEPENDENCIES.md` + `platform/supervisor/README.md`
++ 根 `README.md`，共 **20 份**。谁引用谁见 [`README.md`](README.md) §二。
 
 > **2026-09-18 清理**：`docs/archive/`（历史快照 / 旧性能报告 / 阶段报告，41 个文件）与四个旧路径指针目录
-> （`架构/` `开发/` `规划/` `验证/`）已删除。「一次性过程报告」不再入 `docs/`（并入 `handover/`，或直接不入库）。
+> （`架构/` `开发/` `规划/` `验证/`）已删除。
+> **2026-09-19 清理**：按业主「不能影响程序源码运行，清理没用的」口径再清 **100 份 / 763 KB**，
+> 覆盖 `architecture/`、`ops/`、`guide/`、`product/`、`web/`、`AI/`、`verification/` 的全部文档、
+> `handover/2026-09-17/` 的 12 份、各模块与包的 21 份 README、`docs/` 根 10 份过程报告，
+> 以及仓库根未跟踪的 `SOURCE_SNAPSHOT.md`。被清文件仍在 git 历史中。
 
 ### 旧路径指针规则
 
