@@ -127,10 +127,25 @@ def is_downgrade(new_ver: str, cur_ver: str) -> bool:
 
 
 # ---------------------------------------------------------------- 默认（真实）实现
-def default_fetch(url: str, dest: str, timeout: float = 60.0) -> None:
-    """仅 https；任何非 https 由调用方先拦（§0.1 ①）。"""
-    with urllib.request.urlopen(url, timeout=timeout) as r, open(dest, "wb") as f:
-        shutil.copyfileobj(r, f)
+def default_fetch(url: str, dest: str, timeout: float = 120.0, attempts: int = 3) -> None:
+    """仅 https；任何非 https 由调用方先拦（§0.1 ①）。
+
+    2026-09-19 修复：七牛隧道到板端只有 ~12KB/s，且偶发 >60s 的读停顿，
+    旧的 60s 超时一卡就整包失败。改为 120s 读超时 + 3 次重试（每次重写目标文件）。
+    """
+    last_exc: Exception | None = None
+    for i in range(1, attempts + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "ttbox-ota-updater"})
+            with urllib.request.urlopen(req, timeout=timeout) as r, open(dest, "wb") as f:
+                shutil.copyfileobj(r, f)
+            return
+        except Exception as e:  # 网络类异常一律重试；最后一次仍败则抛出
+            last_exc = e
+            sys.stderr.write(f"[ota] 下载第 {i}/{attempts} 次失败: {e!r}\n")
+            if i < attempts:
+                time.sleep(5)
+    raise last_exc  # type: ignore[misc]
 
 
 def default_install(staging: str, version: str) -> int:
