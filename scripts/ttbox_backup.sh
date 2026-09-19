@@ -20,16 +20,23 @@ TARGETS=(/etc/ttbox /var/lib/ttbox /opt/ttbox/releases)
 MANIFEST="${STAGE}/MANIFEST.sha256"
 
 log "收集备份目标（存在才打包）：${TARGETS[*]}"
-mkdir -p "${STAGE}/data"
+# 布局契约（与 ttbox_restore.sh 的恢复循环逐字对齐）：
+#   /etc/ttbox           -> data/etc/ttbox
+#   /var/lib/ttbox       -> data/var/lib/ttbox
+#   /opt/ttbox/releases  -> data/opt/ttbox/releases
+# 2026-09-19 板端实测修正：原实现 cp -a 后校验 data/etc|var|opt，
+# 但 cp -a /etc/ttbox data/ 产出 data/ttbox（三处同名还会互相合并）⇒ 恒 FATAL。
 for t in "${TARGETS[@]}"; do
+    rel="${t#/}"
     if [ -e "$t" ]; then
-        cp -a "$t" "${STAGE}/data/"
+        mkdir -p "${STAGE}/data/$(dirname "$rel")"
+        cp -a "$t" "${STAGE}/data/${rel%/*}/"
     else
         log "跳过（不存在）: $t"
     fi
 done
 
-[ -d "${STAGE}/data/etc" ] || [ -d "${STAGE}/data/var" ] || [ -d "${STAGE}/data/opt" ] \
+[ -e "${STAGE}/data/etc" ] || [ -e "${STAGE}/data/var" ] || [ -e "${STAGE}/data/opt" ] \
     || die "三处目标全不存在——这台机器上没有 TTBOX？"
 
 # sha256 清单（相对 STAGE/data 的路径），restore 逐项复验
