@@ -9612,8 +9612,13 @@ function renderFanControlStatus(fanControl) {
   const pwmPercent = Number(fan.pwm_percent);
   const pwmRaw = Number(fan.pwm_raw);
   const rpm = Number(fan.fan_rpm);
-  setText("fanControlPill", controlAvailable ? (enabled ? "全速运行" : "PWM接口可用") : "未检测到PWM接口");
-  setText("fanRuntimeMode", enabled ? "全速" : "未启用");
+  // 状态文案以真实 PWM 占空比为准：Core 开机即把 pwm 写成满转（Application.cpp
+  // 的"风扇满转"段），此前这里恒显"未启用"，与风扇正在转的事实相反。
+  const pwmText = Number.isFinite(pwmPercent)
+    ? `${Math.max(0, Math.min(100, Math.round(pwmPercent)))}%`
+    : "--";
+  setText("fanControlPill", controlAvailable ? `${enabled ? "运行中" : "未启用"} ${pwmText}` : "未检测到PWM接口");
+  setText("fanRuntimeMode", enabled ? (pwmPercent >= 100 ? "全速" : pwmText) : "未启用");
   setText("fanControlAvailableValue", controlAvailable ? "PWM接口可用" : "未检测到PWM接口");
   setText("fanTemperatureSourceValue", fan.source_label || "--");
   setText("fanTemperatureValue", Number.isFinite(temp) && temp > 0 ? `${temp.toFixed(1)} °C` : "--");
@@ -10366,6 +10371,11 @@ function storageExpandLabel(rootfs) {
   if (!rootfs || Object.keys(rootfs).length === 0) {
     return "未读取";
   }
+  if (rootfs.expandable && rootfs.action_available === false) {
+    // 磁盘尾部真有未分配空间，但本仓还没把"改分区表 + resize2fs"装箱。
+    // 报"待实现"而不是"可扩容"——后者会让用户以为按钮点一下就成了。
+    return "待实现";
+  }
   if (rootfs.expandable) {
     return "可扩容";
   }
@@ -10377,6 +10387,15 @@ function storageExpandLabel(rootfs) {
   }
   if (rootfs.reason === "filesystem_needs_resize") {
     return "待完成";
+  }
+  if (rootfs.reason === "no_tail_space") {
+    return "空间不足";
+  }
+  if (rootfs.reason === "missing_tools") {
+    return "缺扩容工具";
+  }
+  if (rootfs.reason === "unsupported_filesystem" || rootfs.reason === "unsupported_root") {
+    return "不支持";
   }
   return rootfs.supported === false ? "不可用" : "无需扩容";
 }
@@ -10419,7 +10438,8 @@ function renderStorageExpansion(storage) {
   }
   const rootfs = storage.rootfs;
   const usage = storageUsage(storage || {});
-  const expandable = !!rootfs.expandable;
+  // 按钮可点 = 物理上可扩 且 执行通道已装箱；只满足前者时保持禁用（后端会返 501）。
+  const expandable = !!rootfs.expandable && rootfs.action_available !== false;
   if (pill) {
     pill.textContent = state.storageExpandBusy ? "扩容中" : storageExpandLabel(rootfs);
     pill.className = `pill${rootfs.ok === false ? " danger-pill" : ""}`;
@@ -10476,9 +10496,16 @@ async function expandStorage() {
     // 失败也要以"扩容数据源"形态渲染（必须带 rootfs），否则上面的门卫会直接返回，
     // 界面就只剩一句"扩容中"卡在原地，用户看不到失败原因。
     const payload = error && typeof error.payload === "object" && error.payload !== null ? error.payload : {};
-    renderStorageExpansion({
-      rootfs: Object.assign({ ok: false, message: (error && error.message) || "扩容失败" }, payload),
-    });
+    // 后端已按契约把 rootfs 放在 data.rootfs（共 409/501/500 三个失败分支都带），
+    // 有就直接用它的真实值（reason/method/free_after_partition 都在里面），
+    // 没有才退化成只剩一句人话。
+    const rootfs = payload.rootfs && typeof payload.rootfs === "object"
+      ? Object.assign({}, payload.rootfs, {
+        ok: false,
+        message: payload.rootfs.message || (error && error.message) || "扩容失败",
+      })
+      : { ok: false, message: (error && error.message) || "扩容失败" };
+    renderStorageExpansion({ rootfs });
     throw error;
   } finally {
     state.storageExpandBusy = false;
@@ -12298,13 +12325,18 @@ function randomizeDisplayHardware() {
 }
 
 function populateMouseHardware(payload) {
-  const config = (payload && payload.config) || {};
-  Object.entries(config).forEach(([key, value]) => {
-    setValue(`mouse_${key}`, value);
-  });
   const mode = (payload && payload.mode) || "full_passthrough";
   const isSynthetic = mode === "synthetic";
   const connected = !!(payload && payload.connected);
+  // 合成模式（或没探到物理鼠标）下，面板该显示 usb-proxy 实际落盘的 gadget 配置
+  // —— 那才是真源；透传模式用的是物理鼠标身份，仍按探测值显示。
+  const gadget = (payload && payload.gadget_config) || {};
+  const config = (isSynthetic || !connected) && Object.keys(gadget).length > 0
+    ? gadget
+    : ((payload && payload.config) || {});
+  Object.entries(config).forEach(([key, value]) => {
+    setValue(`mouse_${key}`, value);
+  });
   const usingOriginalProfile = payload && payload.config_source === "original_mouse_profile";
   const usingPhysicalMouse = payload && payload.config_source === "sysfs_usb_mouse";
   const modeInput = document.querySelector(`input[name="mouse_proxy_mode"][value="${mode}"]`);

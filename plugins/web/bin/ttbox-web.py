@@ -1779,9 +1779,150 @@ def get_system_status():
 
 
 
+# ── 根分区扩容：真实探测（取代此前的硬编码结论）────────────────────────────
+# 输出契约对齐前端 storageExpandLabel()/storageExpandLog()：
+#   ok / supported / expandable / reason / message / method / missing_tools /
+#   action_available / action_reason / root{device,disk,label,free_after_partition}
+#
+# ★ 两个问题必须分开回答，不能挤进同一个布尔：
+#   ① expandable       = 这台机器物理上有没有可扩空间（读分区表算出来）
+#   ② action_available = 本仓有没有把"改分区表 + resize2fs"装箱成执行通道
+# 旧实现把两者合成一个恒真的 expandable=True，还附赠一句凭空的
+# "检测到磁盘尾部还有约 N GB 可扩容空间"（那个 N 取自 df 的可用空间，
+# 与磁盘尾部有没有未分配扇区毫无关系 —— 纯编造）。
+ROOTFS_TAIL_MIN_BYTES = 64 * 1024 * 1024
+ROOTFS_EXPAND_FS = ('ext2', 'ext3', 'ext4')
+ROOTFS_EXPAND_TOOLS = ('growpart', 'resize2fs')
+_ROOTFS_PROBE_CACHE: dict = {'ts': 0.0, 'data': None}
+_ROOTFS_PROBE_TTL_SEC = 5.0
+
+
+def _run_quiet(argv: list, timeout: float = 5.0) -> str:
+    """跑一条只读探测命令：非 0 退出 / 超时 / 异常一律返回空串，不抛。"""
+    try:
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        return ''
+    return (out.stdout or '').strip() if out.returncode == 0 else ''
+
+
+def _sysfs_int(path: str) -> int:
+    """读 sysfs 里的整数；读不到返回 -1 —— 用来区分"值为 0"和"读不到"。"""
+    try:
+        with open(path) as fh:
+            return int(fh.read().strip())
+    except Exception:
+        return -1
+
+
+def _human_bytes(n: int) -> str:
+    if n < 0:
+        return '未知'
+    value = float(n)
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if value < 1024 or unit == 'GB':
+            return f'{value:.1f} {unit}'
+        value /= 1024
+    return f'{value:.1f} GB'
+
+
+def _rootfs_expand_probe_uncached() -> dict:
+    """探测根分区扩容可行性 —— 数据全部来自 findmnt / lsblk / sysfs，无预置结论。"""
+    probe = {
+        'ok': True,
+        'supported': True,
+        'expandable': False,
+        'reason': '',
+        'message': '',
+        'method': 'growpart',
+        'missing_tools': [],
+        # 执行通道：本仓尚未把"改分区表 + resize2fs"装箱（没有特权 worker）。
+        # 探测到可扩空间时 expandable 为真、按钮依然不可用，由前端读这个字段。
+        'action_available': False,
+        'action_reason': 'expand_worker_not_implemented',
+        'root': {},
+    }
+    src = _run_quiet(['findmnt', '-no', 'SOURCE', '/'])
+    fstype = _run_quiet(['findmnt', '-no', 'FSTYPE', '/'])
+    root = {'device': src, 'label': '根分区', 'disk': '', 'fstype': fstype}
+    probe['root'] = root
+
+    if not src.startswith('/dev/'):
+        probe.update(supported=False, reason='unsupported_root',
+                     message=f'根文件系统不是块设备分区（{src or "未知"}），不支持在线扩容')
+        return probe
+
+    part = os.path.basename(src)
+    disk_lines = _run_quiet(['lsblk', '-no', 'PKNAME', src]).splitlines()
+    disk = disk_lines[0].strip() if disk_lines else ''
+    if disk:
+        root['disk'] = '/dev/' + disk
+
+    p_start = _sysfs_int(f'/sys/class/block/{part}/start')
+    p_size = _sysfs_int(f'/sys/class/block/{part}/size')
+    d_size = _sysfs_int(f'/sys/class/block/{disk}/size') if disk else -1
+    tail = -1
+    if p_start >= 0 and p_size >= 0 and d_size >= 0:
+        tail = (d_size - (p_start + p_size)) * 512
+        root['free_after_partition'] = tail
+
+    missing = [t for t in ROOTFS_EXPAND_TOOLS if shutil.which(t) is None]
+    probe['missing_tools'] = missing
+
+    if fstype and fstype not in ROOTFS_EXPAND_FS:
+        probe.update(reason='unsupported_filesystem',
+                     message=f'根分区文件系统是 {fstype}，本仓只支持 ext4 在线扩容')
+        return probe
+    if missing:
+        probe.update(reason='missing_tools',
+                     message='缺少扩容工具：' + '、'.join(missing))
+        return probe
+    if tail < 0:
+        probe.update(ok=False, reason='probe_failed',
+                     message=f'读不到 {root["disk"] or part} 的分区表，扩容可行性未知')
+        return probe
+    if tail < ROOTFS_TAIL_MIN_BYTES:
+        probe.update(reason='no_tail_space',
+                     message=(f'磁盘尾部只剩 {_human_bytes(tail)}，'
+                              f'不足 {_human_bytes(ROOTFS_TAIL_MIN_BYTES)}，无法扩容'))
+        return probe
+
+    probe.update(expandable=True, reason='ok',
+                 message=f'磁盘尾部有 {_human_bytes(tail)} 未分配空间，可扩容')
+    return probe
+
+
+def _rootfs_expand_probe(force: bool = False) -> dict:
+    """带 5 秒缓存的探测（findmnt/lsblk 各一次，别被轮询打成热点）。"""
+    now = time.time()
+    cached = _ROOTFS_PROBE_CACHE['data']
+    if not force and cached is not None and now - _ROOTFS_PROBE_CACHE['ts'] < _ROOTFS_PROBE_TTL_SEC:
+        return dict(cached)
+    probe = _rootfs_expand_probe_uncached()
+    _ROOTFS_PROBE_CACHE['ts'] = now
+    _ROOTFS_PROBE_CACHE['data'] = dict(probe)
+    return probe
+
+
+def _rootfs_expand_payload(action: str, force: bool = False) -> dict:
+    """探测结果 + df 容量，拼成一份完整的 rootfs 契约对象。"""
+    s = _storage()
+    payload = dict(_rootfs_expand_probe(force=force))
+    payload.update({
+        'action': action,
+        'can_expand': payload['expandable'],
+        'percent': s['percent'],
+        'total': s['total'],
+        'used': s['used'],
+        'free': s['free'],
+    })
+    return payload
+
+
 @app.get('/api/system/storage')
 def get_storage_status():
     s = _storage()
+    force = str(request.args.get('force') or '') not in ('', '0', 'false')
     return jsonify({
         'ok': True,
         'data': {
@@ -1792,30 +1933,28 @@ def get_storage_status():
             'root_percent': s['percent'],
             'root_total': s['total'],
             'root_used': s['used'],
-            'rootfs': {
-                'action': 'status',
-                'can_expand': True,
-                'expandable': True,
-                'message': f'检测到磁盘尾部还有约 {s["free"]/1024/1024/1024:.1f} GB 可扩容空间',
-                'method': 'growpart',
-                'missing_tools': [],
-                'ok': True,
-                'percent': s['percent'],
-                'total': s['total'],
-                'used': s['used'],
-                'free': s['free'],
-            },
+            'rootfs': _rootfs_expand_payload('status', force=force),
         },
     })
 
 
 @app.post('/api/system/storage/expand')
 def expand_storage():
-    try:
-        out = subprocess.run(['lsblk', '-b', '-n', '-o', 'NAME,SIZE', '/dev/mmcblk0'], capture_output=True, text=True, timeout=5)
-        return jsonify({'ok': True, 'data': {'message': '根分区在线检测完成，扩容需重启进恢复流程', 'detail': out.stdout[:300]}})
-    except Exception as exc:
-        return jsonify({'ok': False, 'error': f'检测失败: {exc}'})
+    payload = _rootfs_expand_payload('expand', force=True)
+    if not payload['expandable']:
+        # 409：请求合法，但当前机器没有可扩空间（或工具/文件系统不支持）。
+        # 真实原因走 error.message + data.rootfs，前端原样展示。
+        return jsonify({'ok': False, 'error': payload['message'],
+                        'data': {'rootfs': payload}}), 409
+    if not payload['action_available']:
+        # 501：物理上可扩，但本仓没有改分区表的执行通道 —— 就说没实现。
+        # 旧行为是回一句"扩容需重启进恢复流程"，把"没做"说成"做了一半"。
+        return jsonify({'ok': False,
+                        'error': '检测到可扩空间，但扩容执行通道尚未装箱（Web 不会修改分区表）',
+                        'data': {'rootfs': payload}}), 501
+    # fail-closed：action_available 若在未接线的情况下为真，宁可报错也不假装扩容成功。
+    return jsonify({'ok': False, 'error': '扩容执行通道状态异常',
+                    'data': {'rootfs': payload}}), 500
 
 
 @app.put('/api/system/hostname')
@@ -2054,22 +2193,51 @@ def api_update_check():
     }})
 
 
+def _power_action_allowed(verb: str) -> tuple:
+    """问 systemd-logind：当前身份到底能不能执行 reboot / poweroff。
+
+    Web 以非 root 的 ttbox 身份运行，systemctl reboot 成不成功取决于 polkit。
+    旧实现是"起线程睡 1.5s 后 os.system(...)，同时立刻回 scheduled=True"——
+    授权通不过也照样报成功，用户看到的是一句没有事实支撑的"已发送"。
+    改为先向 logind 要真实答案，再决定要不要下承诺。
+    """
+    method = 'CanReboot' if verb == 'reboot' else 'CanPowerOff'
+    out = _run_quiet(['busctl', 'call', 'org.freedesktop.login1',
+                      '/org/freedesktop/login1', 'org.freedesktop.login1', method])
+    for token in ('yes', 'no', 'challenge'):
+        if f'"{token}"' in out:
+            if token == 'yes':
+                return True, ''
+            if token == 'challenge':
+                return False, '需要交互式授权（polkit challenge），Web 端无法代为确认'
+            return False, '当前账户无权执行该电源操作（polkit 拒绝）'
+    return False, f'无法查询 {method}（systemd-logind / busctl 不可用）'
+
+
+def _power_action(verb: str):
+    body = request.get_json(silent=True) or {}
+    allowed, why = _power_action_allowed(verb)
+    data = {'action': verb, 'scheduled': False, 'allowed': allowed, 'reason': why}
+    if body.get('dry_run'):
+        # dry_run 是验收脚本用的连通性自检（按 200 判定鉴权门是否放行），沿用 200。
+        # 真实权限结论放在 allowed/reason，调用方可自行判断。
+        return jsonify({'ok': True, 'data': data})
+    if not allowed:
+        return jsonify({'ok': False, 'error': why, 'data': data}), 403
+    threading.Thread(target=lambda: (time.sleep(1.5), os.system('systemctl ' + verb)),
+                     daemon=True).start()
+    data['scheduled'] = True
+    return jsonify({'ok': True, 'data': data})
+
+
 @app.post('/api/system/reboot')
 def reboot_system():
-    body = request.get_json(silent=True) or {}
-    if body.get('dry_run'):
-        return jsonify({'ok': True, 'data': {'action': 'reboot', 'scheduled': True}})
-    threading.Thread(target=lambda: (time.sleep(1.5), os.system('systemctl reboot')), daemon=True).start()
-    return jsonify({'ok': True, 'data': {'action': 'reboot', 'scheduled': True}})
+    return _power_action('reboot')
 
 
 @app.post('/api/system/poweroff')
 def poweroff_system():
-    body = request.get_json(silent=True) or {}
-    if body.get('dry_run'):
-        return jsonify({'ok': True, 'data': {'action': 'poweroff', 'scheduled': True}})
-    threading.Thread(target=lambda: (time.sleep(1.5), os.system('systemctl poweroff')), daemon=True).start()
-    return jsonify({'ok': True, 'data': {'action': 'poweroff', 'scheduled': True}})
+    return _power_action('poweroff')
 
 
 # -- 配置 --
@@ -2156,6 +2324,15 @@ def _auto_start_payload() -> dict:
             'message': '将在下次开机时自动启动', 'updated_at': int(time.time())}
 
 
+def _fan_enabled(pwm_path: str, pwm_raw: int) -> bool:
+    """风扇是否在转：有 PWM 节点且占空比 > 0。
+
+    单拎出来是为了可测 —— Core 启动时就把 pwm 写成 255（满转），
+    这里若恒返 False，面板显示"未启用"而风扇实际在转，是反向的假信息。
+    """
+    return bool(pwm_path) and pwm_raw > 0
+
+
 def _fan_control_payload() -> dict:
     """保持 Web 契约 fan_control 结构（真实硬件读取）。"""
     import glob as _glob
@@ -2173,12 +2350,14 @@ def _fan_control_payload() -> dict:
         pass
     pwm_raw = 0
     pwm_percent = 0
+    pwm_writable = False
     if pwm_path:
         try:
             pwm_raw = int(open(pwm_path).read().strip())
             pwm_percent = int(round(pwm_raw * 100 / 255))
         except Exception:
             pass
+        pwm_writable = os.access(pwm_path, os.W_OK)
     # NPU 温度（devfreq 或 thermal zone）
     temp_c = 0.0
     try:
@@ -2190,12 +2369,16 @@ def _fan_control_payload() -> dict:
         pass
     return {
         'control_available': bool(pwm_path),
-        'enabled': False,
+        # enabled 必须反映硬件真实状态：Core 启动时会把 pwm 写成满转
+        # （core/src/app/Application.cpp 的"风扇满转"段，pwm << 255），
+        # 此处若硬编码 False，面板会显示"未启用"而风扇实际在转 —— 与物理事实相反。
+        'enabled': _fan_enabled(pwm_path, pwm_raw),
         'fan_rpm': 0,
-        'last_error': '',
+        'last_error': '' if (not pwm_path or pwm_writable) else f'{pwm_path} 不可写（权限或只读挂载）',
         'pwm_path': pwm_path,
         'pwm_percent': pwm_percent,
         'pwm_raw': pwm_raw,
+        'pwm_writable': pwm_writable,
         'source': 'npu',
         'source_label': 'NPU',
         'tachometer_available': False,
@@ -3779,22 +3962,21 @@ def get_mouse_hardware():
     except Exception:
         pass
     service_enabled = bool(mouse.get('enabled', False)) or service_active
-    mode = str(mouse.get('proxy_mode') or mouse.get('mode') or 'full_passthrough')
-    if mode in ('proxy', 'synthetic', 'local_hid'):
-        mode = 'full_passthrough'
     return jsonify({
         'ok': True,
         'data': {
             'config': usb_cfg,
             'config_source': 'sysfs_usb_mouse' if connected else 'default',
             'connected': connected,
-            'mode': mode,
+            'mode': _mouse_current_mode(mouse),
             'physical_mouse': physical,
             'service_active': service_active,
             'service_active_text': 'active' if service_active else 'inactive',
             'service_enabled': service_enabled,
             'service_enabled_text': 'enabled' if service_enabled else 'disabled',
-            'set_config_supported': False,
+            'set_config_supported': True,
+            'gadget_config_path': _usbproxy_gadget_config_path(),
+            'gadget_config': _usbproxy_config_for_form(_usbproxy_current_gadget_config()),
             'timing': {
                 'identity_change_settle_delay_sec': float(mouse.get('identity_change_settle_delay_sec', 0.5)),
                 'max_delay_sec': float(mouse.get('max_delay_sec', 30.0)),
@@ -3804,8 +3986,144 @@ def get_mouse_hardware():
     })
 
 
-def _mouse_apply_payload(mouse=None):
-    """保持 Web 契约：PUT 后返回 applied/mode/service_*/timing 结构。"""
+# ── usb-proxy gadget 身份配置通道（cmd.sock，0x4F50 协议）────────────────────
+# 真源 = usbproxy/mouse_control.cpp：kSetConfigReq(14) 载荷 =
+#     <B apply_now><HHHH><BBB><H><BBBB><5×<H len,bytes>>
+# apply_now=1 时 usb-proxy 先落盘 gadget-config.json，再 _exit(0)，由 systemd
+# Restart=always 拉起新配置 —— 这就是前端那句"Windows 会重新枚举"的实现。
+#
+# 旧实现把 usb_* 字段塞进 RuntimeProfile 发给 Core（Core 根本没这些成员，静默
+# 丢弃），却恒返 applied=True，还附一条凭空揎造的 /etc/default/ttbox-usb-proxy
+# —— 该路径全仓无人读，纯装饰。
+USB_PROXY_MAGIC = 0x4F50
+USB_PROXY_VERSION = 1
+USB_PROXY_REQ_SET_CONFIG = 14
+USB_PROXY_RESP_SET_CONFIG = 15
+USB_PROXY_RESP_ERROR = 3
+USB_PROXY_CONFIG_KEYS = (
+    'usb_vid', 'usb_pid', 'usb_bcd_usb', 'usb_bcd_device', 'usb_device_class',
+    'usb_device_subclass', 'usb_device_protocol', 'usb_max_power', 'hid_protocol',
+    'hid_subclass', 'hid_report_length', 'hid_interval', 'usb_manufacturer',
+    'usb_product', 'usb_serial', 'usb_configuration', 'hid_report_desc_hex',
+)
+USB_PROXY_HEX_KEYS = ('usb_vid', 'usb_pid', 'usb_bcd_usb', 'usb_bcd_device')
+
+
+def _usbproxy_gadget_config_path() -> str:
+    """usb-proxy 落盘的 gadget 配置文件（unit 的 WorkingDirectory=<release>/usbproxy/）。"""
+    return os.path.join(ttbox_paths.repo_root(), 'usbproxy', 'gadget-config.json')
+
+
+def _usbproxy_send_set_config(cfg: dict, apply_now: bool) -> tuple:
+    """把 gadget 身份配置真正下发给 usb-proxy（cmd.sock，SOCK_SEQPACKET）。
+
+    返回 (是否被 usb-proxy 确认, 失败原因人话)。连不上 / 无回包 / 协议不符 /
+    被拒绝，一律算失败 —— 不再有"无条件 applied=True"这个分支。
+    """
+    def u16(value) -> bytes:
+        return struct.pack('<H', int(value) & 0xFFFF)
+
+    def u8(value) -> bytes:
+        return struct.pack('<B', int(value) & 0xFF)
+
+    def ustr(value) -> bytes:
+        raw = str(value).encode('utf-8')
+        return u16(len(raw)) + raw
+
+    payload = b''.join([
+        u16(cfg.get('usb_vid', 0)), u16(cfg.get('usb_pid', 0)),
+        u16(cfg.get('usb_bcd_usb', 0x0200)), u16(cfg.get('usb_bcd_device', 0x0100)),
+        u8(cfg.get('usb_device_class', 0)), u8(cfg.get('usb_device_subclass', 0)),
+        u8(cfg.get('usb_device_protocol', 0)), u16(cfg.get('usb_max_power', 250)),
+        u8(cfg.get('hid_protocol', 2)), u8(cfg.get('hid_subclass', 1)),
+        u8(cfg.get('hid_report_length', 4)), u8(cfg.get('hid_interval', 1)),
+        ustr(cfg.get('usb_manufacturer', '')), ustr(cfg.get('usb_product', '')),
+        ustr(cfg.get('usb_serial', '')), ustr(cfg.get('usb_configuration', '')),
+        ustr(cfg.get('hid_report_desc_hex', '')),
+    ])
+    sock_path = ttbox_paths.MOUSE_CMD_SOCK_DEFAULT
+    try:
+        conn = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        conn.settimeout(5.0)
+        conn.connect(sock_path)
+    except Exception as exc:
+        return False, f'usb-proxy 未运行（{sock_path} 连不上：{exc}）'
+    try:
+        conn.sendall(struct.pack('<HBB', USB_PROXY_MAGIC, USB_PROXY_VERSION,
+                                 USB_PROXY_REQ_SET_CONFIG) + struct.pack('<I', 1) +
+                     u8(1 if apply_now else 0) + payload)
+        reply = conn.recv(512)
+    except Exception as exc:
+        return False, f'usb-proxy 无回包：{exc}'
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    if len(reply) < 8:
+        return False, f'usb-proxy 回包过短（{len(reply)} 字节）'
+    magic, version, rtype = struct.unpack_from('<HBB', reply, 0)
+    if magic != USB_PROXY_MAGIC or version != USB_PROXY_VERSION:
+        return False, f'usb-proxy 回包协议不符（magic=0x{magic:04x} version={version}）'
+    if rtype == USB_PROXY_RESP_ERROR:
+        detail = reply[8:].decode('utf-8', 'replace').strip('\x00').strip()
+        return False, f'usb-proxy 拒绝该配置：{detail or "未给出原因"}'
+    if rtype != USB_PROXY_RESP_SET_CONFIG:
+        return False, f'usb-proxy 回包类型异常（type={rtype}）'
+    return True, ''
+
+
+def _usbproxy_current_gadget_config() -> dict:
+    """读 usb-proxy 实际落盘的 gadget 配置；读不到返回空 dict（不编造）。"""
+    try:
+        with open(_usbproxy_gadget_config_path(), encoding='utf-8') as fh:
+            data = json.load(fh)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _usbproxy_config_for_form(cfg: dict) -> dict:
+    """把落盘配置转成前端表单格式（vid/pid/bcd 用 0xXXXX 字符串，与 GET 一致）。"""
+    out = {}
+    for key in USB_PROXY_CONFIG_KEYS:
+        if key not in cfg:
+            continue
+        value = cfg[key]
+        if key in USB_PROXY_HEX_KEYS and isinstance(value, int):
+            value = f'0x{value:04X}'
+        out[key] = value
+    return out
+
+
+def _usbproxy_unit_mode() -> str:
+    """usb-proxy 实际透传模式 —— 真源是 systemd 单元的 Environment=USB_PROXY_MODE。"""
+    out = _run_quiet(['systemctl', 'show', '-p', 'Environment', 'ttbox-usbproxy'])
+    for token in out.replace('"', ' ').split():
+        if token.startswith('USB_PROXY_MODE='):
+            return token.split('=', 1)[1].strip()
+    return ''
+
+
+def _mouse_current_mode(mouse: dict) -> str:
+    """当前生效的透传模式：以 systemd 单元为准（web 改不了它），读不到才回落 profile。
+
+    旧实现里有一句固定映射 "proxy/synthetic/local_hid -> full_passthrough"，
+    等于无论实际什么模式都报透传；GET 又只取 profile（用户请求值）而非真值。
+    前端单选值的 full 对应名是 full_passthrough，此处对齐。
+    """
+    unit = _usbproxy_unit_mode()
+    if unit:
+        return 'full_passthrough' if unit == 'full' else unit
+    return str(mouse.get('mode') or mouse.get('proxy_mode') or '').strip() or 'full_passthrough'
+
+
+def _mouse_apply_payload(mouse=None, applied=False, apply_error=''):
+    """保持 Web 契约：PUT 后返回 applied/mode/service_*/timing 结构。
+
+    applied 由真实下发结果决定，不再恒 True；apply_error 带失败人话原因；
+    config 回填实际落盘的身份字段，让表单显示"已应用什么"而不是用户刚输入的。
+    """
     import glob
     hidg = sorted(glob.glob('/dev/hidg*'))
     mouse = mouse or {}
@@ -3816,13 +4134,14 @@ def _mouse_apply_payload(mouse=None):
         service_active = out == 'active' or bool(hidg)
     except Exception:
         pass
-    mode = str(mouse.get('proxy_mode') or mouse.get('mode') or 'full_passthrough')
-    if mode in ('proxy', 'synthetic', 'local_hid'):
-        mode = 'full_passthrough'
+    gadget_cfg = _usbproxy_current_gadget_config()
     return {
-        'applied': True,
-        'env_path': '/etc/default/ttbox-usb-proxy',
-        'mode': mode,
+        'applied': bool(applied),
+        'apply_error': apply_error,
+        'gadget_config_path': _usbproxy_gadget_config_path(),
+        'gadget_config': _usbproxy_config_for_form(gadget_cfg),
+        'config': _usbproxy_config_for_form(gadget_cfg),
+        'mode': _mouse_current_mode(mouse),
         'service_active': service_active,
         'service_active_text': 'active' if service_active else 'inactive',
         'service_enabled': service_active,
@@ -3856,11 +4175,21 @@ def update_mouse_hardware():
         )})
     prof['mouse'] = mouse
     ok, detail = _mouse_save_or_ipc(prof, mouse)
-    payload = _mouse_apply_payload(mouse)
+    # 身份配置的真源是 usb-proxy 的 gadget-config.json，不是 Core 的 RuntimeProfile
+    # （Core 没有 usb_*/hid_* 成员，先前发过去等于丢掉）。这里走 cmd.sock 真下发。
+    gadget_cfg = {k: v for k, v in mouse.items() if k in USB_PROXY_CONFIG_KEYS}
+    if gadget_cfg:
+        applied, apply_error = _usbproxy_send_set_config(gadget_cfg, bool(body.get('apply_now')))
+    else:
+        applied, apply_error = False, '未提供任何 USB 身份字段，未下发配置'
+    payload = _mouse_apply_payload(mouse, applied=applied, apply_error=apply_error)
     if detail:
         payload['_core_offline'] = True
         payload['_detail'] = detail
-    return jsonify({'ok': ok, 'data': payload})
+    # ok 取两个通道的合取：任一路没落实就不能报成功。
+    both_ok = bool(ok and applied)
+    return jsonify({'ok': both_ok, 'data': payload,
+                    'error': '' if both_ok else (apply_error or detail)})
 
 
 @app.put('/api/hardware/mouse/mode')
@@ -3875,11 +4204,16 @@ def update_mouse_proxy_mode():
     mouse['proxy_mode'] = mode
     prof['mouse'] = mouse
     ok, detail = _mouse_save_or_ipc(prof, mouse)
-    payload = _mouse_apply_payload(mouse)
+    # 透传模式的真源是 systemd 单元的 Environment=USB_PROXY_MODE，改它要 root +
+    # daemon-reload，web（ttbox 身份）做不到。旧实现把这个写进 profile 就报成功，
+    # 而单元里的模式从未变过 —— 典型的假落实。如实报失败，并告知当前真实模式。
+    mode_error = ('切换 USB 透传模式需修改 systemd 单元的 USB_PROXY_MODE 并以 root '
+                  '重载服务，Web 无此权限；请在板端运维通道执行')
+    payload = _mouse_apply_payload(mouse, applied=False, apply_error=mode_error)
     if detail:
         payload['_core_offline'] = True
         payload['_detail'] = detail
-    return jsonify({'ok': ok, 'data': payload})
+    return jsonify({'ok': False, 'error': mode_error, 'data': payload})
 
 
 def _display_mode_entry(token, label, w, h, refresh, pc_khz):
