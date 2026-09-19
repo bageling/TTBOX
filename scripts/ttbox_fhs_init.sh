@@ -94,6 +94,14 @@ fi
 # ---- 3. /var/lib/ttbox：客户数据（升级绝不触碰）----
 # 模型仓库根（ModelRegistry 会自行建 registry/installed/staging/... 子目录）
 install -d -o ttbox -g ttbox -m 0775 /var/lib/ttbox/models
+# V-04 幂等补刀：子目录若由旧布局/ROOT 创建，可能是 root:root 755，导致 web(ttbox)
+# 写入 _incoming 报 EACCES。这里显式创建并修正属主/权限，确保升级设备也生效。
+install -d -o ttbox -g ttbox -m 0775 /var/lib/ttbox/models/installed \
+    /var/lib/ttbox/models/staging /var/lib/ttbox/models/registry \
+    /var/lib/ttbox/models/cache /var/lib/ttbox/models/quarantine \
+    /var/lib/ttbox/models/_incoming 2>/dev/null || true
+find /var/lib/ttbox/models -maxdepth 3 -type d -exec chown ttbox:ttbox {} + 2>/dev/null || true
+find /var/lib/ttbox/models -maxdepth 3 -type d -exec chmod 0775 {} + 2>/dev/null || true
 # HID 包仓库根（HidPackageRegistry 同上）
 install -d -o ttbox -g ttbox -m 0775 /var/lib/ttbox/hid
 # 授权凭据区（T04 使用，0700）

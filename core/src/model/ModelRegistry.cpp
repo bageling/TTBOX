@@ -977,7 +977,14 @@ bool ModelRegistry::scan_locked(std::vector<ModelRecord>* out, std::string* erro
             const std::string id = entry.path().filename().string();
             if (!valid_model_id(id)) continue;
             if (parent == root_ && (id == "registry" || id == "installed" || id == "staging" ||
-                                    id == "cache" || id == "quarantine" || id == "_incoming")) continue;
+                                    id == "cache" || id == "quarantine" ||
+                                    id == "_incoming" || id == "incoming")) continue;
+            // 根目录（旧兼容布局）下：没有 manifest.json 也没有 model.rknn 的目录
+            // 只是历史/工作目录，不应作为模型展示，避免产生空 id 的幽灵卡片。
+            if (legacy && !fs::is_regular_file(entry.path() / "manifest.json", ec) &&
+                !fs::is_regular_file(entry.path() / "model.rknn", ec)) {
+                continue;
+            }
             if (!ids.insert(id).second) continue;
             ModelRecord record;
             build_record_locked(entry.path().string(), id, &record);

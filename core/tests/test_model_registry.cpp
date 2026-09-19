@@ -332,6 +332,18 @@ TEST(registry_scan_rejects_invalid_packages) {
     CHECK(bad_metadata != nullptr && bad_metadata->failure_code == "METADATA_INVALID");
 }
 
+TEST(registry_scan_ignores_work_dirs_and_empty_dirs) {
+    RegistryFixture fx;
+    fs::create_directories(fx.root + "/incoming");
+    fs::create_directories(fx.root + "/_incoming");
+    fs::create_directories(fx.root + "/empty_dir");
+    write_text(fx.root + "/not_a_dir", "not a model");
+
+    CHECK(fx.reg.refresh());
+    auto records = fx.reg.records();
+    CHECK_EQ(records.size(), 0u);
+}
+
 TEST(registry_local_file_source) {
     const std::string src = fx_tmp("src_model.rknn");
     make_fake_model(src);

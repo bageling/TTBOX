@@ -11407,12 +11407,13 @@ function renderModelCards(models, selectedModelId) {
       });
     });
 
+    const canDeleteId = Boolean(model.id);
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
     deleteButton.className = "icon-button delete-model-button";
-    deleteButton.title = isSelected ? "当前模型不能删除" : "删除模型";
-    deleteButton.setAttribute("aria-label", isSelected ? "当前模型不能删除" : `删除 ${modelFileName(model)}`);
-    deleteButton.disabled = isSelected;
+    deleteButton.title = isSelected ? "当前模型不能删除" : (canDeleteId ? "删除模型" : "模型标识无效，无法删除");
+    deleteButton.setAttribute("aria-label", isSelected ? "当前模型不能删除" : (canDeleteId ? `删除 ${modelFileName(model)}` : "模型标识无效，无法删除"));
+    deleteButton.disabled = isSelected || !canDeleteId;
     deleteButton.innerHTML = trashIconSvg();
     deleteButton.addEventListener("click", (event) => {
       event.stopPropagation();

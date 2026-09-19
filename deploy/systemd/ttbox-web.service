@@ -34,6 +34,9 @@ Environment=PYTHONPATH=/opt/ttbox/current/plugins/web
 # IPC socket 唯一真源（A-PATH-5）：与 Core 的 --ipc 及 core/src/common/Paths.hpp::kIpcSocketDefault
 # 保持一致（值 = /run/ttbox/core.sock；跨语言同值由 scripts/ttbox_conventions_gate.sh 断言）。
 Environment=TTBOX_IPC_SOCKET=/run/ttbox/core.sock
+# V-04：模型库根与 Core 的 model_registry_root 对齐（/var/lib/ttbox/models）。
+# 缺省 /opt/ttbox/models 是旧布局且 root:root 不可写，会导致上传 500。
+Environment=TTBOX_MODELS_ROOT=/var/lib/ttbox/models
 # ★ V-20 根治式删除：原 `Environment=TTBOX_WEB_HOST/PORT` 是**装饰性 env**——web 控制台
 # 监听地址/端口在源码 plugins/web/bin/ttbox-web.py（LISTEN_HOST/LISTEN_PORT）里定死，
 # 改这两行**不会生效**，只会在排障时误导。故删除（不是注释保留）。

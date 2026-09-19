@@ -2937,9 +2937,9 @@ def import_model():
 @app.post('/api/models/delete')
 def delete_model():
     body = request.get_json(silent=True) or {}
-    model_id = body.get('model_id', '')
+    model_id = str(body.get('model_id') or '').strip()
     if not model_id:
-        return jsonify({'ok': False, 'error': 'missing field: model_id'})
+        return jsonify({'ok': False, 'error': 'missing field: model_id'}), 400
     r = ipc_request('MODEL_REMOVE', {'model_id': model_id})
     if r.get('status') != 0:
         return jsonify({'ok': False, 'error': r.get('error', '删除失败')})
