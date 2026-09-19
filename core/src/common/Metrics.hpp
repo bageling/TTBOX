@@ -49,6 +49,10 @@ struct PipelineMetrics {
     uint64_t no_target_frames = 0; // 无目标帧数
     bool aim_active = false;   // 热键按下（AI 控制激活中）
     bool injection_allowed = false;
+    // 热键保护是否处于「全部挂起」（面板 hotkey_guard 的 toggle 键按一下切换）。
+    // 挂起时 injection_allowed 恒 false、gated_frames 持续增长 —— 两者要分开看：
+    // 「挂起」是用户主动刹的车，「没按热键」只是没在瞄。
+    bool aim_hotkeys_suspended = false;
     bool mouse_control_connected = false;
     uint64_t mouse_control_socket_write_ok = 0;
     uint64_t mouse_control_socket_write_fail = 0;

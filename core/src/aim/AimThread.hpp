@@ -69,6 +69,9 @@ public:
         uint64_t gated_frames = 0;      // Hotkey Gate 拦截的周期数（热键未按）
         uint16_t last_hotkey_bits = 0;  // 最近一次采样的物理按键位图（遥测）
         bool last_injection_allowed = false;  // 最近一次 Gate 判定结果
+        // 热键保护是否处于「全部挂起」（hotkey_guard.enabled 时由 toggle_hotkey 翻转）。
+        // 挂起期间热键位图被清零 ⇒ last_injection_allowed 恒 false、gated_frames 持续增长。
+        bool hotkeys_suspended = false;
         uint64_t last_timestamp_us = 0;
     };
     AimThread() = default;
@@ -123,6 +126,10 @@ private:
     ContinuousLead continuous_lead_;  // 持续提前量：AI 输出持续同向后附加 X 偏置（pull_curve 后、recoil 前注入 scaled_x）
     PersonalTrajectoryShader personal_shader_;  // 拟人化整形引擎：Fitts 时长+包络+垂直抖动（Gate 前生效）
     RecoilController recoil_;       // 压枪引擎：开火期间下压（pull_curve 后、deadzone 前注入 scaled_y）
+    // 热键保护：toggle_hotkey 的**上升沿**翻转挂起状态。用上一周期的原始位图判边沿，
+    // 与瞄准热键的"按住才生效"语义区分开（这里是按一下切换一次，按住不会连续翻转）。
+    uint16_t last_raw_buttons_ = 0;         // 上一周期采样到的原始物理按键位图
+    bool hotkeys_suspended_ = false;        // 当前是否全部挂起（跨周期保持，直到再按一次）
     // 显示框 One-Euro 平滑（第15阶段）：检测框上边缘 y1 帧间跳变 ±18px（模型头顶边界），
     // 平滑后预览框稳定、标定稳定检测可过。仅影响显示/标定观测，不影响瞄准控制链。
     OneEuroFilter display_smooth_x1_{0.8f, 0.10f, 1.0f};

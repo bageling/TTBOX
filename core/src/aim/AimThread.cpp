@@ -47,6 +47,10 @@ void AimThread::reset_runtime_state() {
     remainder_x_ = 0.0f;
     remainder_y_ = 0.0f;
     last_target_id_ = -1;
+    // 热键保护：挂起状态**跨世代保留** —— 它是用户按出来的意图，换个模型不该被悄悄解除。
+    // 但边沿判据要重新对齐到当前物理位图：否则 start 那一刻会把"键仍按着"误读成一次
+    // 新的上升沿，刚挂起就被自己解掉（start 后第一周期就会翻转一次）。
+    last_raw_buttons_ = physical_buttons_ ? physical_buttons_->load(std::memory_order_acquire) : 0;
 }
 void AimThread::stop() {
     if (!running_.exchange(false)) return;
@@ -123,9 +127,27 @@ void AimThread::loop() {
                 static_cast<uint32_t>(task.timestamp_us / 1000ULL));
             // ---- Hotkey Gate 输入解析（每周期独立计算，AI 链路照常运行）----
             // any 模式：主键或副键任一按下即触发；all 模式：两者同时按下。
-            uint16_t hotkey_bits = 0;
+            const uint16_t raw_buttons =
+                physical_buttons_ ? physical_buttons_->load(std::memory_order_acquire) : 0;
+            // ---- 热键保护（hotkey_guard）：toggle 键**上升沿**翻转「全部挂起」----
+            // 挂起 = 本控制周期把热键位图清零 ⇒ 瞄准 Gate 与压枪一并失效（两者都读这个位图）。
+            // 物理鼠标透传不受影响：那条路在 usbproxy 侧，不经过本变量。
+            // guard 关掉（或 toggle 键未配）时立即恢复"未挂起"，不保留幽灵挂起状态。
+            uint8_t guard_toggle = 0;
+            if (frame_profile) {
+                const auto& guard = frame_profile->mouse.hotkey_guard;
+                if (guard.enabled) guard_toggle = guard.toggle_hotkey;
+            }
+            if (guard_toggle != 0) {
+                const bool now_down = (raw_buttons & guard_toggle) != 0;
+                const bool was_down = (last_raw_buttons_ & guard_toggle) != 0;
+                if (now_down && !was_down) hotkeys_suspended_ = !hotkeys_suspended_;
+            } else {
+                hotkeys_suspended_ = false;
+            }
+            last_raw_buttons_ = raw_buttons;
+            uint16_t hotkey_bits = hotkeys_suspended_ ? 0u : raw_buttons;
             bool injection_allowed = false;
-            if (physical_buttons_) hotkey_bits = physical_buttons_->load(std::memory_order_acquire);
             if (frame_profile) {
                 const bool a = (hotkey_bits & frame_profile->mouse.aim_hotkey) != 0;
                 const bool b = frame_profile->mouse.aim_hotkey2 != 0 && (hotkey_bits & frame_profile->mouse.aim_hotkey2) != 0;
@@ -511,7 +533,10 @@ void AimThread::loop() {
                 ++status_.clipped_frames;
             }
             if (!injection_allowed) ++status_.gated_frames;
-            status_.last_hotkey_bits = hotkey_bits;
+            // 遥测口径：last_hotkey_bits 保留**原始物理**按键位图（挂起时也如实反映手上真按了什么），
+            // 挂起本身单独用一个布尔字段表达，避免"挂起"与"没按键"在遥测里混成同一件事。
+            status_.last_hotkey_bits = raw_buttons;
+            status_.hotkeys_suspended = hotkeys_suspended_;
             status_.last_injection_allowed = injection_allowed;
             status_.last_timestamp_us = task.timestamp_us;
             status_.last_frame = task.frame_number;

@@ -177,6 +177,20 @@ struct RecoilConfig {
     float humanize_jitter_frequency = 8.0f; // X 轴微动变化频率（Hz）
 };
 
+// 热键保护（hotkey_guard）：按一次 toggle_hotkey 在「热键生效 / 全部挂起」之间切换。
+//
+// 挂起的实现方式是**把物理按键位图在本控制周期内清零**（AimThread 里做），
+// 于是所有以位图为判据的链路一并失效：瞄准热键 Gate、压枪开火键，
+// 以及后续在同一个位图上挂的连点 / 自动开火。
+// 物理鼠标自身的透传不受影响 —— 那条路不经过这个位图（见 usbproxy 的透传分支）。
+//
+// ★ 默认 enabled=false ⇒ 未显式开启时 AimThread 不做任何翻转、位图原样透传，
+//   输出链与本参数加入前逐字节一致（照 ContinuousLeadConfig 的先例）。
+struct HotkeyGuardConfig {
+    bool enabled = false;          // 总开关（关掉即恢复"未挂起"，不保留幽灵挂起）
+    uint8_t toggle_hotkey = 0x04;  // 切换键位掩码：1=left 2=right 4=middle 8=back 16=forward
+};
+
 // 目标锁定确认配置（ENTER/HOLD 双阈值 + 确认帧 + instant-enter，第2项）
 // control_gate 目标确认：新目标需更高置信度连续确认，已锁目标用较低阈值保持（防闪烁），
 // 近距离高置信目标跳过确认窗（快瞄）。
@@ -245,6 +259,7 @@ struct MouseProfile {
         // **本结构体缺该成员、AimThread 从未调用** ⇒ 签名/面板都无从配置（M2 补齐）。
         ContinuousLeadConfig continuous_lead;
     RecoilConfig recoil;                    // 压枪（输出链 pull_curve 后、deadzone 前注入 scaled_y）
+    HotkeyGuardConfig hotkey_guard;         // 热键保护（按 toggle_hotkey 切换「热键挂起」）
     AimPointProfile aim_point;
     float lost_grace_ms = 78.0f;                // 目标丢失宽限期
     LockConfirmConfig lock_confirm;                 // 目标锁定确认（ENTER/HOLD + instant-enter，第2项）

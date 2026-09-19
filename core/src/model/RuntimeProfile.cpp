@@ -358,6 +358,12 @@ JsonValue RuntimeProfile::to_json() const {
     rc.set("humanize_jitter_px", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_px)));
     rc.set("humanize_jitter_frequency", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_frequency)));
     m.set("recoil", std::move(rc));
+    // 热键保护（hotkey_guard）：按一次 toggle_hotkey 切换「热键挂起」。
+    // 挂起状态本身是运行时状态（AimThread 成员），**不落盘**；这里只持久化配置。
+    JsonValue hg = JsonValue::object();
+    hg.set("enabled", JsonValue::boolean(mouse.hotkey_guard.enabled));
+    hg.set("toggle_hotkey", JsonValue::number(static_cast<double>(mouse.hotkey_guard.toggle_hotkey)));
+    m.set("hotkey_guard", std::move(hg));
     JsonValue ha = JsonValue::object();
     ha.set("enabled", JsonValue::boolean(mouse.aim_point.head_aim.enabled));
     ha.set("head_offset_top_fraction", JsonValue::number(static_cast<double>(mouse.aim_point.head_aim.head_offset_top_fraction)));
@@ -554,6 +560,14 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.recoil.humanize_curve_strength = static_cast<float>(obj_num(*rk, "humanize_curve_strength", 0.45));
             p.mouse.recoil.humanize_jitter_px = static_cast<float>(obj_num(*rk, "humanize_jitter_px", 0.25));
             p.mouse.recoil.humanize_jitter_frequency = static_cast<float>(obj_num(*rk, "humanize_jitter_frequency", 8.0));
+        }
+        // 热键保护（hotkey_guard）解析：缺字段一律取"保守默认"（enabled=false ⇒ 不翻转、位图原样透传），
+        // 故旧配置/旧预设文件加载后行为与本功能加入前完全一致（向后兼容）。
+        // toggle_hotkey 只取低 5 位（鼠标五键位图：左1 右2 中4 侧8 侧16），越界位一律掩掉。
+        if (const JsonValue* hg = m->find("hotkey_guard"); hg && hg->is_object()) {
+            p.mouse.hotkey_guard.enabled = obj_bool(*hg, "enabled", false);
+            p.mouse.hotkey_guard.toggle_hotkey =
+                static_cast<uint8_t>(obj_int(*hg, "toggle_hotkey", 4) & 0x1F);
         }
         if (const JsonValue* ha = m->find("head_aim"); ha && ha->is_object()) {
             auto obj_num2 = [&](const char* k, double d) {

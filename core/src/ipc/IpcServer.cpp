@@ -935,6 +935,7 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("no_target_frames", JsonValue::number(static_cast<double>(status.metrics.no_target_frames)));
     m.set("aim_active", JsonValue::boolean(status.metrics.aim_active));
     m.set("injection_allowed", JsonValue::boolean(status.metrics.injection_allowed));
+    m.set("aim_hotkeys_suspended", JsonValue::boolean(status.metrics.aim_hotkeys_suspended));
     m.set("mouse_control_connected", JsonValue::boolean(status.metrics.mouse_control_connected));
     m.set("mouse_control_socket_write_ok", JsonValue::number(static_cast<double>(status.metrics.mouse_control_socket_write_ok)));
     m.set("mouse_control_socket_write_fail", JsonValue::number(static_cast<double>(status.metrics.mouse_control_socket_write_fail)));

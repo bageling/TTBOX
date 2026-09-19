@@ -742,6 +742,19 @@ def _bits_to_hotkey(v):
         return ''
 
 
+def _hotkey_guard_to_web(hg) -> dict:
+    """Core 的 mouse.hotkey_guard → 前端控件值。
+
+    缺字段时给的是**与 Core 结构体一致的默认值**（enabled=False / middle），
+    不是另立一套。挂起状态本身不在这里——它是运行期状态，走 state.aim.hotkeys_suspended。
+    """
+    hg = hg if isinstance(hg, dict) else {}
+    return {
+        'enabled': bool(hg.get('enabled', False)),
+        'toggle_hotkey': _bits_to_hotkey(hg.get('toggle_hotkey', 4)) or 'middle',
+    }
+
+
 # controller 内的数值/布尔直通字段（Web key → mouse key）
 CONTROLLER_NUMS = {
     'kp_x': 'kp_x', 'kp_y': 'kp_y',
@@ -917,6 +930,19 @@ def web_body_to_profile(body: dict) -> dict:
             recoil[tk] = rk[yk]
     if recoil:
         mouse['recoil'] = recoil
+
+    # 热键保护（hotkey_guard）—— mouse.hotkey_guard.*
+    # 语义：按一次 toggle_hotkey 在「热键生效 / 全部挂起」之间切换。挂起状态是 Core
+    # 运行期状态，不落盘；面板通过 /api/state 的 state.aim.hotkeys_suspended 回读。
+    guard = {}
+    hg = body.get('hotkey_guard') or {}
+    if hg.get('enabled') is not None:
+        guard['enabled'] = bool(hg['enabled'])
+    if hg.get('toggle_hotkey') is not None:
+        # 空字符串/未识别 → 回落 Core 默认的 middle（4），不写 0（0 = 没有切换键 = 永不挂起）
+        guard['toggle_hotkey'] = _hotkey_to_bits(hg['toggle_hotkey'], 4) or 4
+    if guard:
+        mouse['hotkey_guard'] = guard
 
     # 头部瞄准约束（第3项）—— mouse.head_aim.*
     head_aim = {}
@@ -1170,7 +1196,7 @@ def profile_to_web(prof: dict) -> dict:
             'humanize_jitter_frequency': recoil.get('humanize_jitter_frequency', 8.0),
         }, 'rapid_fire': {}, 'auto_back_flick': {}, 'crosshair': {},
         'auto_trigger': {'enabled': False, 'profiles': []},
-        'hotkey_guard': {'enabled': False, 'toggle_hotkey': 'middle'},
+        'hotkey_guard': _hotkey_guard_to_web(mouse.get('hotkey_guard')),
         'mouse_output': {'mode': 'full_passthrough'},
         'latency': lat, 'fan_control': {}, 'loopout_overlay': {},
     }
@@ -1277,7 +1303,9 @@ def collect_web_state() -> dict:
                     'active_hotkey': m.get('aim_active_hotkey', ''),
                     'active_target_track_id': int(m.get('aim_target_id', -1)),
                     'aim_profile_alternate_offset_states': [False],
-                    'hotkeys_suspended': False,
+                    # 热键保护的真实挂起状态（Core 侧 hotkey_guard 的 toggle 翻转结果）。
+                    # 旧实现恒 False —— 用户按了挂起键，面板徽标还说"未禁用"，是撒谎。
+                    'hotkeys_suspended': bool(m.get('aim_hotkeys_suspended', False)),
                     'last_error': runtime_error or ('未导入模型' if not prof.get('model_id') else ''),
                     'locked': False,
                 },

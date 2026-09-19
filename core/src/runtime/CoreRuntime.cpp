@@ -425,6 +425,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
     out->last_timestamp_us = aim_status.last_timestamp_us;
     out->aim_active = aim_status.has_target;
     out->injection_allowed = aim_status.last_injection_allowed;
+    out->aim_hotkeys_suspended = aim_status.hotkeys_suspended;
     if (auto* backend = dynamic_cast<output::OutputBackend*>(output_.get())) {
         const auto health = backend->health();
         out->mouse_control_connected = health.state == output::BackendState::kConnected;

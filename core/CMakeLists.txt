@@ -623,6 +623,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_hotkey_gate PRIVATE ttbox_core)
   add_test(NAME test_hotkey_gate COMMAND test_hotkey_gate)
 
+  # 热键保护（hotkey_guard）测试：按 toggle 键切换「全部挂起」（9 个场景 + JSON 往返）
+  add_executable(test_hotkey_guard tests/test_hotkey_guard.cpp)
+  target_link_libraries(test_hotkey_guard PRIVATE ttbox_core)
+  add_test(NAME test_hotkey_guard COMMAND test_hotkey_guard)
+
   # 拉枪曲线注入 AimThread 输出链测试（4 个验收场景）
     add_executable(test_pull_curve_aimthread tests/test_pull_curve_aimthread.cpp)
     target_link_libraries(test_pull_curve_aimthread PRIVATE ttbox_core)
