@@ -371,6 +371,11 @@ class OtaUpdater:
                 shutil.copyfile(src_cur, dst)
                 continue
             raise OtaError("delta_base_mismatch", f"增量合并缺文件（payload 与当前树都没有/哈希不符）: {rel}")
+        # manifest 自身不在 files_sha256 清单里，必须单独带上（2026-09-19 板端实测：
+        # 漏带 ⇒ ⑥ 全量复验读不到 manifest ⇒ manifest_mismatch）
+        manifest_src = os.path.join(staging, "RELEASE_MANIFEST.json")
+        if os.path.isfile(manifest_src):
+            shutil.copyfile(manifest_src, os.path.join(full, "RELEASE_MANIFEST.json"))
         shutil.rmtree(staging, ignore_errors=True)
         os.rename(full, staging)
 
