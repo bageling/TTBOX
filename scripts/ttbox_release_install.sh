@@ -348,6 +348,35 @@ ensure_transitional_links() {
 }
 
 # ---------------------------------------------------------------------------
+# 步骤 5b2：同步 systemd unit 与运行时目录权限（升级场景必备）
+# ---------------------------------------------------------------------------
+sync_units_and_runtime_perms() {
+    log "step5b2：同步 systemd unit 与运行时目录权限"
+    local ensure_script="${TTBOX_PREFIX}/current/scripts/ttbox_ensure_services.sh"
+    if [[ -x "$ensure_script" ]]; then
+        if bash "$ensure_script"; then
+            log "unit 同步完成"
+        else
+            warn "unit 同步返回非 0（继续；release 仍可能可用）"
+        fi
+    else
+        warn "找不到 ensure 脚本 ${ensure_script}，跳过 unit 同步"
+    fi
+
+    # V-04：升级上来的旧机器 /var/lib/ttbox/models 子目录可能是 root:root 755，
+    # 导致 web(ttbox) 写入 _incoming 报 EACCES。幂等修正。
+    if [[ -d /var/lib/ttbox/models ]]; then
+        install -d -o ttbox -g ttbox -m 0775 /var/lib/ttbox/models/installed \
+            /var/lib/ttbox/models/staging /var/lib/ttbox/models/registry \
+            /var/lib/ttbox/models/cache /var/lib/ttbox/models/quarantine \
+            /var/lib/ttbox/models/_incoming 2>/dev/null || true
+        find /var/lib/ttbox/models -maxdepth 3 -type d -exec chown ttbox:ttbox {} + 2>/dev/null || true
+        find /var/lib/ttbox/models -maxdepth 3 -type d -exec chmod 0775 {} + 2>/dev/null || true
+        log "模型库运行时权限已修正"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # 步骤 5c/5d：daemon-reload + restart
 # ---------------------------------------------------------------------------
 reload_and_restart() {
@@ -419,6 +448,7 @@ activate() {
     ensure_transitional_links
 
     if have_systemd; then
+        sync_units_and_runtime_perms
         reload_and_restart
         log "step5d：健康检查（最长 ${HEALTH_TIMEOUT}s）…"
         if ! health_check; then
