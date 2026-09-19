@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import math
 import os
@@ -3143,7 +3144,18 @@ def import_preset():
         data = json.loads(f.read())
     except Exception:
         return jsonify({'ok': False, 'error': 'invalid preset file'})
-    name = str(data.get('name') or Path(f.filename).stem or 'imported')
+    if not isinstance(data, dict):
+        return jsonify({'ok': False, 'error': 'preset file must be a JSON object'})
+    # 兼容旧版导出：那时 /export 返回的是 API 信封而非预设本体，
+    # 用户手里已有的导出文件形如 {"ok":true,"data":{"preset":{...}}}。
+    # 这里认出来并把信封剥掉，免得那些文件白导一遍。
+    env = data.get('data')
+    if 'ok' in data and isinstance(env, dict) and isinstance(env.get('preset'), dict):
+        data = env['preset']
+    # 名称优先级：前端 FormData 里的 name（用户在"导入后名称"里填的）> 预设文件里的
+    # name > 文件名主干。旧实现只认后两者，用户填了等于没填。
+    requested = str(request.form.get('name') or '').strip()
+    name = requested or str(data.get('name') or '') or Path(f.filename).stem or 'imported'
     safe = re.sub('[^\\w\\-]', '_', name)[:64]
     d = Path(PRESETS_DIR)
     d.mkdir(parents=True, exist_ok=True)
@@ -3153,7 +3165,17 @@ def import_preset():
 
 @app.get('/api/presets/<name>/export')
 def export_preset(name: str):
-    # 保持 Web 契约：文件不存在报路径错误
+    """导出预设 —— 返回**预设文件本体**，不是 API 信封。
+
+    这个路由的消费方是前端 <a href download> 链接（index.html::presetExportUrl
+    拼出来），浏览器把响应体直接存成文件。旧实现返回
+    {'ok':..,'data':{'preset':..}}，等于把信封当预设导出：用户再导入时，导入端看到的是
+    信封（根上既没有 name，也没有 capture/ai/mouse 这些配置键），于是
+    "导出 → 导入 → 加载"恒静默无效 —— 导入不报错，加载也不报错，就是没效果。
+
+    文件不存在 / 损坏时仍返回 JSON 错误体（浏览器存下来的是一份错误说明，
+    不会和正常预设混淆）。
+    """
     safe = re.sub('[^\\w\\-]', '_', name)[:64]
     pf = Path(PRESETS_DIR) / (safe + '.json')
     if not pf.exists():
@@ -3162,7 +3184,9 @@ def export_preset(name: str):
         data = json.loads(pf.read_text())
     except Exception as exc:
         return jsonify({'ok': False, 'error': f'preset is damaged: {exc}'})
-    return jsonify({'ok': True, 'data': {'preset': data, 'name': safe}})
+    body = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+    return send_file(io.BytesIO(body), mimetype='application/json',
+                     as_attachment=True, download_name=f'{safe}.json')
 
 
 # -- 控制/校准 --

@@ -5763,7 +5763,8 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 <div class="import-type-toggle span-all" aria-label="导入模型类型">
                   <label><input type="radio" name="model_type" value="rknn" checked><span>RKNN</span></label>
                   <label><input type="radio" name="model_type" value="onnx"><span>ONNX</span></label>
-                  <label><input type="radio" name="model_type" value="hef"><span>HEF</span></label>
+                  <!-- 已移除 HEF 选项：HEF 是 Hailo 的格式，本机型（RK3588）没有对应推理后端，
+                       core 侧也没有任何 hef 分支，选了必然被后端拒。需要支持时先加后端再加选项。 -->
                 </div>
                 <label class="field">模型文件<input id="modelImportFile" type="file" name="file" accept=".rknn,.rknn.enc,.enc,.hef,.hef.enc" required></label>
                 <label class="field">类别标签文件（可选）<input id="modelImportLabelsFile" type="file" name="labels_file" accept=".txt,.labels,.names,.json,.csv"></label>
@@ -7758,7 +7759,7 @@ function currentModelImportType(form) {
   if (!selected) {
     return "rknn";
   }
-  return ["onnx", "hef"].includes(selected.value) ? selected.value : "rknn";
+  return selected.value === "onnx" ? "onnx" : "rknn";
 }
 
 function updateModelImportMode() {
@@ -7773,10 +7774,9 @@ function updateModelImportMode() {
   const hint = $("modelImportHint");
   const submit = $("submitModelImportButton");
   const isOnnx = importType === "onnx";
-  const isHef = importType === "hef";
 
   if (fileInput) {
-    fileInput.accept = isOnnx ? ".onnx" : isHef ? ".hef,.hef.enc,.enc" : ".rknn,.rknn.enc,.enc";
+    fileInput.accept = isOnnx ? ".onnx" : ".rknn,.rknn.enc,.enc";
   }
   if (zipField) {
     zipField.hidden = !isOnnx;
@@ -7791,7 +7791,7 @@ function updateModelImportMode() {
     hint.hidden = !isOnnx;
   }
   if (submit && !submit.disabled) {
-    submit.textContent = isOnnx ? "转换并导入" : isHef ? "导入 HEF" : "导入";
+    submit.textContent = isOnnx ? "转换并导入" : "导入";
   }
 }
 
@@ -7810,7 +7810,7 @@ function setModelImportBusy(busy, message = "") {
   if (submit) {
     submit.disabled = busy;
     const importType = currentModelImportType(form);
-    submit.textContent = busy ? "转换中..." : (importType === "onnx" ? "转换并导入" : importType === "hef" ? "导入 HEF" : "导入");
+    submit.textContent = busy ? "转换中..." : (importType === "onnx" ? "转换并导入" : "导入");
   }
   if (cancel) {
     cancel.disabled = busy;
@@ -13448,18 +13448,16 @@ function bindEvents() {
 	          true,
 	          importType === "onnx"
 	            ? "转换中，完成后会自动清理上传文件..."
-	            : importType === "hef"
-	              ? "正在导入 HEF..."
-	              : "导入中..."
+	            : "导入中..."
 	        );
         try {
-          await api("/api/models/import", {
+          await api(importType === "onnx" ? "/api/models/import-onnx" : "/api/models/import", {
             method: "POST",
             body: formData,
           });
           form.reset();
           setModelImportDialogOpen(false);
-	          showToast(importType === "onnx" ? "ONNX 已转换并导入" : importType === "hef" ? "HEF 模型导入成功" : "模型导入成功");
+	          showToast(importType === "onnx" ? "ONNX 已转换并导入" : "模型导入成功");
 	          const payload = await api("/api/models");
 	          if (state.data) {
 	            state.data.models = payload.models || [];
