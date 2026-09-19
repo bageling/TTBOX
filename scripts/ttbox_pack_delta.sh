@@ -70,7 +70,7 @@ with tarfile.open(new_path, "r:*") as src, tarfile.open(out_path, "w:gz") as out
             continue
         rel = m.name[len("payload/"):] if m.name.startswith("payload/") else None
         if rel and rel in changed_set:
-            out.addfile(m)
+            out.addfile(m, src.extractfile(m))  # 必须显式给 fileobj，否则只写头不写数据
 
 # d3：产物逐文件复验
 with tarfile.open(out_path, "r:*") as t:
