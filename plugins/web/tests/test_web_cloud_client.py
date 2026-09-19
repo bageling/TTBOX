@@ -395,6 +395,109 @@ def test_worker_403_triggers_on_expired(tmp_path):
     assert '到期' in snap['error']
 
 
+def test_is_session_loss_predicate():
+    """403 文案分层判据（纯函数）：只有"会话级失效"允许重登自愈。"""
+    from lib.heartbeat_worker import _is_session_loss
+    assert _is_session_loss('登录状态已失效，请重新激活') is True
+    assert _is_session_loss('卡密已到期') is False
+    assert _is_session_loss('卡密已被禁用') is False
+    # ★ 管理员强制下线必须**不**命中，否则自动重登会把强踢抵消掉
+    assert _is_session_loss('会话已被强制下线，请联系管理员') is False
+    assert _is_session_loss('') is False
+    assert _is_session_loss(None) is False
+
+
+def test_worker_403_session_loss_relogins_without_locking(tmp_path):
+    """服务端只把会话行置 invalid ⇒ 必须重登自愈，**不得**锁 core。
+
+    2026-09-19 真机缺陷回归：bridge 把 isValid=0 与 forceOffline=1 答成同一句
+    '登录状态已失效，请重新激活' ⇒ worker 走 403 快路径 on_expired ⇒ core 掉
+    restricted，且此后只在 401 才重登 ⇒ 重启也不自愈（实测激活后 1 分钟内掉线）。
+    """
+    client = FakeClient()
+    client.heartbeat_results = [
+        CloudLicenseError(403, 'session_invalid', '登录状态已失效，请重新激活'),
+    ] + [{'server_time': 1, 'heartbeat_interval': 60, 'heartbeat_timeout': 180}] * 50
+    client.card_login_results = [dict(OK_LOGIN, client_token='tok-2')]
+    fired = []
+    session, worker = make_worker(tmp_path, client, on_expired=lambda: fired.append(1))
+    worker.start()
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if client.login_calls >= 1 and worker.snapshot()['online'] is True:
+            break
+        time.sleep(0.02)
+    worker.stop()
+    assert client.login_calls == 1, '会话级 403 必须触发一次重登'
+    assert not fired, '会话级 403 不得锁 core（on_expired 不得触发）'
+    assert session.load()['client_token'] == 'tok-2', '新 token 必须落盘'
+    snap = worker.snapshot()
+    assert snap['online'] is True and snap['error'] == ''
+
+
+def test_worker_403_forced_offline_still_locks(tmp_path):
+    """管理员强制下线仍必须锁 core，且**不得**自动重登（否则强踢被抵消）。"""
+    client = FakeClient()
+    client.heartbeat_results = [
+        CloudLicenseError(403, 'force_offline', '会话已被强制下线，请联系管理员'),
+    ] * 50
+    fired = []
+    session, worker = make_worker(tmp_path, client, on_expired=lambda: fired.append(1))
+    worker.start()
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if fired:
+            break
+        time.sleep(0.02)
+    worker.stop()
+    assert client.login_calls == 0, '强制下线不得自动重登'
+    assert fired, '强制下线必须锁 core'
+    assert '强制下线' in worker.snapshot()['error']
+
+
+def test_worker_403_session_loss_relogin_fails_locks(tmp_path):
+    """自愈失败（卡已禁用/换绑超限等）⇒ 回落原快路径锁死。"""
+    client = FakeClient()
+    client.heartbeat_results = [
+        CloudLicenseError(403, 'session_invalid', '登录状态已失效，请重新激活'),
+    ] * 50
+    client.card_login_results = [CloudLicenseError(403, 'disabled', '卡密已被禁用')]
+    fired = []
+    session, worker = make_worker(tmp_path, client, on_expired=lambda: fired.append(1))
+    worker.start()
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if fired:
+            break
+        time.sleep(0.02)
+    worker.stop()
+    assert client.login_calls == 1, '必须先试过一次重登'
+    assert fired, '重登失败后必须锁 core'
+    assert worker.snapshot()['online'] is False
+
+
+def test_worker_session_loss_recovery_is_bounded(tmp_path):
+    """服务端持续把会话打回 invalid 时，自愈次数必须封顶（防无 sleep 热循环）。"""
+    from lib.heartbeat_worker import _SESSION_RECOVER_MAX
+    client = FakeClient()
+    client.heartbeat_results = [
+        CloudLicenseError(403, 'session_invalid', '登录状态已失效，请重新激活'),
+    ] * 50
+    client.card_login_results = [dict(OK_LOGIN, client_token='tok-%d' % i)
+                                 for i in range(1, 12)]
+    fired = []
+    session, worker = make_worker(tmp_path, client, on_expired=lambda: fired.append(1))
+    worker.start()
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        if fired and client.login_calls >= _SESSION_RECOVER_MAX:
+            break
+        time.sleep(0.02)
+    worker.stop()
+    assert client.login_calls == _SESSION_RECOVER_MAX, '自愈次数必须恰好封顶'
+    assert fired, '超限后必须回落锁死'
+
+
 def test_worker_network_failure_grace_window(tmp_path):
     client = FakeClient()
     # 先成功一次建立在线态，随后持续网络失败

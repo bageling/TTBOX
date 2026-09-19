@@ -5,6 +5,14 @@
 #   · 心跳失败/超时**不锁 AI**：仅面板状态提示；只有云端 403（到期/禁用，权威否定）
 #     才触发 on_expired 回调 → web 侧发 core ACTIVATE_CLOUD{deactivate:true} 立即锁定。
 #   · token 过期（401）⇒ 用 session 内 card_key 自动重 card-login（P0-4）。
+#   · ★ 403 需再分层（2026-09-19 真机发现）：服务端把两种 403 都答成同一句话时，
+#     "会话行被置 invalid"（清理任务/换绑/多端登录顶号）与"卡级否定"（到期/禁用）
+#     无法区分 ⇒ 前者也会走 on_expired 把 core 锁死，且此后不再重登（只 401 才重登）
+#     ⇒ 真机实测表现 = 激活后 1 分钟内在面板看到"登录状态已失效"、core 掉 restricted，
+#     重启也不自愈。现按**契约消息**分层：`_SESSION_LOSS_MARKERS` 命中 ⇒ 先重登自愈
+#     （连续 `_SESSION_RECOVER_MAX` 次仍失败才降级为锁）；其余 403 维持原快路径锁死。
+#     配套：服务端 bridge 必须对 forceOffline 与 isValid 给出**不同**文案（见 bridge
+#     `license.js` 心跳段），否则强制下线会被自动重登抵消。
 #   · 网络失败：5s 起指数退避封顶 60s；连续失败超过 heartbeat_timeout（默认 180s）
 #     才把 snapshot.online 置 False（断网不误杀在线态；断网宽限 Q3/Q4）。
 # 全程不阻塞 Flask 请求（daemon 线程；stop() 用 Event 等待替代 sleep 以便快速退出）。
@@ -20,6 +28,17 @@ from lib.cloud_session import CloudSessionStore, device_serial
 _BACKOFF_BASE_S = 5.0
 _BACKOFF_CAP_S = 60.0
 _NO_SESSION_POLL_S = 10.0
+
+# 会话级失效的 403 文案（服务端 bridge `license.js` 心跳段：isValid != 1 时下发）。
+# 命中 ⇒ 允许用落盘 card_key 重登自愈；**不**命中（卡到期/禁用/强制下线）⇒ 照旧锁死。
+_SESSION_LOSS_MARKERS = ('登录状态已失效',)
+# 连续自愈上限：防止"重登→立刻又失效"的服务端故障把循环打成热循环（无 sleep 连打）。
+_SESSION_RECOVER_MAX = 3
+
+
+def _is_session_loss(message: str) -> bool:
+    """403 文案是否属于"会话级失效"（可重登自愈）。纯函数，便于单测。"""
+    return any(m in (message or '') for m in _SESSION_LOSS_MARKERS)
 
 
 class HeartbeatWorker:
@@ -94,6 +113,7 @@ class HeartbeatWorker:
     def _loop(self) -> None:
         fail_since: float | None = None
         backoff = _BACKOFF_BASE_S
+        recover_left = _SESSION_RECOVER_MAX
         while not self._stop_evt.is_set():
             sess = self._session.load()
             token = str(sess.get('client_token') or '')
@@ -122,9 +142,18 @@ class HeartbeatWorker:
                     backoff = min(backoff * 2, _BACKOFF_CAP_S)
                     continue
                 if e.status == 403:
-                    # 云端权威否定（到期/禁用）⇒ 快路径：回调让 core 立即锁定（D4）
+                    msg = e.message or ''
+                    # 会话级失效（会话行被置 invalid）⇒ 先试重登自愈；失败/超限才锁。
+                    if _is_session_loss(msg) and recover_left > 0:
+                        if self._login_again():
+                            fail_since = None
+                            backoff = _BACKOFF_BASE_S
+                            recover_left -= 1
+                            continue  # 立即用新 token 补一次心跳
+                        recover_left = 0
+                    # 云端权威否定（到期/禁用/强制下线）⇒ 快路径：回调让 core 立即锁定（D4）
                     fail_since = None
-                    self._set_state(online=False, error=e.message or '卡密已到期')
+                    self._set_state(online=False, error=msg or '卡密已到期')
                     if self._on_expired is not None:
                         try:
                             self._on_expired()
@@ -148,6 +177,7 @@ class HeartbeatWorker:
             # 成功：退避清零，采纳云端下发的节奏参数
             fail_since = None
             backoff = _BACKOFF_BASE_S
+            recover_left = _SESSION_RECOVER_MAX
             interval = int(result.get('heartbeat_interval') or interval)
             self._set_state(online=True, last_ok_at=time.time(),
                             expire_at=str(sess.get('expire_at') or ''),

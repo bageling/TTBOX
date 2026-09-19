@@ -242,10 +242,39 @@ def test_update_thin_endpoints(client, web_mod, monkeypatch, tmp_path):
     # 2026-09-18 定案：versions 死端点已删（404）；check 仅 POST
     assert client.get('/api/update/versions').status_code == 404
     assert client.get('/api/update/check').status_code == 405
-    # check：默认 example.com 占位服务器 ⇒ 503 ota_server_not_configured（无假壳）
+    # check：地址含 example.com（占位）⇒ 503 ota_server_not_configured（无假壳）。
+    # 正式值（2026-09-19）已是真地址，这里 patch 回占位值验证 fail-closed，
+    # 测试不碰真服务器。
+    monkeypatch.setattr(web_mod, 'OTA_SERVER_URL', 'https://ota.ttbox.example.com')
     r3 = client.post('/api/update/check')
     assert r3.status_code == 503
     assert r3.get_json().get('error') == 'ota_server_not_configured'
+    # 非 https scheme 同样 fail-closed（定案：更新器只认 https，不发起下载）
+    monkeypatch.setattr(web_mod, 'OTA_SERVER_URL', 'http://cctv2.top:10046/ota')
+    r4 = client.post('/api/update/check')
+    assert r4.status_code == 503
+    assert r4.get_json().get('error') == 'ota_server_not_configured'
+
+
+def test_ota_server_url_two_places_in_sync():
+    """单点纪律（2026-09-18 定案 §三 D 组）：OTA 地址两处写死、必须同值。
+
+    ttbox.sh 与 ttbox-web.py 各写一份，板端由 `ttbox.sh doctor` 比对；
+    Windows 侧先用这条钉住——改了一处漏另一处，本用例立刻红。
+    同时要求：https、且不再是 example.com 占位值。
+    """
+    import re
+
+    sh = (REPO_ROOT / 'scripts' / 'ttbox.sh').read_text(encoding='utf-8')
+    web = WEB_SRC.read_text(encoding='utf-8')
+    m_sh = re.search(r'^OTA_SERVER_URL="([^"]+)"', sh, re.M)
+    m_web = re.search(r"^OTA_SERVER_URL = '([^']+)'", web, re.M)
+    assert m_sh and m_web, '两处 OTA_SERVER_URL 定义都必须存在'
+    assert m_sh.group(1) == m_web.group(1), (
+        f'OTA 服务器地址漂移：ttbox.sh={m_sh.group(1)!r} ttbox-web.py={m_web.group(1)!r}')
+    url = m_sh.group(1)
+    assert url.startswith('https://'), f'必须是 https：{url}'
+    assert 'example.com' not in url, '仍是占位值——正式包不允许'
 
 
 # ======================================================================

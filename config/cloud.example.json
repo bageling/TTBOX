@@ -1,6 +1,6 @@
 {
   "cloud": {
-    "license_base_url": "https://<your-tunnel>.trycloudflare.com",
+    "license_base_url": "https://cctv2.top:10046/ttbox",
     "app_key": "ttbox",
     "app_secret": "<YOUR_APP_SECRET>"
   }

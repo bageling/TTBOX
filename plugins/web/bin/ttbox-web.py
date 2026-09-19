@@ -2060,11 +2060,14 @@ def api_ota_install():
 
 
 # ---- 2026-09-18 更新功能定案（§三 D 组）：OTA 接线 ----
-# 分发服务器地址**写死在盒子里**（业主自建；交付前由业主替换为正式地址后重新出包）。
+# 分发服务器地址**写死在盒子里**。
 # ★ 单点纪律：本常量与 scripts/ttbox.sh 的 TTBOX_OTA_SERVER_URL 必须同值——
-#   改一处必须同步改另一处；ttbox.sh doctor 会比对两处一致。
-#   占位值含 example.com ⇒ /api/update/check 会以 ota_server_not_configured fail-closed。
-OTA_SERVER_URL = 'https://ota.ttbox.example.com'
+#   改一处必须同步改另一处；ttbox.sh doctor 会比对两处一致（单测
+#   test_ota_server_url_two_places_in_sync 也在 Windows 侧钉住这条）。
+#   正式服务器（2026-09-19）：cctv2.top，经七牛映射 外网10046→内网443；
+#   地址必须带端口（外网 443 未映射）。值含 example.com（占位）⇒
+#   /api/update/check 仍 fail-closed 503（单测会 patch 回占位值验证这条）。
+OTA_SERVER_URL = 'https://cctv2.top:10046/ota'
 # 任务目录（特权通道，§2.2）：web（User=ttbox）写 JSON，root 更新器经 path 单元消费
 OTA_JOBS_DIR = '/var/lib/ttbox/ota/jobs'
 OTA_UPDATER_PATH = '/opt/ttbox/current/scripts/ttbox_ota_updater.py'
@@ -2194,7 +2197,7 @@ def api_update_check():
     返回 data：{update_available, current_version, latest_version,
                 package_url, sign_url, key_id}。前端拿 package_url 直接安装；
     sign_url 必须等于 package_url + '.sign.json'（更新器旁车规则，契约已钉死）。
-    服务器地址仍是占位值（含 example.com）⇒ fail-closed 503，不给假结果。
+    服务器地址含 example.com（占位值）⇒ fail-closed 503，不给假结果。
     """
     if 'example.com' in OTA_SERVER_URL:
         return jsonify({'ok': False, 'error': 'ota_server_not_configured',
