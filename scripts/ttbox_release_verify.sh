@@ -243,7 +243,11 @@ check_device_libs_file() {
     local f="$1"
     file -b -- "$f" 2>/dev/null | grep -q ELF || return 0
     local out lib line resolved rel
-    rel="${RELEASE_DIR}/lib"
+    # ★ 必须先 canon 再比前缀：ldd 回显的是 $ORIGIN **展开后的字面量**，形如
+    #   /opt/ttbox/releases/<ver>/bin/./../lib/librknnrt.so —— 带 ".." 的路径拿去
+    #   和 `${RELEASE_DIR}/lib` 做字符串前缀比较，healthy release 也会被判"release 外"
+    #   （板端实测 rc=1 假阳性）。readlink -f 归一化两边后再比。
+    rel="$(readlink -f -- "${RELEASE_DIR}/lib" 2>/dev/null || printf '%s' "${RELEASE_DIR}/lib")"
     out="$( ( cd "$(dirname -- "$f")" && ldd "$(basename -- "$f")" ) 2>/dev/null || true)"
     for lib in $DEVICE_LIBS; do
         line="$(printf '%s\n' "$out" | grep -F "$lib" || true)"
@@ -256,6 +260,8 @@ check_device_libs_file() {
             fail "${f#"$RELEASE_DIR"/}: 设备库 ${lib} 未解析（${line}）"
             continue
         fi
+        # 归一化（消掉 ./ 与 ../）后再比前缀，见上方注释
+        resolved="$(readlink -f -- "$resolved" 2>/dev/null || printf '%s' "$resolved")"
         case "$resolved" in
             "$rel"/*)
                 ok "设备库 ${lib} 解析落在本 release lib/ 内: ${resolved}"
