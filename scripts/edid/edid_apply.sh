@@ -8,6 +8,19 @@ set -euo pipefail
 
 # 根前缀参数化（A-PATH-4）：板端默认 /opt/ttbox；联调可用 TTBOX_PREFIX 覆盖。
 TTBOX_PREFIX="${TTBOX_PREFIX:-/opt/ttbox}"
+
+# ---- 1.5.23：先修 DTB（出厂镜像里 HDMI-RX 是 disabled ⇒ /dev/video0 根本不存在）----
+# 为什么挂在这里，而不是只放在 ttbox_release_install.sh：
+#   OTA 更新器调的是 /opt/ttbox/current/scripts/ttbox_release_install.sh，而**那一刻
+#   current 还指向旧版本** ⇒ 新包里对 install 脚本的改动本次**不会被执行**；
+#   而 edid 服务是在 current 切换**之后**才被 ensure 拉起的，跑的是**新包**的脚本。
+#   故把修复挂在 EDID 入口最前面（没有 /dev/video0 时 EDID 本来就必失败）。
+# 脚本自带指纹门禁（只认已知的坏版本）+ 恒返回 0 ⇒ 不会打断 EDID 流程，也不会反复重启。
+DTB_FIX="${TTBOX_PREFIX}/current/scripts/ttbox_dtb_fix.sh"
+if [ -x "$DTB_FIX" ]; then
+    "$DTB_FIX" || true
+fi
+
 CONFIG="${TTBOX_DISPLAY_CONFIG:-${TTBOX_PREFIX}/config/hardware_display.json}"
 EDID_DIR="${TTBOX_PREFIX}/runtime/edid"
 # B-CONST-4 / V-09：HPD 重协商重试次数默认**单一真源 = 12**（Web 不再覆写；运维可经
