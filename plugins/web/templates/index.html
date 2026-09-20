@@ -6003,20 +6003,21 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 <h3>系统更新</h3>
                 <span id="updateStatusPill" class="pill">待检查</span>
               </div>
-              <div id="updateSummary" class="license-summary"></div>
               <div class="hardware-actions">
                 <button id="checkUpdateButton" class="ghost-button" type="button">检查更新</button>
                 <button id="installUpdateButton" class="danger-button" type="button" disabled>安装更新</button>
               </div>
-              <div id="updateProgressPanel" class="update-progress-panel" hidden>
+              <!-- 2026-09-20 业主定案：更新卡片只留一套 UI。原「版本两行 summary」删除，
+                   版本信息并入这个常驻详情面板（标签+进度+消息），不再两套来回变换。 -->
+              <div id="updateProgressPanel" class="update-progress-panel">
                 <div class="update-progress-head">
-                  <span id="updateProgressLabel">等待更新</span>
-                  <strong id="updateProgressPercent">0%</strong>
+                  <span id="updateProgressLabel">待检查</span>
+                  <strong id="updateProgressPercent"></strong>
                 </div>
                 <div class="setup-progress-track update-progress-track" aria-hidden="true">
                   <span id="updateProgressBar" style="width: 0%"></span>
                 </div>
-                <p id="updateProgressMessage" class="setup-message">暂无更新任务。</p>
+                <p id="updateProgressMessage" class="setup-message">点「检查更新」开始。</p>
               </div>
               <pre id="updateReleaseNotes" class="hardware-log">暂无更新信息</pre>
             </article>
@@ -10885,8 +10886,8 @@ async function activateLicenseFromInput(sourceInputId = "licenseKeyInput") {
 function renderUpdateResult(payload) {
   // 2026-09-18 定案：check 返回 {update_available, current_version, latest_version,
   // package_url, sign_url, key_id}（服务器一次查询回三样，O11 契约）。
+  // 2026-09-20 业主定案：删除独立版本行 summary，版本信息并入详情面板消息，只留一套 UI。
   const pill = $("updateStatusPill");
-  const summary = $("updateSummary");
   const notes = $("updateReleaseNotes");
   const installButton = $("installUpdateButton");
   const hasUpdate = !!(payload && payload.update_available && payload.package_url);
@@ -10895,25 +10896,13 @@ function renderUpdateResult(payload) {
     package_url: payload.package_url || "",
     key_id: payload.key_id || "",
   } : null;
+  const versionLine = payload
+    ? `当前版本 ${(payload && payload.current_version) || "--"}　·　最新版本 ${(payload && payload.latest_version) || "--"}`
+    : "";
   if (pill) {
     // 2026-09-21 修复：failed 后 danger-pill 残留会让"已是最新"显示成红色
     pill.textContent = hasUpdate ? "发现更新" : "已是最新";
     pill.className = "pill";
-  }
-  if (summary) {
-    const nextSummaryHtml = `
-      <div class="runtime-stat">
-        <span>当前版本</span>
-        <strong>${escapeHtml((payload && payload.current_version) || "--")}</strong>
-      </div>
-      <div class="runtime-stat">
-        <span>最新版本</span>
-        <strong>${escapeHtml((payload && payload.latest_version) || "--")}</strong>
-      </div>
-    `;
-    if (summary.innerHTML !== nextSummaryHtml) {
-      summary.innerHTML = nextSummaryHtml;
-    }
   }
   if (notes) {
     const nextNotes = (payload && (payload.release_notes || payload.notes)) || "暂无更新信息";
@@ -10928,7 +10917,8 @@ function renderUpdateResult(payload) {
     renderUpdateStatus({
       status: "idle",
       progress: 0,
-      message: hasUpdate ? "已发现可安装更新，点击安装更新开始。" : "暂无更新任务。",
+      stateLabel: hasUpdate ? "发现更新" : "已是最新",
+      message: versionLine || "点「检查更新」开始。",
     });
   }
 }
@@ -10946,6 +10936,7 @@ function updateStatusLabel(status) {
 
 // 2026-09-21 稳定化：轮询(1s)/监视器(5s)/检查结果/安装点击四方都会调本函数，
 // 内容没变就直接跳过 DOM 写入；running 阶段进度只增不减，杜绝 65%→30% 倒退跳变。
+// 2026-09-20 业主定案：详情面板常驻显示（不再 hidden 切换），标签列状态、消息列版本/详情。
 let updateRenderKey = "";
 function renderUpdateStatus(status) {
   const payload = status || {};
@@ -10955,7 +10946,7 @@ function renderUpdateStatus(status) {
   if (statusValue === "running" && prev && prev.status === "running") {
     progress = Math.max(progress, Number(prev.progress) || 0);
   }
-  const message = payload.error ? `原因：${payload.error}` : (payload.message || "暂无更新任务。");
+  const message = payload.error ? `原因：${payload.error}` : (payload.message || "点「检查更新」开始。");
   const renderKey = [statusValue, Math.round(progress), message, payload.version || ""].join("|");
   if (renderKey === updateRenderKey) {
     return;
@@ -10972,31 +10963,36 @@ function renderUpdateStatus(status) {
   const installButton = $("installUpdateButton");
   const checkButton = $("checkUpdateButton");
   const running = statusValue === "running";
-  const visible = running || statusValue === "success" || statusValue === "failed";
+  const finished = statusValue === "success" || statusValue === "failed";
   if (statusValue === "success") {
     state.updatePlan = null;
   }
 
   if (panel) {
-    panel.hidden = !visible;
     panel.classList.toggle("is-success", statusValue === "success");
     panel.classList.toggle("is-failed", statusValue === "failed");
   }
   if (label) {
-    label.textContent = updateStatusLabel(payload);
+    // idle 时标签跟随检查结果（待检查/已是最新/发现更新），运行与终态用固定文案
+    label.textContent = payload.stateLabel || updateStatusLabel(payload);
   }
   if (percent) {
-    percent.textContent = `${Math.round(progress)}%`;
+    percent.textContent = running || finished ? `${Math.round(progress)}%` : "";
   }
   if (bar) {
-    bar.style.width = `${progress}%`;
+    bar.style.width = `${running || finished ? progress : 0}%`;
   }
   if (messageEl) {
     messageEl.textContent = message;
   }
-  if (pill && visible) {
-    pill.textContent = updateStatusLabel(payload);
-    pill.className = `pill${statusValue === "failed" ? " danger-pill" : ""}`;
+  if (pill) {
+    if (running || finished) {
+      pill.textContent = updateStatusLabel(payload);
+      pill.className = `pill${statusValue === "failed" ? " danger-pill" : ""}`;
+    } else if (payload.stateLabel) {
+      pill.textContent = payload.stateLabel;
+      pill.className = "pill";
+    }
   }
   if (notes && payload.error) {
     notes.textContent = `更新失败\n${payload.error}`;
@@ -11118,7 +11114,8 @@ async function refreshInitialUpdateStatus() {
     renderUpdateStatus({
       status: "idle",
       progress: 0,
-      message: "暂无更新任务。",
+      stateLabel: "待检查",
+      message: "点「检查更新」开始。",
     });
   }
 }
