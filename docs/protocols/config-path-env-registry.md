@@ -104,7 +104,7 @@
 | `TTBOX_EDID_HPD_SETTLE_SEC` | 秒 | `0.5` | `scripts/edid/edid_apply.sh` | RUNTIME |
 | `TTBOX_EDID_LOCK_TIMEOUT_SEC` | 秒 | `14` | `scripts/edid/edid_apply.sh` | RUNTIME |
 | `TTBOX_CURRENT` | 路径 | `/opt/ttbox/current` | `scripts/ttbox.sh` | 覆盖 current 软链根（运维入口/doctor 定位 scripts 与 web） | RUNTIME |
-| `TTBOX_STATE` | 路径 | `/opt/ttbox/state` | `scripts/ttbox.sh` | 覆盖状态目录（version 留档等） | RUNTIME |
+| `TTBOX_STATE` | 路径 | `/opt/ttbox/state` | `scripts/ttbox.sh` + `core/src/common/Paths.hpp::kStateDirDefault` | 覆盖状态目录（version 留档、OTA 状态、`runtime_intent.json` 用户启停意愿等） | RUNTIME |
 
 ### 2.5 显式登记为 TEST 域（不进 RUNTIME allowlist）
 

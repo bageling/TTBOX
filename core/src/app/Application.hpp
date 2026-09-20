@@ -61,6 +61,11 @@ private:
     bool handle_config_update(const JsonValue& profile_json, std::string* error, bool* persisted);
     // RUNTIME_CONTROL 启停（复用 CoreRuntime start/stop，不改状态机）
     bool handle_runtime_control(const std::string& action, std::string* error);
+    // R5 用户启停意愿持久化：把显式 start/stop 落盘，供 core 重启后还原（OTA 更新会
+    // systemctl restart ttbox-core，不还原就会出现"没点启动却自己跑起来"）。
+    // 无记录时不动默认值（保持历史语义 want=true）。
+    void load_runtime_intent();
+    bool persist_runtime_intent(bool want_running);
     // M2.02：ACTIVATE_LICENSE（离线卡激活 + Gate publish + wire 投影；fail-closed）
     bool handle_license_activate(const std::string& card_envelope,
                                  JsonValue* data, std::string* error);
@@ -149,7 +154,11 @@ private:
     bool runtime_started_ = false;
     // 期望运行标志（自动启停核心）：true=应保持 runtime 运行，false=用户手动停止。
     // 开机/start 时置 true；用户 /api/control/stop 置 false。主循环据此自动重试/自恢复。
+    // R5：进程启动时由 load_runtime_intent() 用上次显式意愿覆盖（无记录则保持 true）。
     std::atomic<bool> want_runtime_running_{true};
+    // 用户启停意愿文件路径（R5），initialize() 解析：TTBOX_STATE > paths::kStateDirDefault
+    // 目录 + paths::kRuntimeIntentFileName。
+    std::string runtime_intent_path_;
     // 模型仓库（v0.3）：root = 配置 model_registry_root 或 <项目>/models
     std::unique_ptr<ModelManagement> model_management_;
     std::string running_model_id_;

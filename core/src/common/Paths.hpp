@@ -23,4 +23,14 @@ inline constexpr const char* kMouseEventSocketDefault = "/run/ttbox-mouse-passth
 // 系统级授权凭据文件（--license > 本文件 > 配置 > Store，见 Application::resolve_license_card）。
 inline constexpr const char* kSystemLicenseFile = "/etc/ttbox/license.key";
 
+// 运行期状态目录（非版本目录，升级绝不清理）：版本留档 / OTA 状态 / 用户启停意愿等。
+// 目录基址 = 环境变量 TTBOX_STATE（与 scripts/ttbox.sh 同源）> 本默认值；
+// 该目录由 scripts/ttbox_release_install.sh 创建（mkdir -p），OTA 更新不触碰。
+inline constexpr const char* kStateDirDefault = "/opt/ttbox/state";
+
+// 用户启停意愿文件（R5）：只记录用户**显式** start/stop 的意愿，core 重启（含 OTA 更新后的
+// systemctl restart）时据此还原 want_runtime_running_，避免"没点启动却自己跑起来"。
+// 无该文件（首次开机 / 记录损坏）时保持编译期默认（自动启动推理）。
+inline constexpr const char* kRuntimeIntentFileName = "runtime_intent.json";
+
 }  // namespace ttbox::core::paths

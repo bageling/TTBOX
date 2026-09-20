@@ -25,6 +25,7 @@
 
 #include "common/Logger.hpp"
 #include "common/CpuAffinity.hpp"
+#include "common/Json.hpp"           // R5：启停意愿文件读写（json_parse_file / dump）
 #include "common/Paths.hpp"        // A-PATH-5：运行期路径字面量单点真源
 #include "common/ConfigDefaults.hpp"  // C-CFG-4：出厂默认值镜像（== deploy/config/00-factory.json）
 #include "model/ModelManagement.hpp"
@@ -486,6 +487,17 @@ int Application::initialize(int argc, char** argv) {
         return 1;
     }
     TTBOX_LOG_INFO("配置已加载: " + config_path_);
+
+    // ---- 用户启停意愿还原（R5）----
+    // OTA 更新 = systemctl restart ttbox-core；此时进程重启，若不带回用户上次显式
+    // start/stop 的意愿，就会用编译期默认（want=true）"没点启动却自己跑起来"。
+    // 目录基址：TTBOX_STATE 环境变量（与 scripts/ttbox.sh 同源）> /opt/ttbox/state。
+    {
+        std::string state_dir = env_or_empty("TTBOX_STATE");
+        if (state_dir.empty()) state_dir = paths::kStateDirDefault;
+        runtime_intent_path_ = state_dir + "/" + paths::kRuntimeIntentFileName;
+        load_runtime_intent();
+    }
 
     // ---- CPU 调频策略：使用系统默认动态调频，不强制拉满频率 ----
     // 绑核已经保证采集/推理/瞄准/预览在大核上运行；频率交给内核
@@ -1437,6 +1449,7 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
             return false;
         }
         want_runtime_running_.store(true);
+        persist_runtime_intent(true);
         running_model_id_.clear();
         // R4：降级态（core_runtime_ 已分配但未 initialize）先整链重建再 start；
         // 重建失败返回真实等待原因，而不是"内部对象未初始化"这类误导性内部错误。
@@ -1457,6 +1470,7 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
     }
     if (action == "stop") {
         want_runtime_running_.store(false);
+        persist_runtime_intent(false);
         core_runtime_->stop();
         runtime_started_ = false;
         running_model_id_.clear();
@@ -1471,6 +1485,7 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
             return false;
         }
         want_runtime_running_.store(true);
+        persist_runtime_intent(true);
         // 新运行世代在首帧 inference+decode 通过前没有 current model。
         // 禁止 restart 返回后继续展示旧世代 running_model_id。
         running_model_id_.clear();
@@ -1495,6 +1510,65 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
     }
     if (error) *error = "未知 action: " + action;
     return false;
+}
+
+// ---- R5 用户启停意愿持久化 ----
+// 只记录**用户显式** start / stop 的意愿（restart 视为 start），供 core 重启后还原。
+// 语义边界：
+//   · 无文件 / 字段缺失 / JSON 损坏 → 不改默认（want 保持 true），并留日志；
+//   · 运行期崩溃、看门狗重启、模型热切换等**内部** want 变更**不落盘**——
+//     那些不是用户意愿，语义仍是"应保持运行"。
+// 目录由发布脚本 mkdir -p 且升级不清理（与 ota_status.json 同处），故 OTA 后仍能读到。
+void Application::load_runtime_intent() {
+    if (runtime_intent_path_.empty()) return;
+    std::error_code ec;
+    if (!std::filesystem::exists(runtime_intent_path_, ec)) {
+        TTBOX_LOG_INFO("无启停意愿记录，按默认处理（自动启动推理）: " + runtime_intent_path_);
+        return;
+    }
+    const JsonParseResult parsed = json_parse_file(runtime_intent_path_);
+    const JsonValue* field = parsed.ok ? parsed.value.find("want_runtime_running") : nullptr;
+    if (!field || !field->is_bool()) {
+        TTBOX_LOG_WARN("启停意愿文件不可用（" +
+                       (parsed.ok ? std::string("缺 want_runtime_running 字段") : parsed.error) +
+                       "），按默认处理（自动启动推理）");
+        return;
+    }
+    const bool want = field->as_bool(true);
+    want_runtime_running_.store(want);
+    TTBOX_LOG_INFO(std::string("启停意愿已还原：推理 ") + (want ? "开启" : "关闭") +
+                   "（上次用户显式 " + (want ? "start" : "stop") + "）");
+}
+
+// 原子发布：临时文件 + rename，避免断电/崩溃留下半截 JSON（与 persist_runtime_profile 同法）。
+// 任一环节失败都只降级为 WARN：意愿落盘失败绝不能影响启停本身。
+bool Application::persist_runtime_intent(bool want_running) {
+    if (runtime_intent_path_.empty()) return false;
+    JsonValue root = JsonValue::object();
+    root.set("want_runtime_running", JsonValue::boolean(want_running));
+    const std::string tmp = runtime_intent_path_ + ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            TTBOX_LOG_WARN("启停意愿写入失败（打不开临时文件，忽略）: " + tmp);
+            return false;
+        }
+        out << root.dump();
+        out.flush();
+        if (!out.good()) {
+            TTBOX_LOG_WARN("启停意愿写入失败（写临时文件出错，忽略）: " + tmp);
+            return false;
+        }
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, runtime_intent_path_, ec);
+    if (ec) {
+        TTBOX_LOG_WARN("启停意愿发布失败（rename，忽略）: " + ec.message());
+        std::error_code rm_ec;
+        std::filesystem::remove(tmp, rm_ec);
+        return false;
+    }
+    return true;
 }
 
 // ---- 模型管理（v0.3）实现 ----
