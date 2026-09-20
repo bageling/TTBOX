@@ -199,7 +199,10 @@ html[data-theme="light"] .button-link.is-disabled {
   grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 14px;
   height: calc(100vh - 44px);
-  min-height: 620px;
+  /* 2026-09-20 修复「小窗口下 08 授权 / 09 风扇页签点不到」：原 min-height:620px
+     会在视口高度 <664px 时把 sticky 侧栏撑出屏幕下沿，最后两个页签永远在视口外，
+     真实鼠标点击落空。改成不超过视口高度，多出的页签由 .module-tabs 内部滚动。 */
+  min-height: min(620px, calc(100vh - 44px));
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -277,11 +280,24 @@ h3 {
   min-height: 0;
   overflow: auto;
   padding-right: 2px;
-  scrollbar-width: none;
+  /* 2026-09-20：小窗口下页签需要滚动，滚动条必须可见（原来 display:none
+     让用户根本不知道下面还有 08/09 两个页签）。 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(121, 214, 197, 0.45) transparent;
 }
 
 .module-tabs::-webkit-scrollbar {
-  display: none;
+  display: block;
+  width: 3px;
+}
+
+.module-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.module-tabs::-webkit-scrollbar-thumb {
+  background: rgba(121, 214, 197, 0.55);
+  border-radius: 999px;
 }
 
 .module-tab {
@@ -450,6 +466,39 @@ html[data-theme="light"] .top-shell {
   color: var(--green);
   border-color: rgba(148, 230, 172, 0.32);
   background: rgba(148, 230, 172, 0.08);
+}
+
+/* 2026-09-20：idle（未连接）此前无独立样式，与基础态视觉无差异。 */
+.status-badge.idle {
+  color: var(--muted-strong);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* 2026-09-20：面板上「有 UI 但内核未实现」的区块统一标记，避免用户以为是坏的。 */
+.unimplemented-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border: 1px solid rgba(242, 198, 109, 0.5);
+  border-radius: 999px;
+  color: var(--amber);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+
+.unimplemented-notice {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(242, 198, 109, 0.42);
+  border-radius: 10px;
+  background: rgba(242, 198, 109, 0.1);
+  color: var(--amber);
+  font-size: 12.5px;
+  line-height: 1.65;
 }
 
 .status-badge.error,
@@ -5464,17 +5513,18 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <label class="field"><span class="field-label">Y轴刹车</span><input id="controller_kd_y" data-config type="number" step="0.1"><span class="field-hint">KD Y；对Y轴速度变化做刹车。跳跃、落地发抖时先调低或关掉。</span></label>
                     <label class="field"><span class="field-label">X轴跟随</span><input id="controller_rate_x" data-config type="number" step="0.01"><span class="field-hint">RATE X；X轴输出变强的速度。反应慢就加一点；突然一窜就降一点。</span></label>
                     <label class="field"><span class="field-label">Y轴跟随</span><input id="controller_rate_y" data-config type="number" step="0.01"><span class="field-hint">RATE Y；Y轴输出变强的速度。压不住高度差就加；Y轴突跳就降。</span></label>
-                    <label class="field"><span class="field-label">基础死区</span><input id="controller_output_deadzone" data-config type="number" step="0.01"><span class="field-hint">OUTPUT DEADZONE；最终死区会按检测框大小自动放宽。基础值大了更稳，小了修得更细。</span></label>
+                    <label class="field"><span class="field-label">基础死区</span><input id="controller_output_deadzone" data-config type="number" step="0.01"><span class="field-hint">OUTPUT DEADZONE；低于该值的输出直接归零（防微抖）。基础值大了更稳，小了修得更细。</span></label>
                   </div>
                 </div>
                 <article class="module-tile">
                   <div class="module-title"><strong>目标锁定</strong></div>
                   <div class="field-grid compact">
-                    <label class="field"><span class="field-label">丢失帧</span><input id="controller_selector_max_lost_frames" data-config type="number" step="1"><span class="field-hint">允许短暂丢失后继续保持锁定的帧数。</span></label>
+                    <label class="field"><span class="field-label">丢失宽限 ms</span><input id="controller_selector_lost_grace_ms" data-config type="number" step="1"><span class="field-hint">目标短暂丢失后继续保持锁定的毫秒数；越大越不容易丢锁，过大可能粘住错误目标。</span></label>
                   </div>
                 </article>
                 <article class="module-tile">
-                  <div class="module-title"><strong>开火延迟释放Y轴</strong></div>
+                  <div class="module-title"><strong>开火延迟释放Y轴<span class="unimplemented-tag">未实现</span></strong></div>
+                  <div class="unimplemented-notice">开火延迟释放Y轴尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
                   <label class="check-line"><input id="controller_aim_fire_lock_y" data-config type="checkbox"> 开火延迟释放Y轴</label>
                   <div class="field-grid compact">
                     <label class="field">开火按键<select id="controller_y_axis_fire_hotkey" data-config></select><span class="field-hint">用于判断开火状态，默认左键。</span></label>
@@ -5506,9 +5556,9 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                   <div class="field-grid compact">
                     <label class="field"><span class="field-label">进入距离 px</span><input id="controller_continuous_lead_enter_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">AI输出在X轴持续同方向累计超过该距离后，开始给瞄准点加入提前偏置。</span></label>
                     <label class="field"><span class="field-label">提前量系数</span><input id="controller_continuous_lead_scale" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">偏置大小为目标框宽度乘该系数；0 为不产生偏置。</span></label>
-                    <label class="field"><span class="field-label">渐入时间 ms</span><input id="controller_continuous_lead_fade_in_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">达到进入距离后，提前量从0过渡到目标值的时间。</span></label>
-                    <label class="field"><span class="field-label">渐出时间 ms</span><input id="controller_continuous_lead_fade_out_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">停止同方向移动或反向时，提前量回到0的时间。</span></label>
-                    <label class="field"><span class="field-label">近距离禁用占比</span><input id="controller_continuous_lead_near_disable_ratio" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">目标框宽度占裁剪宽度达到该比例时，持续提前量直接关闭。</span></label>
+                    <label class="field"><span class="field-label">渐入时间 ms</span><input id="controller_continuous_lead_fade_in_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">达到进入距离后，提前量从0过渡到目标值的时间（预留字段，当前算法未使用）。</span></label>
+                    <label class="field"><span class="field-label">渐出时间 ms</span><input id="controller_continuous_lead_fade_out_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">停止同方向移动或反向时，提前量回到0的时间（预留字段，当前算法未使用）。</span></label>
+                    <label class="field"><span class="field-label">近距离禁用占比</span><input id="controller_continuous_lead_near_disable_ratio" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">目标框宽度占裁剪宽度达到该比例时，持续提前量直接关闭（预留字段，当前算法未使用）。</span></label>
                   </div>
                 </article>
               </div>
@@ -5533,16 +5583,16 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
               <span>01</span>压枪
             </button>
             <button id="assistSectionTabTrigger" class="control-section-tab" type="button" data-assist-section-target="assist-section-trigger" aria-selected="false">
-              <span>02</span>自动开火
+              <span>02</span>自动开火<span class="unimplemented-tag">未实现</span>
             </button>
             <button id="assistSectionTabRapid" class="control-section-tab" type="button" data-assist-section-target="assist-section-rapid" aria-selected="false">
-              <span>03</span>连点
+              <span>03</span>连点<span class="unimplemented-tag">未实现</span>
             </button>
             <button id="assistSectionTabBackFlick" class="control-section-tab" type="button" data-assist-section-target="assist-section-back-flick" aria-selected="false">
-              <span>04</span>自动背闪
+              <span>04</span>自动背闪<span class="unimplemented-tag">未实现</span>
             </button>
             <button id="assistSectionTabCrosshair" class="control-section-tab" type="button" data-assist-section-target="assist-section-crosshair" aria-selected="false">
-              <span>05</span>准星找色
+              <span>05</span>准星找色<span class="unimplemented-tag">未实现</span>
             </button>
           </nav>
 
@@ -5596,6 +5646,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
 
             <section id="assist-section-trigger" class="assist-section" data-assist-section hidden>
               <div class="assist-section-body auto-trigger-section-body">
+                <div class="unimplemented-notice">自动开火尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
                 <div class="auto-trigger-config-toolbar">
                   <div>
                     <strong>开火配置</strong>
@@ -5614,6 +5665,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                   <label class="switch"><input id="rapid_fire_enabled" data-config type="checkbox"><span></span></label>
                 </div>
                 <div class="assist-section-body">
+                  <div class="unimplemented-notice">连点尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
                   <label class="field">触发按键<select id="rapid_fire_hotkey" data-config></select><span class="field-hint">按住该键时循环模拟左键点击。</span></label>
                   <div class="field-grid compact assist-field-pair">
                     <label class="field">基础按下时间<input id="rapid_fire_press_base_ms" data-config type="number" step="1"><span class="field-hint">每次左键按住的基准毫秒数；实际会加入随机浮动，偶尔会慢一拍。</span></label>
@@ -5630,6 +5682,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                   <label class="switch"><input id="auto_back_flick_enabled" data-config type="checkbox"><span></span></label>
                 </div>
                 <div class="assist-section-body">
+                  <div class="unimplemented-notice">自动背闪尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
                   <div id="autoBackFlickClassPicker" class="class-picker auto-back-flick-class-picker"></div>
                   <div class="field-grid compact assist-field-pair">
                     <label class="inline-checkbox"><input id="auto_back_flick_random_direction" data-config type="checkbox">随机方向</label>
@@ -5654,6 +5707,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                   <label class="switch"><input id="crosshair_detection_enabled" data-config type="checkbox"><span></span></label>
                 </div>
                 <div class="assist-section-body">
+                  <div class="unimplemented-notice">准星找色尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
                   <div class="crosshair-fire-gate">
                     <div class="crosshair-fire-switch"><span>开火时生效</span><label class="switch"><input id="crosshair_only_when_fire_held" data-config type="checkbox"><span></span></label></div>
                     <label class="field">开火按键<select id="crosshair_fire_hotkey" data-config></select><span class="field-hint">开启后只在按住该键时使用找色结果。</span></label>
@@ -5820,9 +5874,11 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
               <h2>显示器与鼠标描述</h2>
             </div>
             <div class="diagnostic-actions">
+              <button id="recordAimTraceButton" class="ghost-button" type="button">录制瞄准轨迹(10s)</button>
               <button id="downloadUsbDiagnosticsButton" class="ghost-button" type="button">下载USB诊断日志</button>
               <button id="refreshHardwareButton" class="ghost-button" type="button">刷新硬件</button>
               <span id="usbDiagnosticsStatus" class="trace-status"></span>
+              <span id="recordAimTraceStatus" class="trace-status"></span>
             </div>
           </div>
 
@@ -5933,6 +5989,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             </div>
             <div class="preset-head-actions">
               <span id="presetLibrarySummary" class="pill">暂无预设参数</span>
+              <a id="exportPresetButton" class="button-link is-disabled" href="#" download>导出当前预设</a>
               <button id="cleanupUnusedPresetsButton" class="ghost-button preset-clean-button" type="button" disabled>清理未使用预设</button>
               <button id="openPresetImportButton" class="ghost-button preset-import-button" type="button">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
@@ -6066,10 +6123,12 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             <span id="fanControlPill" class="pill">未检测到PWM接口</span>
           </div>
 
+          <div class="unimplemented-notice">风扇温控尚未实现：固件当前把风扇固定为满速（防 NPU 热节流），这里的温度曲线设置在保存时会被忽略，仅作界面预留；“运行状态”一栏是真实硬件读数。</div>
+
           <div class="hardware-grid fan-page-grid">
             <article class="module-tile">
               <div class="module-title">
-                <h3>全速运行</h3>
+                <h3>全速运行<span class="unimplemented-tag">未实现</span></h3>
                 <label class="switch"><input id="fan_control_enabled" data-config type="checkbox"><span></span></label>
               </div>
               <div class="field-grid compact fan-control-grid">
@@ -6317,7 +6376,7 @@ const NUMERIC_RANGE_LIMITS = {
   controller_continuous_lead_near_disable_ratio: [0, 1],
   controller_aim_reference_offset_x: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_aim_reference_offset_y: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
-  controller_selector_max_lost_frames: [0, 30],
+  controller_selector_lost_grace_ms: [0, 2000],
   controller_y_axis_fire_release_delay_sec: [0, 2],
   recoil_strength: [0, 300],
   recoil_speed: [0.1, 3],
@@ -6389,7 +6448,7 @@ const CONTROLLER_DEFAULTS = {
   aim_reference_offset_y: 0,
   y_axis_fire_hotkey: "left",
   y_axis_fire_release_delay_sec: 0.3,
-  selector_max_lost_frames: 5,
+  selector_lost_grace_ms: 78,
 };
 const MOVEMENT_CONTROL_DEFAULTS = {
   sens: 1,
@@ -7330,7 +7389,10 @@ function formatControlValue(el, value) {
   }
   const decimals = decimalPlacesFromStep(el.step);
   if (decimals === null) {
-    return String(value);
+    // 2026-09-20：无 step 的数字/滑杆输入回填浮点时会显示二进制残差
+    // （如 0.30000001192092896汃 0.5699999928474426）。统一按最多 4 位小数格式化，
+    // trimFixedNumber 会去掉多余尾零，整数/长小数保持原样。
+    return trimFixedNumber(numericValue.toFixed(4));
   }
   if (decimals === 0) {
     return String(Math.round(numericValue));
@@ -8610,7 +8672,7 @@ function profileTemplate(profile, index) {
       </div>
       <div class="aim-profile-offset-switch span-all">
         <div class="aim-profile-offset-switch-head">
-          <label class="check-line"><input class="aim-profile-offset-switch-enabled" type="checkbox" ${offsetSwitchChecked}> 偏移切换</label>
+          <label class="check-line"><input class="aim-profile-offset-switch-enabled" type="checkbox" ${offsetSwitchChecked}> 偏移切换<span class="unimplemented-tag">未实现</span></label>
           <label class="field aim-profile-offset-switch-hotkey-field" ${offsetSwitchPanelHidden}>切换热键
             <select class="aim-profile-offset-switch-hotkey"></select>
           </label>
@@ -9739,7 +9801,7 @@ function populateForm(config) {
   setValue("controller_aim_reference_offset_x", controller.aim_reference_offset_x ?? CONTROLLER_DEFAULTS.aim_reference_offset_x);
   setValue("controller_aim_reference_offset_y", controller.aim_reference_offset_y ?? CONTROLLER_DEFAULTS.aim_reference_offset_y);
   updateDynamicOffsetControlLimits({ clampValues: true });
-  setValue("controller_selector_max_lost_frames", controller.selector_max_lost_frames ?? CONTROLLER_DEFAULTS.selector_max_lost_frames);
+  setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms ?? CONTROLLER_DEFAULTS.selector_lost_grace_ms);
   setValue("controller_y_axis_fire_hotkey", controller.y_axis_fire_hotkey ?? CONTROLLER_DEFAULTS.y_axis_fire_hotkey);
   setValue("controller_y_axis_fire_release_delay_sec", controller.y_axis_fire_release_delay_sec ?? CONTROLLER_DEFAULTS.y_axis_fire_release_delay_sec);
 
@@ -9816,7 +9878,7 @@ function setMovementControlDefaultsToForm() {
   setValue("controller_continuous_lead_fade_out_ms", controller.continuous_lead_fade_out_ms);
   setValue("controller_continuous_lead_near_disable_ratio", controller.continuous_lead_near_disable_ratio);
   setCheckbox("controller_aim_fire_lock_y", controller.aim_fire_lock_y);
-  setValue("controller_selector_max_lost_frames", controller.selector_max_lost_frames);
+  setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms);
   setValue("controller_y_axis_fire_hotkey", controller.y_axis_fire_hotkey);
   setValue("controller_y_axis_fire_release_delay_sec", controller.y_axis_fire_release_delay_sec);
 }
@@ -9884,7 +9946,7 @@ function movementDefaultsForSection(sectionId) {
       controller_smooth_x: controller.smooth_x,
       controller_smooth_y: controller.smooth_y,
       controller_output_deadzone: controller.output_deadzone,
-      controller_selector_max_lost_frames: controller.selector_max_lost_frames,
+      controller_selector_lost_grace_ms: controller.selector_lost_grace_ms,
       controller_aim_fire_lock_y: controller.aim_fire_lock_y,
       controller_y_axis_fire_hotkey: controller.y_axis_fire_hotkey,
       controller_y_axis_fire_release_delay_sec: controller.y_axis_fire_release_delay_sec,
@@ -10066,7 +10128,7 @@ function collectConfig() {
         aim_reference_offset_y: getNumberInRange("controller_aim_reference_offset_y", CONTROLLER_DEFAULTS.aim_reference_offset_y),
         y_axis_fire_hotkey: getString("controller_y_axis_fire_hotkey") || CONTROLLER_DEFAULTS.y_axis_fire_hotkey,
         y_axis_fire_release_delay_sec: getNumber("controller_y_axis_fire_release_delay_sec", CONTROLLER_DEFAULTS.y_axis_fire_release_delay_sec),
-        selector_max_lost_frames: getNumber("controller_selector_max_lost_frames", CONTROLLER_DEFAULTS.selector_max_lost_frames),
+        selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
       },
     },
     recoil: {
@@ -10990,6 +11052,10 @@ function renderUpdateStatus(status) {
     } else if (payload.stateLabel) {
       pill.textContent = payload.stateLabel;
       pill.className = "pill";
+    } else {
+      // 2026-09-20：idle 且无 stateLabel 时不再保留上一轮的 danger-pill 红底
+      // （失败后回到「待检查」，文字已变而底色还红）。
+      pill.className = "pill";
     }
   }
   if (notes && payload.error) {
@@ -11046,6 +11112,9 @@ function startUpdateCompletionWatcher() {
   if (state.updateCompletionTimer) {
     return;
   }
+  // 记录本页打开时刻（秒）。只有「完成时间晚于本页打开」的 SUCCESS 才算真的刚更新完；
+  // 板端 ota_status.json 装完后会永久停在 SUCCESS，不加这道判断就会每开一次新页面都误刷新。
+  const pageOpenedAtSec = Math.floor(Date.now() / 1000);
   state.updateCompletionTimer = window.setInterval(async () => {
     if (document.visibilityState !== "visible") {
       return;
@@ -11056,16 +11125,39 @@ function startUpdateCompletionWatcher() {
     if (state.updateRefreshScheduled) {
       return;
     }
+    // 有弹窗（免责声明/公告等）打开时不刷新，避免把用户正在看的弹窗顶掉、刷新后又弹一遍。
+    const modalOpen = Array.from(document.querySelectorAll(".modal-backdrop"))
+      .some((el) => !el.hidden);
+    if (modalOpen) {
+      return;
+    }
     try {
       const status = await fetchUpdateStatus({ silent: true });
       if (!status || status.status !== "success" || !status.version) {
         return;
       }
-      const key = "ota_success_seen_" + status.version;
-      if (window.sessionStorage.getItem(key)) {
-        return; // 本标签页已确认过该版本，刷新后不再弹
+      // 新鲜度判断：完成时间必须晚于本页打开时刻（容忍 60s 时钟/写入误差）。
+      const finishedAt = Number(status.finished_at) || 0;
+      if (!finishedAt || finishedAt < pageOpenedAtSec - 60) {
+        return; // 历史残留的 SUCCESS，不提示也不刷新
       }
-      window.sessionStorage.setItem(key, "1");
+      // 去重键用 localStorage（跳标签页/刷新都记得住；原来用 sessionStorage，
+      // 每开一个新标签页都会再触发一次）。
+      const key = "ota_success_seen_" + status.version;
+      let seen = null;
+      try {
+        seen = window.localStorage.getItem(key);
+      } catch (error) {
+        seen = null;
+      }
+      if (seen) {
+        return;
+      }
+      try {
+        window.localStorage.setItem(key, "1");
+      } catch (error) {
+        /* localStorage 不可用时仍继续，最多多刷一次 */
+      }
       stopUpdateStatusPolling();
       renderUpdateStatus(status);
       showToast("检测到更新已完成（" + status.version + "），页面即将刷新");

@@ -770,7 +770,6 @@ CONTROLLER_NUMS = {
 # controller 内的布尔直通字段
 CONTROLLER_BOOLS = {
     'pull_curve_enabled': '_pc_enabled',
-    'humanize_enabled': '_hz_enabled',
     'personal_trajectory_enabled': '_pt_enabled',
     'lock_confirm_instant_enter_enabled': '_lc_inst_enter_enabled',
     'head_aim_enabled': '_ha_enabled',
@@ -1118,7 +1117,6 @@ def profile_to_web(prof: dict) -> dict:
         'humanize_curve_strength': hz.get('curve_strength', 0.45),
         'humanize_jitter_px': hz.get('jitter_px', 0.25),
         'humanize_jitter_frequency': hz.get('jitter_frequency', 8),
-        'selector_search_radius': mouse.get('selector_search_radius', 170),
         'personal_trajectory_enabled': personal_traj.get('enabled', False),
         'personal_trajectory_speed_scale': personal_traj.get('speed_scale', 1.0),
         'personal_trajectory_stability_scale': personal_traj.get('stability_scale', 1.0),
@@ -2194,12 +2192,25 @@ def api_update_status():
                                              'message': str(doc.get('phase') or '更新进行中'),
                                              'version': doc.get('version') or ''}})
     if state == 'SUCCESS':
+        # 2026-09-20 修复「开页面就自动刷新」：状态文件装完后永久停在 SUCCESS，
+        # 前端无法区分"刚装完"和"几十小时前的旧结果"。补 finished_at（文件 mtime）
+        # 让前端只在"刚刚完成"时才提示刷新，历史残留忽略。
+        try:
+            finished_at = int(os.path.getmtime(OTA_STATUS_FILE))
+        except OSError:
+            finished_at = 0
         return jsonify({'ok': True, 'data': {'status': 'success', 'progress': 100,
-                                             'version': doc.get('version') or ''}})
+                                             'version': doc.get('version') or '',
+                                             'finished_at': finished_at}})
     if state == 'FAILED':
+        try:
+            finished_at = int(os.path.getmtime(OTA_STATUS_FILE))
+        except OSError:
+            finished_at = 0
         return jsonify({'ok': True, 'data': {'status': 'failed', 'progress': 100,
                                              'error': str(doc.get('detail')
-                                                          or doc.get('error') or '更新失败')}})
+                                                          or doc.get('error') or '更新失败'),
+                                             'finished_at': finished_at}})
     return jsonify({'ok': True, 'data': {'status': 'idle'}})
 
 
