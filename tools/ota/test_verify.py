@@ -311,24 +311,29 @@ def case_downgrade_rejected(fx):
 
 
 def case_health_criteria_real_ipc_keys(fx):
-    """§2.3：健康判据 = 三服务 active + current_model_id 非空；不看授权；
+    """§2.3（2026-09-20 订正）：健康判据 = 三服务 active + core IPC 已就绪
+    （GET_STATUS 返回非空 `version`）；**不再要求 current_model_id**——更新后流水线按 R6
+    保持停止、无模型在跑，旧口径会让每次更新都误判失败并回滚；不看授权；
     旧判据键（model_loaded / license_available / cmd 请求体）必须绝迹。"""
     print("[9] health_criteria_real_ipc_keys")
     orig_active, orig_ipc = up._is_active, up._ipc_get_status
     try:
         up._is_active = lambda unit: True
-        # a) current_model_id 非空 ⇒ 通过
+        # a) core IPC 就绪（version 非空）⇒ 通过（流水线可处于停止态）
+        up._ipc_get_status = lambda: {"version": "1.5.18"}
+        check("core IPC 就绪 ⇒ 健康", up.default_health(timeout_s=1), "")
+        # a2) 只有 current_model_id、没有 version ⇒ 不通过（新口径认 version，不认模型在跑）
         up._ipc_get_status = lambda: {"current_model_id": "m1"}
-        check("模型已加载 ⇒ 健康", up.default_health(timeout_s=1), "")
-        # b) 旧假键 license_available 单独为真 ⇒ 不通过（旧判据不复活）
+        check("仅模型在跑、无 version ⇒ 不健康", not up.default_health(timeout_s=1), "")
+        # b) 旧假键 license_available/model_loaded 单独为真 ⇒ 不通过（旧判据不复活）
         up._ipc_get_status = lambda: {"license_available": True, "model_loaded": True}
         check("旧假键 ⇒ 不健康", not up.default_health(timeout_s=1), "")
         # c) IPC 空（core 不可达）⇒ 不通过
         up._ipc_get_status = lambda: {}
         check("IPC 空 ⇒ 不健康", not up.default_health(timeout_s=1), "")
-        # d) 进程不 active ⇒ 不通过（业务即使 OK）
+        # d) 进程不 active ⇒ 不通过（core IPC 即使 OK）
         up._is_active = lambda unit: False
-        up._ipc_get_status = lambda: {"current_model_id": "m1"}
+        up._ipc_get_status = lambda: {"version": "1.5.18"}
         check("服务未 active ⇒ 不健康", not up.default_health(timeout_s=1), "")
         # e) 源码锁：IPC 请求体必须是 {"type":"GET_STATUS"}，"cmd" 键与旧判据绝迹
         real_src = Path(up.__file__).read_text(encoding="utf-8")
@@ -338,6 +343,9 @@ def case_health_criteria_real_ipc_keys(fx):
         check("license_available 判据已绝迹",
               '.get("license_available")' not in real_src
               and "'license_available'" not in real_src, "")
+        # f) 源码锁：不得再用 current_model_id 做健康判据
+        check("current_model_id 不再作为健康判据",
+              '.get("current_model_id")' not in real_src, "")
     finally:
         up._is_active, up._ipc_get_status = orig_active, orig_ipc
 

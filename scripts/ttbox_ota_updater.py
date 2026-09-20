@@ -18,12 +18,17 @@
   详见 `tools/ota/ttbox_ota_sign.py` 文件头的契约裁定。
 ★ 私钥永不入库；本进程**只有公钥**（发布树内 `deploy/keys/`）。
 
-★ 健康检查判据（2026-09-18 业主定案 §2.3）：三个服务进程 active + 模型已加载
-  （IPC `current_model_id` 非空）；**不看授权** —— 授权是客户状态，与"本次升级是否
+★ 健康检查判据（2026-09-20 订正 §2.3）：三个服务进程 active + core IPC 已就绪
+  （GET_STATUS 返回非空 `version`）；**不看授权** —— 授权是客户状态，与"本次升级是否
   成功"无关，放进门禁会造成死锁（授权到期 ⇒ 升不了级 ⇒ 升级恰是解授权问题的手段）。
-  历史教训：旧版判据写 `model_loaded`/`license_available`，两个键在 IPC 契约里
-  从未存在过 ⇒ 健康检查恒假 ⇒ 升级必自动回滚。此处键名以
-  `core/src/ipc/IpcServer.cpp:890` 为准。
+  ★ **也不看 `current_model_id`**：更新完成后 core 会按 R6（刚更新过）或用户既有停用意愿
+  保持 AI 流水线停止（`runtime_intent.want_runtime_running=false`），此刻没有模型在跑。
+  旧口径要求「模型在跑」⇒ 更新后停止态必被判 `health_check_failed` 并自动回滚
+  （业主 2026-09-20 实测：1.5.17 装完 30s 后回滚到 1.5.16）。判据与
+  `scripts/ttbox_release_install.sh::health_check`（core.sock + IPC 应答 + web 端口）同口径。
+  历史教训：更早的判据写 `model_loaded`/`license_available`，两个键在 IPC 契约里从未
+  存在过 ⇒ 健康检查恒假 ⇒ 升级必自动回滚。键名一律以
+  `core/src/ipc/IpcServer.cpp:882-891` 为准。
 
 ★ 任务文件模式（2026-09-18 定案 §2.2 特权通道）：`--from-jobs [DIR]` 无 URL 运行；
   web（User=ttbox）往任务目录丢 JSON（0770 root:ttbox），本进程（root）消费后把
@@ -215,15 +220,26 @@ def _ipc_get_status() -> dict:
         return {}
 
 
+def _core_ipc_ready() -> bool:
+    """core 是否已就绪：IPC GET_STATUS 能应答且返回非空 `version`。
+
+    不用 `current_model_id` —— 更新后流水线按 R6/用户意愿保持停止，此刻没有模型在跑。
+    """
+    st = _ipc_get_status()
+    return bool(str(st.get("version") or "").strip())
+
+
 def default_health(timeout_s: int = HEALTH_TIMEOUT_S) -> bool:
-    """业务能力优先（§0.5 + 2026-09-18 定案 §2.3）：
-    三服务进程 active **且** IPC `current_model_id` 非空。不看授权（理由见文件头）。"""
+    """升级成功判据（2026-09-20 订正）：三服务进程 active **且** core IPC 已就绪。
+
+    ★ **不要求 `current_model_id` 非空**：更新完成后 core 会按 R6（刚更新过）或用户既有
+    停用意愿保持 AI 流水线停止，此刻没有模型在跑；旧口径要求「模型在跑」会让每次更新
+    都被判 `health_check_failed` 并自动回滚（业主 2026-09-20 实测 1.5.17）。
+    授权同样不看（理由见文件头）。"""
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         units_ok = all(_is_active(u) for u in HEALTH_UNITS)
-        st = _ipc_get_status()
-        biz_ok = bool(str(st.get("current_model_id") or "").strip())
-        if units_ok and biz_ok:
+        if units_ok and _core_ipc_ready():
             return True
         time.sleep(1)
     return False
