@@ -162,6 +162,14 @@ private:
     // 用户启停意愿文件路径（R5），initialize() 解析：TTBOX_STATE > paths::kStateDirDefault
     // 目录 + paths::kRuntimeIntentFileName。
     std::string runtime_intent_path_;
+    // 更新冒烟自检（2026-09-20 方案B）：命中"刚更新过"时先把 AI 流水线跑起来满足旧版
+    // 更新器的健康门禁（要求 IPC current_model_id 非空 = 模型真跑过首帧），等更新器把
+    // ota_status.json 落成 SUCCESS/FAILED 后再停回停止态（业主约定：更新后不点启动不跑）。
+    std::atomic<bool> post_update_smoke_{false};
+    std::string post_update_smoke_expected_version_;
+    double post_update_smoke_deadline_ms_ = 0.0;
+    // ota_status.json 路径（与 runtime_intent_path_ 同目录），供主循环自检收尾读取。
+    std::string ota_status_path_;
     // 模型仓库（v0.3）：root = 配置 model_registry_root 或 <项目>/models
     std::unique_ptr<ModelManagement> model_management_;
     std::string running_model_id_;

@@ -11,6 +11,7 @@
 using ttbox::core::decide_startup_intent;
 using ttbox::core::JsonValue;
 using ttbox::core::json_parse;
+using ttbox::core::ota_terminal_state;
 
 namespace {
 
@@ -111,6 +112,41 @@ TEST(marker_takes_precedence_over_ota_status) {
     const auto d = decide_startup_intent("1.5.16", kCur, &st);
     CHECK(!d.just_updated);
     CHECK(d.want_running);
+}
+
+// ---- 更新冒烟自检：更新器终态判定（方案B，2026-09-20）----
+// 命中"刚更新过"后流水线先跑起来，等这里判定出终态才收尾停回停止态。
+// 判错的后果：提前收尾 ⇒ 健康门禁来不及通过 ⇒ 更新回滚。
+
+// 本版本 SUCCESS/FAILED ⇒ 终态成立（自检可以收尾）。
+TEST(ota_terminal_state_success_and_failed) {
+    const JsonValue ok = parse(R"({"state":"SUCCESS","progress":100,"version":"1.5.19"})");
+    CHECK(ota_terminal_state(ok, "1.5.19") == "SUCCESS");
+    const JsonValue bad = parse(R"({"state":"FAILED","error":"health_check_failed","version":"1.5.19"})");
+    CHECK(ota_terminal_state(bad, "1.5.19") == "FAILED");
+}
+
+// 运行中（更新还没判完）⇒ 不是终态，自检必须继续跑。
+TEST(ota_terminal_state_running_is_not_terminal) {
+    const JsonValue st = parse(R"({"state":"RUNNING","progress":85,"version":"1.5.19"})");
+    CHECK(ota_terminal_state(st, "1.5.19").empty());
+}
+
+// ★ 版本不符（上一次更新残留的 SUCCESS）⇒ 不算终态，否则会提前收尾害本次更新回滚。
+TEST(ota_terminal_state_stale_other_version_rejected) {
+    const JsonValue st = parse(R"({"state":"SUCCESS","progress":100,"version":"1.5.16"})");
+    CHECK(ota_terminal_state(st, "1.5.19").empty());
+}
+
+// 大小写不敏感 + 缺字段/非对象/空期望版本一律不算终态（fail-open 到"继续跑"）。
+TEST(ota_terminal_state_edge_cases) {
+    const JsonValue lower = parse(R"({"state":"success","version":"1.5.19"})");
+    CHECK(ota_terminal_state(lower, "1.5.19") == "SUCCESS");
+    for (const char* body : {"{}", R"({"state":"SUCCESS"})", R"({"version":"1.5.19"})", "[1,2,3]"}) {
+        CHECK(ota_terminal_state(parse(body), "1.5.19").empty());
+    }
+    const JsonValue ok = parse(R"({"state":"SUCCESS","version":"1.5.19"})");
+    CHECK(ota_terminal_state(ok, "").empty());
 }
 
 int main() {

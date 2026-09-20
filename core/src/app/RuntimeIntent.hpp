@@ -59,4 +59,26 @@ inline StartupIntent decide_startup_intent(const std::string& prev_boot_version,
     return out;
 }
 
+// 更新冒烟自检（方案B，2026-09-20）：从**已解析**的 ota_status.json 判定"更新器终态"。
+// 仅当 version == expected_version 且 state 为 SUCCESS/FAILED 时返回该状态串（大写）；
+// 其余（RUNNING / 缺字段 / 版本不符）返回空串。
+// ★ version 必须匹配：否则会把上一次更新残留的 SUCCESS 误当本次结果而提前收尾。
+// 纯函数（无磁盘 I/O），磁盘读取留在 Application，host 可单测。
+inline std::string ota_terminal_state(const JsonValue& ota_status,
+                                      const std::string& expected_version) {
+    if (expected_version.empty() || !ota_status.is_object()) return std::string();
+    const JsonValue* ver = ota_status.find("version");
+    if (ver == nullptr || !ver->is_string() || ver->as_string() != expected_version) {
+        return std::string();
+    }
+    const JsonValue* st = ota_status.find("state");
+    if (st == nullptr || !st->is_string()) return std::string();
+    std::string s = st->as_string();
+    for (char& ch : s) {
+        if (ch >= 'a' && ch <= 'z') ch = static_cast<char>(ch - 'a' + 'A');
+    }
+    if (s == "SUCCESS" || s == "FAILED") return s;
+    return std::string();
+}
+
 }  // namespace ttbox::core

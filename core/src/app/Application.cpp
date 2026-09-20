@@ -75,6 +75,24 @@ double now_ms() {
             .count());
 }
 
+namespace {
+
+// ---- 更新冒烟自检（2026-09-20 方案B）----
+// 自检最长等待（ms）：更新器异常/未写终态时的兜底停回时限，绝不无限运行。
+constexpr double kPostUpdateSmokeMaxMs = 200000.0;
+
+// 读 ota_status.json 并判定"更新器终态"。判定逻辑在 RuntimeIntent.hpp::ota_terminal_state
+// （纯函数、host 可单测）；这里只做文件 I/O 薄封装。
+std::string read_ota_terminal_state(const std::string& path,
+                                    const std::string& expected_version) {
+    if (path.empty()) return std::string();
+    const JsonParseResult parsed = json_parse_file(path);
+    if (!parsed.ok) return std::string();
+    return ota_terminal_state(parsed.value, expected_version);
+}
+
+}  // namespace
+
 LogLevel parse_log_level(const std::string& s) {
     if (s == "debug") return LogLevel::kDebug;
     if (s == "warn") return LogLevel::kWarn;
@@ -499,6 +517,7 @@ int Application::initialize(int argc, char** argv) {
         std::string state_dir = env_or_empty("TTBOX_STATE");
         if (state_dir.empty()) state_dir = paths::kStateDirDefault;
         runtime_intent_path_ = state_dir + "/" + paths::kRuntimeIntentFileName;
+        ota_status_path_ = state_dir + "/" + paths::kOtaStatusFileName;
         apply_startup_runtime_intent(state_dir);
     }
 
@@ -944,6 +963,9 @@ void Application::run() {
     // 启动失败重试间隔（与 heartbeat 解耦：重试更激进，HDMI 恢复后 ~2s 内拉起）
     constexpr auto kRetryInterval = std::chrono::seconds(2);
     auto last_retry = std::chrono::steady_clock::now();
+    // 更新冒烟自检的 ota_status 轮询间隔（1s 足够：更新器终态在自检跑起来后几秒内落盘）
+    constexpr auto kPostUpdateSmokePoll = std::chrono::seconds(1);
+    auto last_smoke_check = std::chrono::steady_clock::now();
 
     // ---- 采集活体看门狗 ----
     // capture 线程被驱动卡死时 CoreRuntime::running() 仍是 true，主循环的“自动重试”
@@ -1091,6 +1113,36 @@ void Application::run() {
                 if (model_failure_code_.empty()) {
                     model_failure_code_ = "INFERENCE_FAILED_OR_OUTPUT_INVALID";
                     model_failure_message_.clear();
+                }
+            }
+            // ---- 更新冒烟自检收尾（2026-09-20 方案B）----
+            // 命中"刚更新过"时已把流水线跑起来满足更新器健康门禁；这里等更新器把
+            // ota_status.json 落成 SUCCESS/FAILED（且 version == 本版本）后，停回停止态并
+            // 落盘 want=false。超时兜底：更新器异常/不写终态时也必须停，绝不无限运行。
+            if (post_update_smoke_.load()) {
+                if (now - last_smoke_check >= kPostUpdateSmokePoll) {
+                    last_smoke_check = now;
+                    const std::string terminal =
+                        read_ota_terminal_state(ota_status_path_, post_update_smoke_expected_version_);
+                    const bool timed_out = now_ms() >= post_update_smoke_deadline_ms_;
+                    if (!terminal.empty() || timed_out) {
+                        post_update_smoke_.store(false);
+                        // 落盘 want=false：更新后一直保持停止，直到用户显式点启动（约定）。
+                        want_runtime_running_.store(false);
+                        persist_runtime_intent(false);
+                        if (core_runtime_) core_runtime_->stop();
+                        runtime_started_ = false;
+                        running_model_id_.clear();
+                        model_failure_code_.clear();
+                        model_failure_message_.clear();
+                        watch_capture_running_seen = false;
+                        if (!terminal.empty()) {
+                            TTBOX_LOG_INFO("更新自检完成（更新器状态=" + terminal +
+                                           "）：AI 流水线停回停止态（更新后不点启动不跑）");
+                        } else {
+                            TTBOX_LOG_WARN("更新自检超时未见更新器终态，仍按约定停回停止态");
+                        }
+                    }
                 }
             }
         }
@@ -1445,6 +1497,8 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
         return false;
     }
     if (action == "start") {
+        // 用户显式点启动 ⇒ 取消更新冒烟自检的"稍后自动停"（用户意愿优先）。
+        post_update_smoke_.store(false);
         if (core_runtime_->running()) return true;  // 幂等
         // T1.10① / M2.03：授权未通过不启动 AI 路径（透传/Web 管理不受影响）。
         if (!auth::LicenseGate::instance().pipeline_allowed()) {
@@ -1472,6 +1526,8 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
         return true;
     }
     if (action == "stop") {
+        // 用户显式点停止 ⇒ 同时取消更新冒烟自检（用户意愿优先）。
+        post_update_smoke_.store(false);
         want_runtime_running_.store(false);
         persist_runtime_intent(false);
         core_runtime_->stop();
@@ -1482,6 +1538,8 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
         return true;
     }
     if (action == "restart") {
+        // 用户显式重启 ⇒ 取消更新冒烟自检（视为"保持运行"，不再自动停）。
+        post_update_smoke_.store(false);
         // T1.10① / M2.03：授权未通过不重启 AI 路径。
         if (!auth::LicenseGate::instance().pipeline_allowed()) {
             if (error) *error = "授权未通过：缺少 feature 'capture'，AI 功能路径不启动";
@@ -1520,7 +1578,9 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
 //   ① <state>/core_boot_version 存在且 != 当前 kCoreVersion ⇒ 中间换过版本；
 //   ② 标记不存在（升到本特性首个版本时会这样），但 <state>/ota_status.json 记着
 //      state=SUCCESS 且 version == 当前版本 ⇒ 更新器刚把本版本装上来。
-// 命中 ⇒ want=false 且**落盘**（更新后一直保持停止，直到用户显式点启动）。
+// 命中 ⇒ 走「更新冒烟自检」（2026-09-20 方案B）：先置 want=true 把流水线跑起来，
+//   满足旧版更新器"模型真跑过首帧"的健康门禁；等 ota_status 落成 SUCCESS/FAILED 后，
+//   由主循环停回停止态并落盘 want=false（更新后一直保持停止，直到用户显式点启动）。
 // 未命中 ⇒ 走 R5 还原用户显式意愿（无记录则保持默认自动启动）。
 void Application::apply_startup_runtime_intent(const std::string& state_dir) {
     const std::string boot_version_path = state_dir + "/" + paths::kCoreBootVersionFileName;
@@ -1576,10 +1636,17 @@ void Application::apply_startup_runtime_intent(const std::string& state_dir) {
     }
 
     if (intent.just_updated) {
-        want_runtime_running_.store(intent.want_running);
-        persist_runtime_intent(intent.want_running);
+        // 2026-09-20 方案B：更新后不直接停，而是先自动跑一次推理当「更新冒烟自检」。
+        // 为什么：旧版 OTA 更新器的健康门禁要求 IPC current_model_id 非空（= 模型真跑过
+        // 首帧），而「更新后保持停止」会让门禁恒失败 ⇒ 每次更新都被判 health_check_failed
+        // 并自动回滚（1.5.17 板端实测）。先自检跑起来满足门禁，等更新器把 ota_status.json
+        // 落成 SUCCESS/FAILED 后，由主循环停回停止态（业主约定：更新后不点启动不跑）。
+        want_runtime_running_.store(true);
+        post_update_smoke_expected_version_ = cur_version;
+        post_update_smoke_deadline_ms_ = now_ms() + kPostUpdateSmokeMaxMs;
+        post_update_smoke_.store(true);
         TTBOX_LOG_INFO("检测到刚完成版本更新（" + intent.reason +
-                       "）：AI 流水线保持停止，等用户手动点启动");
+                       "）：先自动跑一次推理当更新自检，待更新器确认后自动停回停止态");
         return;
     }
     load_runtime_intent();
