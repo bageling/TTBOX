@@ -944,9 +944,6 @@ html[data-theme="light"] .preview-panel {
 .preview-stage {
   position: relative;
   width: 100%;
-  /* 2026-09-20：主页「低帧预览」尺寸档位由这个变量控制（档位值设在 .preview-panel 上）。
-     默认 100% ⇒ 与加档位之前完全一致。 */
-  max-width: var(--preview-max, 100%);
   margin-inline: auto;
   aspect-ratio: 1 / 1;
   height: auto;
@@ -959,44 +956,6 @@ html[data-theme="light"] .preview-panel {
     #090a09;
 }
 
-/* 2026-09-20：低帧预览尺寸档位（小/中/大/全宽）。
-   max-width 只在 .preview-stage 的基础规则里声明一次，档位仅改变量值 ——
-   这样不会被 #home-page .preview-stage 这类 id 选择器的优先级盖掉。 */
-.preview-panel[data-preview-size="s"] { --preview-max: 200px; }
-.preview-panel[data-preview-size="m"] { --preview-max: 300px; }
-.preview-panel[data-preview-size="l"] { --preview-max: 420px; }
-.preview-panel[data-preview-size="full"] { --preview-max: 100%; }
-
-.preview-size-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-}
-
-.preview-size-button {
-  min-width: 28px;
-  padding: 3px 8px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 830;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.preview-size-button:hover {
-  color: var(--text);
-}
-
-.preview-size-button.is-active {
-  background: var(--accent-soft);
-  color: var(--text);
-}
 
 .preview-stage::after {
   content: "";
@@ -5362,12 +5321,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                   <p>实时画面</p>
                   <h3>低帧预览</h3>
                 </div>
-                <div class="preview-size-switch" role="group" aria-label="预览尺寸">
-                  <button type="button" class="preview-size-button" data-preview-size="s">小</button>
-                  <button type="button" class="preview-size-button" data-preview-size="m">中</button>
-                  <button type="button" class="preview-size-button" data-preview-size="l">大</button>
-                  <button type="button" class="preview-size-button is-active" data-preview-size="full">全宽</button>
-                </div>
                 <span class="pill">MJPEG</span>
               </div>
               <div class="preview-stage">
@@ -6614,8 +6567,6 @@ const DISCLAIMER_STORAGE_KEY = "aiassistance_disclaimer_ack_v1";
 const THEME_STORAGE_KEY = "aiassistance_theme";
 // 2026-09-20：刷新/重新打开后回到上次停留的页签（原来没有持久化，刷新必回首页）
 const ACTIVE_PAGE_STORAGE_KEY = "aiassistance_active_page";
-// 2026-09-20：主页「低帧预览」的尺寸档位（小/中/大/全宽）
-const PREVIEW_SIZE_STORAGE_KEY = "aiassistance_preview_size";
 const UI_BRAND_YU = "yu";
 const UI_BRAND_XH = "xh";
 const UI_BRAND_XCSH = "xcsh";
@@ -12977,45 +12928,6 @@ function initPageNavigation() {
   }
 }
 
-function initPreviewSizeSwitch() {
-  const panel = document.querySelector(".preview-panel");
-  const buttons = Array.from(document.querySelectorAll("[data-preview-size]"));
-  if (!panel || buttons.length === 0) {
-    return;
-  }
-
-  const valid = new Set(buttons.map((btn) => btn.dataset.previewSize));
-
-  function apply(size) {
-    const target = valid.has(size) ? size : "full";
-    panel.dataset.previewSize = target;
-    buttons.forEach((btn) => {
-      btn.classList.toggle("is-active", btn.dataset.previewSize === target);
-    });
-    try {
-      if (window.localStorage) {
-        window.localStorage.setItem(PREVIEW_SIZE_STORAGE_KEY, target);
-      }
-    } catch (_) {
-      /* 存储不可用：本次会话内仍然生效 */
-    }
-  }
-
-  buttons.forEach((btn) => {
-    btn.addEventListener("click", () => apply(btn.dataset.previewSize));
-  });
-
-  let saved = null;
-  try {
-    if (window.localStorage) {
-      saved = window.localStorage.getItem(PREVIEW_SIZE_STORAGE_KEY);
-    }
-  } catch (_) {
-    /* ignore */
-  }
-  apply(saved || panel.dataset.previewSize || "full");
-}
-
 function initControlSectionNavigation() {
   const tabs = Array.from(document.querySelectorAll("[data-control-section-target]"));
   const sections = Array.from(document.querySelectorAll("[data-control-section]"));
@@ -14085,7 +13997,6 @@ async function main() {
   fillOptions($("crosshair_fire_hotkey"), POINTER_HOTKEYS);
   fillOptions($("hotkey_guard_toggle_hotkey"), POINTER_HOTKEYS);
   initPageNavigation();
-  initPreviewSizeSwitch();
   initControlSectionNavigation();
   initAssistSectionNavigation();
   enhanceNumericRangeControls();

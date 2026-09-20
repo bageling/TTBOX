@@ -165,24 +165,35 @@ int watermark_glyph_index(char c) {
 
 }  // namespace
 
-void PreviewModule::resolve_crop_size(uint32_t* crop_width, uint32_t* crop_height) const {
-    if (crop_width == nullptr || crop_height == nullptr) return;
-    uint32_t width = params_.crop_width;
-    uint32_t height = params_.crop_height;
+void PreviewModule::resolve_preview_geometry(uint32_t frame_w, uint32_t frame_h,
+                                             PreviewRoi* roi, uint32_t* out_width,
+                                             uint32_t* out_height) const {
+    if (roi == nullptr || out_width == nullptr || out_height == nullptr) return;
+
+    uint32_t cap_w = 0;
+    uint32_t cap_h = 0;
+    int32_t offset_x = 0;
+    int32_t offset_y = 0;
+    uint32_t max_w = params_.crop_width;
+    uint32_t max_h = params_.crop_height;
     if (params_.runtime_config != nullptr) {
         if (auto profile = params_.runtime_config->snapshot()) {
-            // Preview 与模型截取尺寸（capture.width/height）彻底解耦：
-            // capture 是 AI 的 ROI（随模型输入档位 192/256/320/416/640 变化），
-            // preview 是给人看的固定窗口（默认 640×640，中心裁剪）。
-            // 此前这里误读 capture.width/height，导致「模型输入从 320 改 416，
-            // 预览跟着变」——违反 Preview/AI 解耦架构。
-            // preview.width/height 为 0 时保持 Params 默认（Application 传入的 crop_width/height）。
-            if (profile->preview.width > 0) width = profile->preview.width;
-            if (profile->preview.height > 0) height = profile->preview.height;
+            // 裁剪范围的真源：capture（面板上的「截取尺寸」）。
+            // 2026-09-20 业主定案：主页「截取尺寸」改多少，低帧预览就裁多少——
+            // 预览必须和 AI 推理看的是同一块。公式与 WorkerPool 逐字一致
+            // （见 preview/PreviewRoi.hpp::compute_preview_roi）。
+            cap_w = profile->capture.width;
+            cap_h = profile->capture.height;
+            offset_x = profile->capture.offset_x;
+            offset_y = profile->capture.offset_y;
+            // preview.width/height 降级为**输出上限**：ROI 超过它才等比缩小，
+            // 不再决定"裁哪一块"（那由 capture 决定）。
+            if (profile->preview.width > 0) max_w = profile->preview.width;
+            if (profile->preview.height > 0) max_h = profile->preview.height;
         }
     }
-    *crop_width = std::max<uint32_t>(1, width);
-    *crop_height = std::max<uint32_t>(1, height);
+    *roi = compute_preview_roi(frame_w, frame_h, cap_w, cap_h, offset_x, offset_y);
+    fit_preview_output(roi->w, roi->h, max_w, max_h, out_width, out_height);
 }
 
 void PreviewModule::draw_boxes(uint8_t* crop, uint32_t width, uint32_t height,
@@ -444,25 +455,30 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame,
     const uint32_t frame_width = frame.info.width;
     const uint32_t frame_height = frame.info.height;
     const uint32_t frame_stride = frame.info.stride ? frame.info.stride : frame_width * 3;
-    uint32_t crop_width = 0;
-    uint32_t crop_height = 0;
-    resolve_crop_size(&crop_width, &crop_height);
-    if (crop_width > frame_width || crop_height > frame_height ||
-        frame_stride < frame_width * 3 || frame.info.cpu_va == nullptr) {
-        if (error) *error = "Preview 中心截取尺寸超出 Capture 或 CPU 映射不可用";
+    if (frame_width == 0 || frame_height == 0 || frame_stride < frame_width * 3 ||
+        frame.info.cpu_va == nullptr) {
+        if (error) *error = "Preview 输入帧不可用（尺寸/步长/CPU 映射）";
         return false;
     }
 
-    const uint32_t origin_x = (frame_width - crop_width) / 2;
-    const uint32_t origin_y = (frame_height - crop_height) / 2;
-    const uint32_t crop_stride = crop_width * 3;
-    const size_t crop_bytes = static_cast<size_t>(crop_stride) * crop_height;
+    PreviewRoi roi;
+    uint32_t out_width = 0;
+    uint32_t out_height = 0;
+    resolve_preview_geometry(frame_width, frame_height, &roi, &out_width, &out_height);
+    if (roi.w == 0 || roi.h == 0 || roi.x + roi.w > frame_width ||
+        roi.y + roi.h > frame_height) {
+        if (error) *error = "Preview 裁剪矩形超出 Capture";
+        return false;
+    }
+
+    const uint32_t crop_stride = roi.w * 3;
+    const size_t crop_bytes = static_cast<size_t>(crop_stride) * roi.h;
     if (crop_buffer_.size() < crop_bytes) crop_buffer_.resize(crop_bytes);
     uint8_t* crop = crop_buffer_.data();
     const auto* source = static_cast<const uint8_t*>(frame.info.cpu_va);
-    for (uint32_t y = 0; y < crop_height; ++y) {
-        const auto* source_row = source + static_cast<size_t>(origin_y + y) * frame_stride +
-                                 static_cast<size_t>(origin_x) * 3;
+    for (uint32_t y = 0; y < roi.h; ++y) {
+        const auto* source_row = source + static_cast<size_t>(roi.y + y) * frame_stride +
+                                 static_cast<size_t>(roi.x) * 3;
         std::memcpy(crop + static_cast<size_t>(y) * crop_stride,
                     source_row, crop_stride);
     }
@@ -475,23 +491,39 @@ bool PreviewModule::encode_frame(const FrameBuffer& frame,
             if (detections_provider_) raw = detections_provider_();
         }
         smooth_boxes(raw, &boxes);
-        draw_boxes(crop, crop_width, crop_height, crop_stride,
-                   boxes, origin_x, origin_y);
+        draw_boxes(crop, roi.w, roi.h, crop_stride,
+                   boxes, roi.x, roi.y);
     }
 
     // ★ M2.03：受限态水印叠加。水印是**附加绘制**，任何情况下都不影响后续编码与帧输出
     //   （draw_watermark 为纯数组写入、无分配/无异常）。
     if (params_.watermark && !params_.watermark_text.empty()) {
         try {
-            draw_watermark(crop, crop_width, crop_height, crop_stride);
+            draw_watermark(crop, roi.w, roi.h, crop_stride);
         } catch (...) {
             // 水印失败绝不影响帧输出（never block）。
         }
     }
 
-    metrics_.width.store(crop_width);
-    metrics_.height.store(crop_height);
-    return encode_bgr_jpeg(crop, crop_width, crop_height, crop_stride,
+    // 输出：ROI 没超过上限就原尺寸直出（**不放大**——浏览器自己会把画面缩放到面板，
+    // 放大只是白烧 CPU）；超过（如 0×0 回退的中心正方形 1440）才用 INTER_AREA 等比缩小。
+    const uint8_t* out_data = crop;
+    uint32_t out_stride = crop_stride;
+    if (out_width != roi.w || out_height != roi.h) {
+        cv::Mat src(static_cast<int>(roi.h), static_cast<int>(roi.w), CV_8UC3, crop,
+                    crop_stride);
+        cv::Mat dst(static_cast<int>(out_height), static_cast<int>(out_width), CV_8UC3);
+        cv::resize(src, dst, dst.size(), 0, 0, cv::INTER_AREA);
+        out_stride = out_width * 3;
+        const size_t need = static_cast<size_t>(out_stride) * out_height;
+        if (scaled_buffer_.size() < need) scaled_buffer_.resize(need);
+        std::memcpy(scaled_buffer_.data(), dst.data, need);
+        out_data = scaled_buffer_.data();
+    }
+
+    metrics_.width.store(out_width);
+    metrics_.height.store(out_height);
+    return encode_bgr_jpeg(out_data, out_width, out_height, out_stride,
                            params_.jpeg_quality, jpeg_out, error);
 }
 

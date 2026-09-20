@@ -1,4 +1,4 @@
-// PreviewModule.hpp — Capture 中心可调尺寸预览
+// PreviewModule.hpp — 低帧预览（裁剪范围跟随 RuntimeProfile::capture 的截取尺寸）
 #pragma once
 
 #include <atomic>
@@ -13,12 +13,15 @@
 #include "capture/V4L2Capture.hpp"
 #include "common/Types.hpp"
 #include "model/RuntimeProfile.hpp"
+#include "preview/PreviewRoi.hpp"
 
 namespace ttbox::core {
 
 class PreviewModule {
 public:
     struct Params {
+        // 预览**输出上限**（来自 preview.width/height）。裁剪范围由 RuntimeProfile::capture
+        // 的截取尺寸决定（见 preview/PreviewRoi.hpp），这里只用来限制 JPEG 体量与编码耗时。
         uint32_t crop_width = 640;
         uint32_t crop_height = 640;
         int fps = 15;
@@ -69,7 +72,10 @@ private:
     void draw_watermark(uint8_t* crop, uint32_t width, uint32_t height,
                         uint32_t stride) const;
     void smooth_boxes(const std::vector<DetectionBox>& raw, std::vector<DetectionBox>* out);
-    void resolve_crop_size(uint32_t* crop_width, uint32_t* crop_height) const;
+    // 依据 RuntimeProfile::capture（截取尺寸 + 偏移）算出预览裁剪矩形与输出尺寸。
+    // 纯计算在 preview/PreviewRoi.hpp（host 可单测），这里只负责取 profile 快照。
+    void resolve_preview_geometry(uint32_t frame_w, uint32_t frame_h, PreviewRoi* roi,
+                                  uint32_t* out_width, uint32_t* out_height) const;
 
     const LatestFrame* latest_ = nullptr;
     Params params_{};
@@ -83,6 +89,8 @@ private:
     uint64_t smooth_lost_count_ = 0;
     // 预览线程独占，按尺寸复用，避免每帧重复申请 640×640×3 临时缓冲。
     std::vector<uint8_t> crop_buffer_;
+    // 仅在 ROI 超过输出上限（如全帧中心正方形 1440）时用于等比缩小，同样按尺寸复用。
+    std::vector<uint8_t> scaled_buffer_;
 
     mutable std::mutex jpeg_mutex_;
     std::vector<uint8_t> jpeg_;

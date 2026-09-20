@@ -11,7 +11,7 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言同值。
-project(ttbox_core VERSION 1.5.16 LANGUAGES CXX)
+project(ttbox_core VERSION 1.5.17 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -677,6 +677,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_startup_intent tests/test_startup_intent.cpp)
   target_link_libraries(test_startup_intent PRIVATE ttbox_core)
   add_test(NAME test_startup_intent COMMAND test_startup_intent)
+
+  # 预览裁剪矩形：跟随 RuntimeProfile::capture（面板「截取尺寸」）的纯函数测试
+  add_executable(test_preview_roi tests/test_preview_roi.cpp)
+  target_link_libraries(test_preview_roi PRIVATE ttbox_core)
+  add_test(NAME test_preview_roi COMMAND test_preview_roi)
 
   # A11：FOV 分辨率与方向换算测试
   add_executable(test_fov_angle tests/test_fov_angle.cpp)
