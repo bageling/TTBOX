@@ -5498,22 +5498,14 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             <section id="control-section-pid" class="control-section is-active" data-control-section>
               <div class="assist-grid control-group-grid">
                 <div class="pid-control-block">
-                  <div class="field-grid compact pid-rate-grid">
-                    <label class="field"><span class="field-label">移动倍率</span><input id="sens" data-config class="value-input" type="number" min="0" max="5" step="0.01"><input id="sens_range" type="range" min="0" max="5" step="0.01"><span class="field-hint">移动算法的最终输出倍率。一般无需调整，只需调节 PID 参数即可；整体追不上再小幅增加。</span></label>
-                  </div>
                   <div class="module-title"><strong>PID 控制器</strong></div>
+                  <div class="field-hint">对应 pid1.cpp 的 P_PID；X / Y 两轴共用以下 5 项参数，保存后两轴同时生效。</div>
                   <div class="field-grid compact pid-field-grid">
-                    <label class="field"><span class="field-label">X轴拉力</span><input id="controller_kp_x" data-config type="number" step="0.1"><span class="field-hint">KP X；X轴方向把准星拉向目标的力度。追不上就加一点；来回冲就降一点。</span></label>
-                    <label class="field"><span class="field-label">Y轴拉力</span><input id="controller_kp_y" data-config type="number" step="0.1"><span class="field-hint">KP Y；Y轴方向把准星拉向目标的力度。抬不上去就加；Y轴晃就降。</span></label>
-                    <label class="field"><span class="field-label">X轴预判</span><input id="controller_predict_x" data-config type="number" step="0.1"><span class="field-hint">PREDICT X；目标横着跑时提前往前看一点。滞后就加，提前过头就降。</span></label>
-                    <label class="field"><span class="field-label">Y轴预判</span><input id="controller_predict_y" data-config type="number" step="0.1"><span class="field-hint">PREDICT Y；目标Y轴移动时提前看一点。一般保持很小，落地抖就别加。</span></label>
-                    <label class="field"><span class="field-label">X轴平滑</span><input id="controller_smooth_x" data-config type="number" step="10"><span class="field-hint">SMOOTH X；对输出做柔和限幅。9900 ≈ 不过滤（标准值）；调低输出更柔但会更迟钝。</span></label>
-                    <label class="field"><span class="field-label">Y轴平滑</span><input id="controller_smooth_y" data-config type="number" step="10"><span class="field-hint">SMOOTH Y；对输出做柔和限幅。9900 ≈ 不过滤（标准值）；调低输出更柔但会更迟钝。</span></label>
-                    <label class="field"><span class="field-label">X轴刹车</span><input id="controller_kd_x" data-config type="number" step="0.1"><span class="field-hint">KD X；对X轴速度变化做刹车。数值大容易抖，晃的时候优先调低。</span></label>
-                    <label class="field"><span class="field-label">Y轴刹车</span><input id="controller_kd_y" data-config type="number" step="0.1"><span class="field-hint">KD Y；对Y轴速度变化做刹车。跳跃、落地发抖时先调低或关掉。</span></label>
-                    <label class="field"><span class="field-label">X轴跟随</span><input id="controller_rate_x" data-config type="number" step="0.01"><span class="field-hint">RATE X；X轴输出变强的速度。反应慢就加一点；突然一窜就降一点。</span></label>
-                    <label class="field"><span class="field-label">Y轴跟随</span><input id="controller_rate_y" data-config type="number" step="0.01"><span class="field-hint">RATE Y；Y轴输出变强的速度。压不住高度差就加；Y轴突跳就降。</span></label>
-                    <label class="field"><span class="field-label">基础死区</span><input id="controller_output_deadzone" data-config type="number" step="0.01"><span class="field-hint">OUTPUT DEADZONE；低于该值的输出直接归零（防微抖）。基础值大了更稳，小了修得更细。</span></label>
+                    <label class="field"><span class="field-label">Kp 拉力</span><input id="controller_kp" data-config type="number" step="0.1"><span class="field-hint">KP；把准星拉向目标的力度。追不上就加一点；来回冲就降一点。</span></label>
+                    <label class="field"><span class="field-label">Kd 刹车</span><input id="controller_kd" data-config type="number" step="0.1"><span class="field-hint">KD；对速度变化做刹车、防过冲。数值大容易抖，晃的时候优先调低。</span></label>
+                    <label class="field"><span class="field-label">Predict 预判</span><input id="controller_predict" data-config type="number" step="0.1"><span class="field-hint">PREDICT；目标移动时提前往前看一点。滞后就加，提前过头就降。</span></label>
+                    <label class="field"><span class="field-label">Rate 跟随</span><input id="controller_rate" data-config type="number" step="0.01"><span class="field-hint">RATE；输出变强的速度。反应慢就加一点；突然一窜就降一点。</span></label>
+                    <label class="field"><span class="field-label">Smooth 平滑</span><input id="controller_smooth" data-config type="number" step="10"><span class="field-hint">SMOOTH；对输出做柔和限幅。9900 ≈ 不过滤（标准值）；调低输出更柔但会更迟钝。</span></label>
                   </div>
                 </div>
                 <article class="module-tile">
@@ -6342,12 +6334,10 @@ const DYNAMIC_OFFSET_INPUT_IDS = [
 const RANGE_BINDINGS = [
   ["video_detection_confidence", "video_detection_confidence_range"],
   ["video_detection_iou", "video_detection_iou_range"],
-  ["sens", "sens_range"],
   ["range_factor", "range_factor_range"],
 ];
 const NUMERIC_RANGE_LIMITS = {
   capture_crop_size: [CROP_SIZE_MIN, CROP_SIZE_MAX],
-  sens: [0, 5],
   aim_profile_sensitivity: [0.1, 3],
   aim_profile_fov_scale: [AIM_PROFILE_FOV_SCALE_MIN, AIM_PROFILE_FOV_SCALE_MAX],
   aim_profile_offset_x: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
@@ -6355,17 +6345,11 @@ const NUMERIC_RANGE_LIMITS = {
   range_factor: [0, 1],
   capture_crop_offset_x: [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX],
   capture_crop_offset_y: [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX],
-  controller_kp_x: [0, 200],
-  controller_kp_y: [0, 200],
-  controller_kd_x: [0, 80],
-  controller_kd_y: [0, 80],
-  controller_predict_x: [0, 10],
-  controller_predict_y: [0, 10],
-  controller_rate_x: [0, 1],
-  controller_rate_y: [0, 1],
-  controller_smooth_x: [0, 9999],
-  controller_smooth_y: [0, 9999],
-  controller_output_deadzone: [0, 20],
+  controller_kp: [0, 200],
+  controller_kd: [0, 80],
+  controller_predict: [0, 10],
+  controller_rate: [0, 1],
+  controller_smooth: [0, 9999],
   controller_pull_curve_strength: [0, 2],
   controller_pull_curve_jitter_px: [0, 12],
   controller_pull_curve_min_distance: [0, 1280],
@@ -6420,19 +6404,14 @@ function overviewDefaults() {
 }
 
 const CONTROLLER_DEFAULTS = {
-  // 2026-09-20 定案：pid1.cpp 为唯一标准，默认值与其 main() 权威参数一致
-  // （X: kp=25 kd=25 predict=3 rate=0.3 smooth=9900；Y: predict=0，其余同 X）。
-  kp_x: 25,
-  kp_y: 25,
-  kd_x: 25,
-  kd_y: 25,
-  predict_x: 3,
-  predict_y: 0,
-  rate_x: 0.3,
-  rate_y: 0.3,
-  smooth_x: 9900,
-  smooth_y: 9900,
-  output_deadzone: 1,
+  // 2026-09-20 定案：pid1.cpp 的 P_PID 为唯一标准，面板只暴露它的 5 个参数。
+  // 面板按「X/Y 两轴共用一组」呈现，保存时同时写 _x 与 _y，回填取 X（权威值）。
+  // 默认值 = pid1.cpp main() 的 X 轴入参（predict 统一取 3）。
+  kp: 25,
+  kd: 25,
+  predict: 3,
+  rate: 0.3,
+  smooth: 9900,
   pull_curve_enabled: true,
   pull_curve_strength: 0.8,
   pull_curve_jitter_px: 3,
@@ -9766,24 +9745,18 @@ function populateForm(config) {
   setCheckbox("capture_nv12_full_range", capture.nv12_full_range);
   setValue("video_detection_confidence", config.video_detection_confidence);
   setValue("video_detection_iou", config.video_detection_iou);
-  setValue("sens", config.sens);
   setValue("range_factor", config.range_factor);
   setValue("pos", config.pos);
   setCheckbox("hotkey_guard_enabled", hotkeyGuard.enabled ?? HOTKEY_GUARD_DEFAULTS.enabled);
   setValue("hotkey_guard_toggle_hotkey", hotkeyGuard.toggle_hotkey ?? HOTKEY_GUARD_DEFAULTS.toggle_hotkey);
   renderAimProfiles(config.aim_profiles);
 
-  setValue("controller_kp_x", controller.kp_x ?? CONTROLLER_DEFAULTS.kp_x);
-  setValue("controller_kp_y", controller.kp_y ?? CONTROLLER_DEFAULTS.kp_y);
-  setValue("controller_kd_x", controller.kd_x ?? CONTROLLER_DEFAULTS.kd_x);
-  setValue("controller_kd_y", controller.kd_y ?? CONTROLLER_DEFAULTS.kd_y);
-  setValue("controller_predict_x", controller.predict_x ?? CONTROLLER_DEFAULTS.predict_x);
-  setValue("controller_predict_y", controller.predict_y ?? CONTROLLER_DEFAULTS.predict_y);
-  setValue("controller_rate_x", controller.rate_x ?? CONTROLLER_DEFAULTS.rate_x);
-  setValue("controller_rate_y", controller.rate_y ?? CONTROLLER_DEFAULTS.rate_y);
-  setValue("controller_smooth_x", controller.smooth_x ?? CONTROLLER_DEFAULTS.smooth_x);
-  setValue("controller_smooth_y", controller.smooth_y ?? CONTROLLER_DEFAULTS.smooth_y);
-  setValue("controller_output_deadzone", controller.output_deadzone ?? CONTROLLER_DEFAULTS.output_deadzone);
+  // X/Y 两轴共用一组：回填取 X 轴的值（权威），保存时再同时写回两轴
+  setValue("controller_kp", controller.kp_x ?? CONTROLLER_DEFAULTS.kp);
+  setValue("controller_kd", controller.kd_x ?? CONTROLLER_DEFAULTS.kd);
+  setValue("controller_predict", controller.predict_x ?? CONTROLLER_DEFAULTS.predict);
+  setValue("controller_rate", controller.rate_x ?? CONTROLLER_DEFAULTS.rate);
+  setValue("controller_smooth", controller.smooth_x ?? CONTROLLER_DEFAULTS.smooth);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled ?? CONTROLLER_DEFAULTS.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
   setValue("controller_pull_curve_jitter_px", controller.pull_curve_jitter_px ?? CONTROLLER_DEFAULTS.pull_curve_jitter_px);
@@ -9855,18 +9828,11 @@ function populateForm(config) {
 
 function setMovementControlDefaultsToForm() {
   const controller = MOVEMENT_CONTROL_DEFAULTS.controller;
-  setValue("sens", MOVEMENT_CONTROL_DEFAULTS.sens);
-  setValue("controller_kp_x", controller.kp_x);
-  setValue("controller_kp_y", controller.kp_y);
-  setValue("controller_kd_x", controller.kd_x);
-  setValue("controller_kd_y", controller.kd_y);
-  setValue("controller_predict_x", controller.predict_x);
-  setValue("controller_predict_y", controller.predict_y);
-  setValue("controller_rate_x", controller.rate_x);
-  setValue("controller_rate_y", controller.rate_y);
-  setValue("controller_smooth_x", controller.smooth_x);
-  setValue("controller_smooth_y", controller.smooth_y);
-  setValue("controller_output_deadzone", controller.output_deadzone);
+  setValue("controller_kp", controller.kp);
+  setValue("controller_kd", controller.kd);
+  setValue("controller_predict", controller.predict);
+  setValue("controller_rate", controller.rate);
+  setValue("controller_smooth", controller.smooth);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength);
   setValue("controller_pull_curve_jitter_px", controller.pull_curve_jitter_px);
@@ -9934,18 +9900,11 @@ function movementDefaultsForSection(sectionId) {
   const controller = MOVEMENT_CONTROL_DEFAULTS.controller;
   const defaultsBySection = {
     "control-section-pid": {
-      sens: MOVEMENT_CONTROL_DEFAULTS.sens,
-      controller_kp_x: controller.kp_x,
-      controller_kp_y: controller.kp_y,
-      controller_kd_x: controller.kd_x,
-      controller_kd_y: controller.kd_y,
-      controller_predict_x: controller.predict_x,
-      controller_predict_y: controller.predict_y,
-      controller_rate_x: controller.rate_x,
-      controller_rate_y: controller.rate_y,
-      controller_smooth_x: controller.smooth_x,
-      controller_smooth_y: controller.smooth_y,
-      controller_output_deadzone: controller.output_deadzone,
+      controller_kp: controller.kp,
+      controller_kd: controller.kd,
+      controller_predict: controller.predict,
+      controller_rate: controller.rate,
+      controller_smooth: controller.smooth,
       controller_selector_lost_grace_ms: controller.selector_lost_grace_ms,
       controller_aim_fire_lock_y: controller.aim_fire_lock_y,
       controller_y_axis_fire_hotkey: controller.y_axis_fire_hotkey,
@@ -10089,7 +10048,6 @@ function collectConfig() {
     mouse_output: {
       mode: "passthrough",
     },
-    sens: getNumber("sens", MOVEMENT_CONTROL_DEFAULTS.sens),
     range_factor: getNumber("range_factor", 1),
     pos: getNumber("pos", 0.5),
     hotkey_guard: {
@@ -10099,17 +10057,19 @@ function collectConfig() {
     aim_profiles: collectAimProfiles(),
     ai: {
       controller: {
-        kp_x: getNumber("controller_kp_x", CONTROLLER_DEFAULTS.kp_x),
-        kp_y: getNumber("controller_kp_y", CONTROLLER_DEFAULTS.kp_y),
-        kd_x: getNumber("controller_kd_x", CONTROLLER_DEFAULTS.kd_x),
-        kd_y: getNumber("controller_kd_y", CONTROLLER_DEFAULTS.kd_y),
-        predict_x: getNumber("controller_predict_x", CONTROLLER_DEFAULTS.predict_x),
-        predict_y: getNumber("controller_predict_y", CONTROLLER_DEFAULTS.predict_y),
-        rate_x: getNumber("controller_rate_x", CONTROLLER_DEFAULTS.rate_x),
-        rate_y: getNumber("controller_rate_y", CONTROLLER_DEFAULTS.rate_y),
-        smooth_x: getNumber("controller_smooth_x", CONTROLLER_DEFAULTS.smooth_x),
-        smooth_y: getNumber("controller_smooth_y", CONTROLLER_DEFAULTS.smooth_y),
-        output_deadzone: getNumber("controller_output_deadzone", CONTROLLER_DEFAULTS.output_deadzone),
+        // X/Y 两轴共用面板上的 5 项（业主 2026-09-20 定案）：同一个输入框写两份。
+        // output_deadzone / sensitivity 已从面板移除 ⇒ 这里**不发**这两个键，
+        // 后端 web_body_to_profile 对缺失键保留 profile 现值，不会抹掉已调好的值。
+        kp_x: getNumber("controller_kp", CONTROLLER_DEFAULTS.kp),
+        kp_y: getNumber("controller_kp", CONTROLLER_DEFAULTS.kp),
+        kd_x: getNumber("controller_kd", CONTROLLER_DEFAULTS.kd),
+        kd_y: getNumber("controller_kd", CONTROLLER_DEFAULTS.kd),
+        predict_x: getNumber("controller_predict", CONTROLLER_DEFAULTS.predict),
+        predict_y: getNumber("controller_predict", CONTROLLER_DEFAULTS.predict),
+        rate_x: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
+        rate_y: getNumber("controller_rate", CONTROLLER_DEFAULTS.rate),
+        smooth_x: getNumber("controller_smooth", CONTROLLER_DEFAULTS.smooth),
+        smooth_y: getNumber("controller_smooth", CONTROLLER_DEFAULTS.smooth),
         pull_curve_enabled: getCheckbox("controller_pull_curve_enabled"),
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),
         pull_curve_jitter_px: getNumber("controller_pull_curve_jitter_px", CONTROLLER_DEFAULTS.pull_curve_jitter_px),
