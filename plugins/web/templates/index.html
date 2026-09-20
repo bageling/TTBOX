@@ -10896,10 +10896,12 @@ function renderUpdateResult(payload) {
     key_id: payload.key_id || "",
   } : null;
   if (pill) {
+    // 2026-09-21 修复：failed 后 danger-pill 残留会让"已是最新"显示成红色
     pill.textContent = hasUpdate ? "发现更新" : "已是最新";
+    pill.className = "pill";
   }
   if (summary) {
-    summary.innerHTML = `
+    const nextSummaryHtml = `
       <div class="runtime-stat">
         <span>当前版本</span>
         <strong>${escapeHtml((payload && payload.current_version) || "--")}</strong>
@@ -10909,9 +10911,15 @@ function renderUpdateResult(payload) {
         <strong>${escapeHtml((payload && payload.latest_version) || "--")}</strong>
       </div>
     `;
+    if (summary.innerHTML !== nextSummaryHtml) {
+      summary.innerHTML = nextSummaryHtml;
+    }
   }
   if (notes) {
-    notes.textContent = (payload && (payload.release_notes || payload.notes)) || "暂无更新信息";
+    const nextNotes = (payload && (payload.release_notes || payload.notes)) || "暂无更新信息";
+    if (notes.textContent !== nextNotes) {
+      notes.textContent = nextNotes;
+    }
   }
   if (installButton) {
     installButton.disabled = !hasUpdate;
@@ -10936,20 +10944,33 @@ function updateStatusLabel(status) {
   return "待检查";
 }
 
+// 2026-09-21 稳定化：轮询(1s)/监视器(5s)/检查结果/安装点击四方都会调本函数，
+// 内容没变就直接跳过 DOM 写入；running 阶段进度只增不减，杜绝 65%→30% 倒退跳变。
+let updateRenderKey = "";
 function renderUpdateStatus(status) {
   const payload = status || {};
-  state.updateStatus = payload;
+  const statusValue = String(payload.status || "idle");
+  const prev = state.updateStatus;
+  let progress = Math.max(0, Math.min(100, Number(payload.progress) || 0));
+  if (statusValue === "running" && prev && prev.status === "running") {
+    progress = Math.max(progress, Number(prev.progress) || 0);
+  }
+  const message = payload.error ? `原因：${payload.error}` : (payload.message || "暂无更新任务。");
+  const renderKey = [statusValue, Math.round(progress), message, payload.version || ""].join("|");
+  if (renderKey === updateRenderKey) {
+    return;
+  }
+  updateRenderKey = renderKey;
+  state.updateStatus = { ...payload, progress };
   const panel = $("updateProgressPanel");
   const label = $("updateProgressLabel");
   const percent = $("updateProgressPercent");
   const bar = $("updateProgressBar");
-  const message = $("updateProgressMessage");
+  const messageEl = $("updateProgressMessage");
   const pill = $("updateStatusPill");
   const notes = $("updateReleaseNotes");
   const installButton = $("installUpdateButton");
   const checkButton = $("checkUpdateButton");
-  const statusValue = String(payload.status || "idle");
-  const progress = Math.max(0, Math.min(100, Number(payload.progress) || 0));
   const running = statusValue === "running";
   const visible = running || statusValue === "success" || statusValue === "failed";
   if (statusValue === "success") {
@@ -10970,9 +10991,8 @@ function renderUpdateStatus(status) {
   if (bar) {
     bar.style.width = `${progress}%`;
   }
-  if (message) {
-    const details = payload.error ? `原因：${payload.error}` : (payload.message || "暂无更新任务。");
-    message.textContent = details;
+  if (messageEl) {
+    messageEl.textContent = message;
   }
   if (pill && visible) {
     pill.textContent = updateStatusLabel(payload);
@@ -13779,15 +13799,8 @@ function bindEvents() {
       button.disabled = true;
     }
     const result = await installUpdatePlan(state.updatePlan);
-    renderUpdateStatus({
-      status: "running",
-      stage: "scheduled",
-      message: result.message || "更新任务已启动，正在安装",
-      progress: 65,
-      version: result.version || state.updatePlan.latest_version || "",
-      type: result.type || "",
-      unit: result.unit || "",
-    });
+    // 2026-09-21：不再在此硬画 progress=65 —— 轮询 1s 内会拉回真实阶段值，
+    // 先 65 后 30 的倒退正是"UI 变来变去"的来源。进度完全由轮询单调驱动。
     showToast("更新任务已启动");
   }));
 
