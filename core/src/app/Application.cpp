@@ -1,8 +1,10 @@
 // Application.cpp — 应用生命周期实现
 #include "app/Application.hpp"
+#include "app/RuntimeIntent.hpp"   // R5/R6：启动意图裁决（纯函数，host 可单测）
 
 #include <atomic>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -488,15 +490,16 @@ int Application::initialize(int argc, char** argv) {
     }
     TTBOX_LOG_INFO("配置已加载: " + config_path_);
 
-    // ---- 用户启停意愿还原（R5）----
-    // OTA 更新 = systemctl restart ttbox-core；此时进程重启，若不带回用户上次显式
-    // start/stop 的意愿，就会用编译期默认（want=true）"没点启动却自己跑起来"。
+    // ---- 启动意图裁决（R5 用户意愿 / R6 刚更新过）（R5/R6）----
+    // OTA 更新 = systemctl restart ttbox-core；两条诉求必须一起满足：
+    //   · 业主 2026-09-20：**更新后应该是停止状态**（不点启动不跑）——R6；
+    //   · 普通重启/断电恢复：尊重用户上次显式 start/stop——R5。
     // 目录基址：TTBOX_STATE 环境变量（与 scripts/ttbox.sh 同源）> /opt/ttbox/state。
     {
         std::string state_dir = env_or_empty("TTBOX_STATE");
         if (state_dir.empty()) state_dir = paths::kStateDirDefault;
         runtime_intent_path_ = state_dir + "/" + paths::kRuntimeIntentFileName;
-        load_runtime_intent();
+        apply_startup_runtime_intent(state_dir);
     }
 
     // ---- CPU 调频策略：使用系统默认动态调频，不强制拉满频率 ----
@@ -1510,6 +1513,76 @@ bool Application::handle_runtime_control(const std::string& action, std::string*
     }
     if (error) *error = "未知 action: " + action;
     return false;
+}
+
+// ---- R6 启动意图裁决（唯一入口）----
+// 判据（任一成立即视为"刚更新过"）：
+//   ① <state>/core_boot_version 存在且 != 当前 kCoreVersion ⇒ 中间换过版本；
+//   ② 标记不存在（升到本特性首个版本时会这样），但 <state>/ota_status.json 记着
+//      state=SUCCESS 且 version == 当前版本 ⇒ 更新器刚把本版本装上来。
+// 命中 ⇒ want=false 且**落盘**（更新后一直保持停止，直到用户显式点启动）。
+// 未命中 ⇒ 走 R5 还原用户显式意愿（无记录则保持默认自动启动）。
+void Application::apply_startup_runtime_intent(const std::string& state_dir) {
+    const std::string boot_version_path = state_dir + "/" + paths::kCoreBootVersionFileName;
+    const std::string ota_status_path = state_dir + "/" + paths::kOtaStatusFileName;
+    const std::string cur_version(kCoreVersion);
+
+    std::string prev_boot_version;
+    {
+        std::ifstream in(boot_version_path, std::ios::binary);
+        if (in) {
+            std::getline(in, prev_boot_version);
+            while (!prev_boot_version.empty() &&
+                   (prev_boot_version.back() == '\r' || prev_boot_version.back() == '\n' ||
+                    prev_boot_version.back() == ' ' || prev_boot_version.back() == '\t')) {
+                prev_boot_version.pop_back();
+            }
+        }
+    }
+
+    // 判定规则见 app/RuntimeIntent.hpp（纯函数，host 可单测）。
+    // ota_status.json 只在"还没有启动版本标记"时才用得上（规则②），省一次读盘。
+    JsonValue ota_status;
+    bool have_ota_status = false;
+    if (prev_boot_version.empty()) {
+        const JsonParseResult st = json_parse_file(ota_status_path);
+        if (st.ok && st.value.is_object()) {
+            ota_status = st.value;
+            have_ota_status = true;
+        }
+    }
+    const StartupIntent intent =
+        decide_startup_intent(prev_boot_version, cur_version,
+                              have_ota_status ? &ota_status : nullptr);
+
+    // 记录本次启动版本（best-effort：失败只告警，绝不影响启停本身）。
+    {
+        const std::string tmp = boot_version_path + ".tmp";
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (out) {
+            out << cur_version << "\n";
+            out.flush();
+            out.close();
+            std::error_code ec;
+            std::filesystem::rename(tmp, boot_version_path, ec);
+            if (ec) {
+                TTBOX_LOG_WARN("启动版本标记发布失败（忽略）: " + ec.message());
+                std::error_code rm_ec;
+                std::filesystem::remove(tmp, rm_ec);
+            }
+        } else {
+            TTBOX_LOG_WARN("启动版本标记写入失败（打不开临时文件，忽略）: " + tmp);
+        }
+    }
+
+    if (intent.just_updated) {
+        want_runtime_running_.store(intent.want_running);
+        persist_runtime_intent(intent.want_running);
+        TTBOX_LOG_INFO("检测到刚完成版本更新（" + intent.reason +
+                       "）：AI 流水线保持停止，等用户手动点启动");
+        return;
+    }
+    load_runtime_intent();
 }
 
 // ---- R5 用户启停意愿持久化 ----

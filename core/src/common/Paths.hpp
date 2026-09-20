@@ -33,4 +33,12 @@ inline constexpr const char* kStateDirDefault = "/opt/ttbox/state";
 // 无该文件（首次开机 / 记录损坏）时保持编译期默认（自动启动推理）。
 inline constexpr const char* kRuntimeIntentFileName = "runtime_intent.json";
 
+// 上次启动时 core 自己的版本（R6）：与当前 kCoreVersion 不一致 ⇒ 中间发生过版本更替
+// （OTA / 重装），据此把流水线停在停止态等用户手动启动。与 <state>/ota_status.json
+// （更新器写的安装结果）配合，覆盖"升级到本特性首个版本"那一次（此时标记尚不存在）。
+inline constexpr const char* kCoreBootVersionFileName = "core_boot_version";
+
+// 更新器安装结果文件（更新器写、web `/api/update/status` 读，键 state/version）。
+inline constexpr const char* kOtaStatusFileName = "ota_status.json";
+
 }  // namespace ttbox::core::paths

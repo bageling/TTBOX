@@ -66,6 +66,9 @@ private:
     // 无记录时不动默认值（保持历史语义 want=true）。
     void load_runtime_intent();
     bool persist_runtime_intent(bool want_running);
+    // R6 启动意图裁决（唯一入口）：先判"刚更新过"（版本更替 ⇒ 强制停止并落盘），
+    // 否则按 R5 还原用户显式意愿。state_dir 由 initialize() 解析（TTBOX_STATE > 默认）。
+    void apply_startup_runtime_intent(const std::string& state_dir);
     // M2.02：ACTIVATE_LICENSE（离线卡激活 + Gate publish + wire 投影；fail-closed）
     bool handle_license_activate(const std::string& card_envelope,
                                  JsonValue* data, std::string* error);

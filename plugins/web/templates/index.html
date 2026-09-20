@@ -11127,14 +11127,53 @@ function stopUpdateStatusPolling() {
   }
 }
 
-function scheduleUpdatePageRefresh(delayMs = 2600) {
-  if (state.updateRefreshScheduled) {
-    return;
+// 2026-09-20：一次更新只允许自动刷新一次。
+// 为什么加这个：更新成功有**两条**到达路径——「本页发起安装」的 1s 轮询，和常驻的 5s
+// 完成监视器（后者为了发现"别处发起的更新"）。两条都能各自安排刷新；而刷新后新页面的
+// state 是全新的，旧代码只有监视器那条写去重标记、轮询那条不写 ⇒ 页面刷一次后，
+// 监视器又把这条 SUCCESS 判成"刚更新完"，于是再刷一次，用户看到连刷两次。
+// 标记放 sessionStorage：同一标签页刷新后**仍然记得**（这正是防二次刷新的关键），
+// 又不像 localStorage 那样跨标签页共享（多个标签页各自刷一次，不会被彼此吃掉）。
+const OTA_REFRESH_SEEN_PREFIX = "ota_refresh_seen_";
+
+function otaRefreshAlreadyDone(version) {
+  try {
+    return window.sessionStorage.getItem(OTA_REFRESH_SEEN_PREFIX + version) === "1";
+  } catch (error) {
+    return false; // 拿不到 sessionStorage：退化为只靠本页实例的 updateRefreshScheduled 兜底
   }
+}
+
+function markOtaRefreshDone(version) {
+  try {
+    window.sessionStorage.setItem(OTA_REFRESH_SEEN_PREFIX + version, "1");
+  } catch (error) {
+    /* 忽略：最坏情况多刷一次，不会无限刷（监视器还有 finished_at 新鲜度窗口兜底） */
+  }
+}
+
+// 返回 true = 本次真的安排了刷新（调用方据此决定要不要弹提示）。
+function scheduleUpdatePageRefresh(version, delayMs = 2600) {
+  const key = version || "_unknown";
+  if (state.updateRefreshScheduled || otaRefreshAlreadyDone(key)) {
+    return false;
+  }
+  markOtaRefreshDone(key);
   state.updateRefreshScheduled = true;
   window.setTimeout(() => {
     window.location.reload();
   }, delayMs);
+  return true;
+}
+
+// 两条路径（1s 轮询 / 5s 监视器）共用的唯一确认入口，防止重复弹提示、重复刷新。
+function confirmUpdateSuccessAndRefresh(version) {
+  if (!scheduleUpdatePageRefresh(version)) {
+    return false;
+  }
+  showToast(version ? "检测到更新已完成（" + version + "），页面即将刷新"
+                    : "更新成功，页面即将刷新");
+  return true;
 }
 
 // 2026-09-20：OTA 完成监视器。原「成功→自动刷新」只挂在「本页发起安装」的轮询上；
@@ -11174,27 +11213,14 @@ function startUpdateCompletionWatcher() {
       if (!finishedAt || finishedAt < pageOpenedAtSec - 60) {
         return; // 历史残留的 SUCCESS，不提示也不刷新
       }
-      // 去重键用 localStorage（跳标签页/刷新都记得住；原来用 sessionStorage，
-      // 每开一个新标签页都会再触发一次）。
-      const key = "ota_success_seen_" + status.version;
-      let seen = null;
-      try {
-        seen = window.localStorage.getItem(key);
-      } catch (error) {
-        seen = null;
-      }
-      if (seen) {
+      // 去重：本标签页已经为这个版本刷过一次就不再动（sessionStorage 跨刷新保留，
+      // 所以刷新后的新页面不会把同一条 SUCCESS 再当一次"刚更新完"）。
+      if (otaRefreshAlreadyDone(status.version) || state.updateRefreshScheduled) {
         return;
-      }
-      try {
-        window.localStorage.setItem(key, "1");
-      } catch (error) {
-        /* localStorage 不可用时仍继续，最多多刷一次 */
       }
       stopUpdateStatusPolling();
       renderUpdateStatus(status);
-      showToast("检测到更新已完成（" + status.version + "），页面即将刷新");
-      scheduleUpdatePageRefresh();
+      confirmUpdateSuccessAndRefresh(status.version);
     } catch (error) {
       /* 静默：网络抖动/服务重启期间读不到就等下一轮 */
     }
@@ -11214,8 +11240,10 @@ function startUpdateStatusPolling() {
       const status = await fetchUpdateStatus({ silent: true });
       if (status && status.status === "success") {
         stopUpdateStatusPolling();
-        showToast("更新成功，页面即将刷新");
-        scheduleUpdatePageRefresh();
+        // 走同一个确认入口：已刷过就只更新面板，不再弹提示、不再安排第二次刷新。
+        if (!confirmUpdateSuccessAndRefresh(status.version)) {
+          renderUpdateStatus(status);
+        }
       } else if (status && status.status === "failed") {
         stopUpdateStatusPolling();
         showToast(status.error || "更新失败", true);
