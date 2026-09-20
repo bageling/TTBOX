@@ -59,6 +59,7 @@ if [ -z "$TARGETS" ]; then
 fi
 
 rc=0
+REPLACED=0
 while IFS= read -r dst; do
     [ -n "$dst" ] || continue
     cur="$(sha256sum "$dst" 2>/dev/null | cut -d' ' -f1)"
@@ -82,7 +83,8 @@ while IFS= read -r dst; do
                 cat "$bak" > "$dst" 2>/dev/null
                 continue
             fi
-            log "已替换为可用 DTB（备份 $bak）⇒ **需重启后生效**"
+            log "已替换为可用 DTB（备份 $bak）"
+            REPLACED=1
             ;;
         *)
             warn "$(basename "$dst") 指纹未登记（got=$cur），不敢动，跳过"
@@ -91,5 +93,29 @@ while IFS= read -r dst; do
 done <<EOF
 $TARGETS
 EOF
+
+# ---- 2. 真换过才安排重启 ----
+# 为什么必须自动重启：DTB 由 u-boot 开机时读取，只换文件不重启 ⇒ 修复**永远不生效**，
+# 客户会再报一遍同样的 EDID 错，而线上看"OTA 已经装上了"——比不修更难查。
+# 只在「确实发生了替换」时安排（已是正确的版本 ⇒ 不动 ⇒ 绝不反复重启）；
+# 留 2 分钟缓冲，让 OTA 的 activate/健康检查先正常收尾（可被 shutdown -c 取消）。
+if [ "$REPLACED" = 1 ]; then
+    if [ -n "${TTBOX_DTB_FIX_TEST:-}" ]; then
+        log "[TEST] 已跳过重启安排（TTBOX_DTB_FIX_TEST）"
+    else
+        MARK="/var/lib/ttbox/dtb-reboot-pending"
+        mkdir -p /var/lib/ttbox 2>/dev/null
+        { date -Is 2>/dev/null || date; } > "$MARK" 2>/dev/null || true
+        if command -v shutdown >/dev/null 2>&1; then
+            if shutdown -r +2 "TTBOX: DTB 已更新，重启后 HDMI 采集生效" 2>/dev/null; then
+                log "已安排 2 分钟后重启（取消命令：shutdown -c）"
+            else
+                warn "shutdown 调用失败 ⇒ 请手动重启，否则 DTB 修复不生效"
+            fi
+        else
+            warn "系统无 shutdown 命令 ⇒ 请手动重启，否则 DTB 修复不生效"
+        fi
+    fi
+fi
 
 exit 0
