@@ -7136,6 +7136,33 @@ function redirectToActivationPage() {
   }, 0);
 }
 
+let authConfirmInFlight = false;
+async function confirmAuthorizationFailure() {
+  // 2026-09-20：OTA 安装会重启 core，重启瞬间 /api/state 可能瞬时 401「未激活」，
+  // 旧逻辑一见授权类错误立刻跳激活页 ⇒ 用户升级中被误踢到激活页。改为二次确认：
+  // 重查一次 /api/state，只有它也明确报授权失败才跳；网络抖动/服务重启中一律不跳。
+  if (authConfirmInFlight) {
+    return false;
+  }
+  authConfirmInFlight = true;
+  try {
+    const response = await fetch("/api/state", { cache: "no-store" });
+    if (response.status === 401) {
+      return true;
+    }
+    const data = await response.json().catch(() => ({}));
+    const error = new Error(data.error || `HTTP ${response.status}`);
+    error.status = response.status;
+    return isAuthorizationFailure(error);
+  } catch (error) {
+    return false;
+  } finally {
+    window.setTimeout(() => {
+      authConfirmInFlight = false;
+    }, 1500);
+  }
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, options);
   const data = await response.json().catch(() => ({}));
@@ -7144,7 +7171,14 @@ async function api(path, options = {}) {
     error.payload = data.data;
     error.status = response.status;
     if (isAuthorizationFailure(error)) {
-      redirectToActivationPage();
+      const updateRunning = state.updateStatus && state.updateStatus.status === "running";
+      if (!updateRunning) {
+        confirmAuthorizationFailure().then((confirmed) => {
+          if (confirmed) {
+            redirectToActivationPage();
+          }
+        });
+      }
     }
     throw error;
   }
