@@ -610,6 +610,17 @@ main() {
     verify_staging "$staging" "${payload}/RELEASE_MANIFEST.json"
     publish_release "$ver"
 
+    # 1.5.22：出厂 DTB 里 HDMI-RX 是 disabled ⇒ /dev/video0 不存在、HDMI 采集不可用。
+    # 放在 publish 之后、activate 之前：DTB 属于启动链，与运行树切换无关；
+    # 且脚本恒退出 0 —— 绝不允许它把一次 OTA 判成失败（失败的后果比不修更糟）。
+    # 注意：替换的是文件，**必须重启才生效**（u-boot 开机才读 DTB）。
+    if [[ -x "${RELEASES_DIR}/${ver}/scripts/ttbox_dtb_fix.sh" ]]; then
+        "${RELEASES_DIR}/${ver}/scripts/ttbox_dtb_fix.sh" \
+            || warn "ttbox_dtb_fix.sh 返回非 0（已忽略，不阻断安装）"
+    else
+        warn "payload 缺 scripts/ttbox_dtb_fix.sh，跳过 DTB 修复"
+    fi
+
     if (( activate_flag )); then
         activate "$ver"
         prune_versions

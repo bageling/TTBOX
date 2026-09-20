@@ -38,6 +38,7 @@ scripts/ttbox_restore.sh
 scripts/ttbox_uninstall.sh
 scripts/ttbox_ensure_services.sh
 scripts/ttbox_ota_updater.py
+scripts/ttbox_dtb_fix.sh
 scripts/ttbox_release_install.sh
 scripts/ttbox_fhs_init.sh
 scripts/ttbox-web-reset-credentials.sh
@@ -55,3 +56,8 @@ deploy/systemd/*.path
 deploy/config/00-factory.json
 deploy/config/10-device.json
 deploy/config/hardware_display.json
+#   rk3588-orangepi-5-plus.dtb：已启用 HDMI-RX 的设备树（1.5.22）
+#     出厂那份里 hdmirx-controller@fdee0000 是 status=disabled ⇒ /dev/video0 不存在
+#     ⇒ HDMI 采集整体不可用、EDID 报「未找到可写 HPD 节点」。
+#     由 scripts/ttbox_dtb_fix.sh 在装机/OTA 时替换（指纹精确匹配才动，需重启生效）。
+deploy/dtb/rk3588-orangepi-5-plus.dtb
