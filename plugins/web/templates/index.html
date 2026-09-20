@@ -11129,16 +11129,9 @@ function scheduleUpdatePageRefresh(version, delayMs = 2600) {
   markOtaRefreshDone(key);
   state.updateRefreshScheduled = true;
   window.setTimeout(() => {
-    // 2026-09-20 业主反馈：更新后刷新会跳回上次停留的页签（常见是 07 预设参数）。
-    // 「系统状态」页本身就是免记页（LICENSE_GATE_PAGE_ID），所以刷新时只会落回更早的页签。
-    // 更新 = 一次重开，落回首页(总览)最符合直觉；顺手把记住的页签也归位，避免后手再跳。
-    try {
-      if (window.localStorage) {
-        window.localStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, "home-page");
-      }
-    } catch (_) {
-      /* 私密模式 / 存储被禁用：退回 HTML 默认首页，同样不跳预设 */
-    }
+    // 2026-09-20 业主反馈修正：刷新后要停在**当前这一页**，别跳来跳去。
+    // 页签记忆已修成「用户点过的都记（含 08 系统状态）」，所以直接刷新就是对的：
+    // 在 08 盯着更新就留在 08，在别处就留在别处，不再强制归位首页。
     window.location.reload();
   }, delayMs);
   return true;
@@ -12915,8 +12908,15 @@ function initPageNavigation() {
     return;
   }
 
-  function activate(pageId) {
-    if (state.navigationLockedToLicense && pageId !== LICENSE_GATE_PAGE_ID) {
+  // 2026-09-20 业主反馈修正：刷新后要**停在原来那一页**，不要再跳。
+  // 旧逻辑把「系统状态」页排除在记忆之外（它同时是授权门禁页），于是你在 08 看更新、
+  // 一刷新就落回更早停留的页签（本次是 07 预设参数）。
+  // 现在：用户点过的每一页都记（含 08）；只有「授权门禁强制跳转」不记——
+  // 那是被动进来的，记下来解锁后会一直停在授权页。
+  function activate(pageId, options = {}) {
+    // 门禁锁定时的一切切页都是被动的，不写记忆。
+    const gateForced = !!state.navigationLockedToLicense;
+    if (gateForced && pageId !== LICENSE_GATE_PAGE_ID) {
       pageId = LICENSE_GATE_PAGE_ID;
     }
     state.activePageId = pageId;
@@ -12926,9 +12926,7 @@ function initPageNavigation() {
     tabs.forEach((tab) => {
       tab.classList.toggle("is-active", tab.dataset.pageTarget === pageId);
     });
-    // 2026-09-20：记住当前页签。授权门禁页不记——它是被动跳转进来的，
-    // 记下来会让人解锁后一直停在授权页。
-    if (pageId !== LICENSE_GATE_PAGE_ID) {
+    if (!gateForced && options.persistMemory !== false) {
       try {
         if (window.localStorage) {
           window.localStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, pageId);
@@ -12945,12 +12943,14 @@ function initPageNavigation() {
   });
   window.activatePage = activate;
 
-  // 恢复上次停留的页签（没有记录或记录已失效 ⇒ 保持 HTML 默认的首页）
+  // 恢复上次停留的页签（没有记录或记录已失效 ⇒ 保持 HTML 默认的首页）。
+  // 2026-09-20 修正：不再排除「系统状态」页——在 08 刷新就该停在 08。
+  // 存储里能出现 08，只可能是用户自己点进去的（门禁被动跳转不写记忆）。
   try {
     if (window.localStorage) {
       const saved = window.localStorage.getItem(ACTIVE_PAGE_STORAGE_KEY);
-      if (saved && saved !== LICENSE_GATE_PAGE_ID && pages.some((page) => page.id === saved)) {
-        activate(saved);
+      if (saved && pages.some((page) => page.id === saved)) {
+        activate(saved, { persistMemory: false });
       }
     }
   } catch (_) {
