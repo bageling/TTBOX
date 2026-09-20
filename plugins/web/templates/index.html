@@ -5458,8 +5458,8 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <label class="field"><span class="field-label">Y轴拉力</span><input id="controller_kp_y" data-config type="number" step="0.1"><span class="field-hint">KP Y；Y轴方向把准星拉向目标的力度。抬不上去就加；Y轴晃就降。</span></label>
                     <label class="field"><span class="field-label">X轴预判</span><input id="controller_predict_x" data-config type="number" step="0.1"><span class="field-hint">PREDICT X；目标横着跑时提前往前看一点。滞后就加，提前过头就降。</span></label>
                     <label class="field"><span class="field-label">Y轴预判</span><input id="controller_predict_y" data-config type="number" step="0.1"><span class="field-hint">PREDICT Y；目标Y轴移动时提前看一点。一般保持很小，落地抖就别加。</span></label>
-                    <label class="field"><span class="field-label">X轴积分</span><input id="controller_ki_x" data-config type="number" step="0.01"><span class="field-hint">KI X；补偿长期残余误差。默认 0；小幅增加即可，过高容易漂移或来回晃。</span></label>
-                    <label class="field"><span class="field-label">Y轴积分</span><input id="controller_ki_y" data-config type="number" step="0.01"><span class="field-hint">KI Y；补偿长期残余误差。默认 0；小幅增加即可，过高容易漂移或来回晃。</span></label>
+                    <label class="field"><span class="field-label">X轴平滑</span><input id="controller_smooth_x" data-config type="number" step="10"><span class="field-hint">SMOOTH X；对输出做柔和限幅。9900 ≈ 不过滤（标准值）；调低输出更柔但会更迟钝。</span></label>
+                    <label class="field"><span class="field-label">Y轴平滑</span><input id="controller_smooth_y" data-config type="number" step="10"><span class="field-hint">SMOOTH Y；对输出做柔和限幅。9900 ≈ 不过滤（标准值）；调低输出更柔但会更迟钝。</span></label>
                     <label class="field"><span class="field-label">X轴刹车</span><input id="controller_kd_x" data-config type="number" step="0.1"><span class="field-hint">KD X；对X轴速度变化做刹车。数值大容易抖，晃的时候优先调低。</span></label>
                     <label class="field"><span class="field-label">Y轴刹车</span><input id="controller_kd_y" data-config type="number" step="0.1"><span class="field-hint">KD Y；对Y轴速度变化做刹车。跳跃、落地发抖时先调低或关掉。</span></label>
                     <label class="field"><span class="field-label">X轴跟随</span><input id="controller_rate_x" data-config type="number" step="0.01"><span class="field-hint">RATE X；X轴输出变强的速度。反应慢就加一点；突然一窜就降一点。</span></label>
@@ -6298,14 +6298,14 @@ const NUMERIC_RANGE_LIMITS = {
   capture_crop_offset_y: [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX],
   controller_kp_x: [0, 200],
   controller_kp_y: [0, 200],
-  controller_ki_x: [0, 50],
-  controller_ki_y: [0, 50],
   controller_kd_x: [0, 80],
   controller_kd_y: [0, 80],
   controller_predict_x: [0, 10],
   controller_predict_y: [0, 10],
   controller_rate_x: [0, 1],
   controller_rate_y: [0, 1],
+  controller_smooth_x: [0, 9999],
+  controller_smooth_y: [0, 9999],
   controller_output_deadzone: [0, 20],
   controller_pull_curve_strength: [0, 2],
   controller_pull_curve_jitter_px: [0, 12],
@@ -6361,15 +6361,15 @@ function overviewDefaults() {
 }
 
 const CONTROLLER_DEFAULTS = {
-  kp_x: 20,
-  kp_y: 20,
-  ki_x: 0,
-  ki_y: 0,
-  kd_x: 0,
-  kd_y: 0,
-  predict_x: 0.5,
-  predict_y: 0.5,
-  rate_x: 0.4,
+  // 2026-09-20 定案：pid1.cpp 为唯一标准，默认值与其 main() 权威参数一致
+  // （X: kp=25 kd=25 predict=3 rate=0.3 smooth=9900；Y: predict=0，其余同 X）。
+  kp_x: 25,
+  kp_y: 25,
+  kd_x: 25,
+  kd_y: 25,
+  predict_x: 3,
+  predict_y: 0,
+  rate_x: 0.3,
   rate_y: 0.3,
   smooth_x: 9900,
   smooth_y: 9900,
@@ -9713,14 +9713,14 @@ function populateForm(config) {
 
   setValue("controller_kp_x", controller.kp_x ?? CONTROLLER_DEFAULTS.kp_x);
   setValue("controller_kp_y", controller.kp_y ?? CONTROLLER_DEFAULTS.kp_y);
-  setValue("controller_ki_x", controller.ki_x ?? CONTROLLER_DEFAULTS.ki_x);
-  setValue("controller_ki_y", controller.ki_y ?? CONTROLLER_DEFAULTS.ki_y);
   setValue("controller_kd_x", controller.kd_x ?? CONTROLLER_DEFAULTS.kd_x);
   setValue("controller_kd_y", controller.kd_y ?? CONTROLLER_DEFAULTS.kd_y);
   setValue("controller_predict_x", controller.predict_x ?? CONTROLLER_DEFAULTS.predict_x);
   setValue("controller_predict_y", controller.predict_y ?? CONTROLLER_DEFAULTS.predict_y);
   setValue("controller_rate_x", controller.rate_x ?? CONTROLLER_DEFAULTS.rate_x);
   setValue("controller_rate_y", controller.rate_y ?? CONTROLLER_DEFAULTS.rate_y);
+  setValue("controller_smooth_x", controller.smooth_x ?? CONTROLLER_DEFAULTS.smooth_x);
+  setValue("controller_smooth_y", controller.smooth_y ?? CONTROLLER_DEFAULTS.smooth_y);
   setValue("controller_output_deadzone", controller.output_deadzone ?? CONTROLLER_DEFAULTS.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled ?? CONTROLLER_DEFAULTS.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
@@ -9796,14 +9796,14 @@ function setMovementControlDefaultsToForm() {
   setValue("sens", MOVEMENT_CONTROL_DEFAULTS.sens);
   setValue("controller_kp_x", controller.kp_x);
   setValue("controller_kp_y", controller.kp_y);
-  setValue("controller_ki_x", controller.ki_x);
-  setValue("controller_ki_y", controller.ki_y);
   setValue("controller_kd_x", controller.kd_x);
   setValue("controller_kd_y", controller.kd_y);
   setValue("controller_predict_x", controller.predict_x);
   setValue("controller_predict_y", controller.predict_y);
   setValue("controller_rate_x", controller.rate_x);
   setValue("controller_rate_y", controller.rate_y);
+  setValue("controller_smooth_x", controller.smooth_x);
+  setValue("controller_smooth_y", controller.smooth_y);
   setValue("controller_output_deadzone", controller.output_deadzone);
   setCheckbox("controller_pull_curve_enabled", controller.pull_curve_enabled);
   setValue("controller_pull_curve_strength", controller.pull_curve_strength);
@@ -9875,14 +9875,14 @@ function movementDefaultsForSection(sectionId) {
       sens: MOVEMENT_CONTROL_DEFAULTS.sens,
       controller_kp_x: controller.kp_x,
       controller_kp_y: controller.kp_y,
-      controller_ki_x: controller.ki_x,
-      controller_ki_y: controller.ki_y,
       controller_kd_x: controller.kd_x,
       controller_kd_y: controller.kd_y,
       controller_predict_x: controller.predict_x,
       controller_predict_y: controller.predict_y,
       controller_rate_x: controller.rate_x,
       controller_rate_y: controller.rate_y,
+      controller_smooth_x: controller.smooth_x,
+      controller_smooth_y: controller.smooth_y,
       controller_output_deadzone: controller.output_deadzone,
       controller_selector_max_lost_frames: controller.selector_max_lost_frames,
       controller_aim_fire_lock_y: controller.aim_fire_lock_y,
@@ -10039,16 +10039,14 @@ function collectConfig() {
       controller: {
         kp_x: getNumber("controller_kp_x", CONTROLLER_DEFAULTS.kp_x),
         kp_y: getNumber("controller_kp_y", CONTROLLER_DEFAULTS.kp_y),
-        ki_x: getNumber("controller_ki_x", CONTROLLER_DEFAULTS.ki_x),
-        ki_y: getNumber("controller_ki_y", CONTROLLER_DEFAULTS.ki_y),
         kd_x: getNumber("controller_kd_x", CONTROLLER_DEFAULTS.kd_x),
         kd_y: getNumber("controller_kd_y", CONTROLLER_DEFAULTS.kd_y),
         predict_x: getNumber("controller_predict_x", CONTROLLER_DEFAULTS.predict_x),
         predict_y: getNumber("controller_predict_y", CONTROLLER_DEFAULTS.predict_y),
         rate_x: getNumber("controller_rate_x", CONTROLLER_DEFAULTS.rate_x),
         rate_y: getNumber("controller_rate_y", CONTROLLER_DEFAULTS.rate_y),
-        smooth_x: CONTROLLER_DEFAULTS.smooth_x,
-        smooth_y: CONTROLLER_DEFAULTS.smooth_y,
+        smooth_x: getNumber("controller_smooth_x", CONTROLLER_DEFAULTS.smooth_x),
+        smooth_y: getNumber("controller_smooth_y", CONTROLLER_DEFAULTS.smooth_y),
         output_deadzone: getNumber("controller_output_deadzone", CONTROLLER_DEFAULTS.output_deadzone),
         pull_curve_enabled: getCheckbox("controller_pull_curve_enabled"),
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),

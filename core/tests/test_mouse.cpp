@@ -1,7 +1,7 @@
 // test_mouse.cpp — A10 AI 鼠标注入模块单元测试
 //
 // 覆盖：TargetSelector / AimPointProfile / CoordinateTransform / AimTracker /
-//       MotionController / Deadzone / RateLimit / MotionMerge / AimState /
+//       Deadzone / RateLimit / MotionMerge / AimState /
 //       RuntimeProfile(mouse 段) + 关键场景。
 #include "test_util.hpp"
 
@@ -15,7 +15,6 @@
 #include "mouse/Deadzone.hpp"
 #include "mouse/FovAngle.hpp"
 #include "mouse/Humanize.hpp"
-#include "mouse/MotionController.hpp"
 #include "mouse/MotionMerge.hpp"
 #include "mouse/MouseRouter.hpp"
 #include "mouse/MouseTypes.hpp"
@@ -193,36 +192,9 @@ TEST(mouse_aim_tracker_position_smoothing) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. MotionController（PID：kp 项 + ki/kd 默认 0 = 纯 P）
+// 2026-09-20 定案：pid1.cpp 为唯一标准控制器，旧经典 PID MotionController
+// 连同其 3 个用例（p_only / ki / kd）一并删除（Pid1Controller 覆盖见 test_pid1.cpp）。
 // ---------------------------------------------------------------------------
-TEST(mouse_motion_controller_p_only) {
-    aim::MotionController c;
-    auto o = c.update(10.0f, -4.0f, 17.0f, 10.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    CHECK_EQ(o.out_x, 127.0f);
-    CHECK_EQ(o.out_y, -40.0f);
-}
-
-TEST(mouse_motion_controller_ki) {
-    aim::MotionController c;
-    // ki=0.1：积分会更新，但最终输出受 +127 限幅
-    auto o1 = c.update(10.0f, 0.0f, 17.0f, 10.0f, 0.1f, 0.0f, 0.0f, 0.0f);
-    CHECK_EQ(o1.out_x, 127.0f);
-    // 持续 err=10：积分再 +1
-    auto o2 = c.update(10.0f, 0.0f, 17.0f, 10.0f, 0.1f, 0.0f, 0.0f, 0.0f);
-    CHECK_EQ(o2.out_x, 127.0f);
-}
-
-TEST(mouse_motion_controller_kd) {
-    aim::MotionController c;
-    // kd=2：微分会参与控制，但最终输出受 +127 限幅
-    auto o1 = c.update(10.0f, 0.0f, 17.0f, 10.0f, 0.0f, 0.0f, 2.0f, 0.0f);
-    (void)o1;
-    auto o2 = c.update(8.0f, 0.0f, 17.0f, 10.0f, 0.0f, 0.0f, 2.0f, 0.0f);
-    CHECK_EQ(o2.out_x, -127.0f);
-    c.reset();
-    auto o3 = c.update(8.0f, 0.0f, 17.0f, 10.0f, 0.0f, 0.0f, 2.0f, 0.0f);
-    CHECK_EQ(o3.out_x, 127.0f);  // reset 后无微分，误差为正时恢复正向输出
-}
 
 // ---------------------------------------------------------------------------
 // 6. Deadzone（X/Y 独立）

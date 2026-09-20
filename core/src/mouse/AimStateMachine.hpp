@@ -3,7 +3,7 @@
 // IDLE → SELECTING（目标检测命中）→ AIMING（selector 选中 + 热键有效）
 //      → LOST_GRACE（目标丢失）→ 找回恢复 AIMING / 超时回 IDLE。
 // 默认丢失宽限 78ms。
-// 退出 AIMING / 进入新目标时产生 reset 需求（Reset MotionController + Tracker）。
+// 退出 AIMING / 进入新目标时产生 reset 需求（Reset Pid1Controller + Tracker）。
 //
 // 第2项升级（目标锁定确认：ENTER/HOLD 双阈值门控）：
 //   - ENTER：新目标需连续 confirmation_frames 帧通过确认置信度阈值(target_enter_conf)
