@@ -3776,11 +3776,13 @@ html[data-theme="light"] .model-game-suggestion-list {
   display: none;
 }
 
-/* 2026-09-20：空闲态（未运行、无终态）收起进度头与进度条，只留一行提示语。
-   状态文字不再在面板里重复一份——统一由卡片右上角的 pill 承担。 */
-.update-progress-panel.is-idle .update-progress-head,
-.update-progress-panel.is-idle .update-progress-track {
-  display: none;
+/* 2026-09-20 业主定案修正：进度头与进度条**常驻**，空闲时只把数值归零，
+   不再 display:none 收起。显隐来回切换正是「进度条一会有一会没有」的根源；
+   结构恒定 = 布局不跳、不乱变。状态文字仍统一由卡片右上角的 pill 承担，
+   面板里只留「百分比 + 进度条 + 一行消息」。 */
+.update-progress-panel.is-idle .update-progress-head strong,
+.update-progress-panel.is-idle #updateProgressBar {
+  opacity: 0.5;
 }
 
 .update-progress-head {
@@ -3791,6 +3793,8 @@ html[data-theme="light"] .model-game-suggestion-list {
   color: var(--text);
   font-size: 13px;
   font-weight: 850;
+  /* 空闲时 <strong> 内容为空 —— 固定这一行高度，避免进度头塌陷导致进度条上跳 */
+  min-height: 18px;
 }
 
 .update-progress-head strong {
@@ -6604,6 +6608,8 @@ const state = {
   updateStatusInFlight: false,
   updateCompletionTimer: null,
   updateRefreshScheduled: false,
+  // 安装已提交、更新器尚未写出 RUNNING 的窗口闩（毫秒时间戳）。期间端点回 idle 一律忽略。
+  updateSessionDeadline: 0,
   licenseRecoveryInProgress: false,
   lastLicenseRecoveryMessage: "",
   displayRealMonitor: null,
@@ -10982,11 +10988,20 @@ function updateStatusLabel(status) {
 
 // 2026-09-21 稳定化：轮询(1s)/监视器(5s)/检查结果/安装点击四方都会调本函数，
 // 内容没变就直接跳过 DOM 写入；running 阶段进度只增不减，杜绝 65%→30% 倒退跳变。
-// 2026-09-20 业主定案：详情面板常驻显示（不再 hidden 切换），标签列状态、消息列版本/详情。
+// 2026-09-20 业主定案修正：面板结构恒定（进度头 + 进度条 + 消息常驻），空闲只是数值归零。
+const UPDATE_SESSION_TIMEOUT_MS = 180000;
 let updateRenderKey = "";
 function renderUpdateStatus(status) {
   const payload = status || {};
   const statusValue = String(payload.status || "idle");
+  // 更新会话闩：从「安装已提交」到「更新器写出 RUNNING」之间，状态端点会先返回 idle。
+  // 若照实渲染，进度条就会闪没、下一拍又冒出来。窗口内一律忽略 idle。
+  if (statusValue === "idle" && state.updateSessionDeadline && Date.now() < state.updateSessionDeadline) {
+    return;
+  }
+  if (statusValue !== "idle") {
+    state.updateSessionDeadline = 0;
+  }
   const prev = state.updateStatus;
   let progress = Math.max(0, Math.min(100, Number(payload.progress) || 0));
   if (statusValue === "running" && prev && prev.status === "running") {
@@ -11016,11 +11031,13 @@ function renderUpdateStatus(status) {
   if (panel) {
     panel.classList.toggle("is-success", statusValue === "success");
     panel.classList.toggle("is-failed", statusValue === "failed");
-    // 2026-09-20：空闲（未运行、无终态）时收起进度头和进度条，只留一行提示语。
-    // 状态文字统一由卡片右上角的 pill 承担，面板里不再重复一份。
+    // 2026-09-20 修正：空闲态不再隐藏进度头/进度条（那正是"一会有一会没有"），
+    // 只把数值归零、整体淡一档，面板结构保持恒定。
     panel.classList.toggle("is-idle", !running && !finished);
   }
   if (percent) {
+    // 数值只在真正有进度时出现；空闲留空但由 .update-progress-head 的 min-height 占位，
+    // 高度不塌陷 ⇒ 布局不跳。
     percent.textContent = running || finished ? `${Math.round(progress)}%` : "";
   }
   if (bar) {
@@ -11112,6 +11129,16 @@ function scheduleUpdatePageRefresh(version, delayMs = 2600) {
   markOtaRefreshDone(key);
   state.updateRefreshScheduled = true;
   window.setTimeout(() => {
+    // 2026-09-20 业主反馈：更新后刷新会跳回上次停留的页签（常见是 07 预设参数）。
+    // 「系统状态」页本身就是免记页（LICENSE_GATE_PAGE_ID），所以刷新时只会落回更早的页签。
+    // 更新 = 一次重开，落回首页(总览)最符合直觉；顺手把记住的页签也归位，避免后手再跳。
+    try {
+      if (window.localStorage) {
+        window.localStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, "home-page");
+      }
+    } catch (_) {
+      /* 私密模式 / 存储被禁用：退回 HTML 默认首页，同样不跳预设 */
+    }
     window.location.reload();
   }, delayMs);
   return true;
@@ -11248,6 +11275,9 @@ async function installUpdatePlan(plan) {
       progress: 1,
       version: (plan && plan.latest_version) || "",
     });
+    // 必须在 running 渲染**之后**上闩：renderUpdateStatus 见到非 idle 会把闩清零。
+    // 闩住「已提交 → 更新器写出 RUNNING」这段空窗，期间端点回 idle 不闪进度条。
+    state.updateSessionDeadline = Date.now() + UPDATE_SESSION_TIMEOUT_MS;
     startUpdateStatusPolling();
     return await api("/api/update/install", {
       method: "POST",
