@@ -87,6 +87,9 @@
 | `USB_PROXY_WAIT_SECONDS` | 秒 | `1` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_BIN` | 路径 | `<usbproxy 目录>/usb-proxy` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_EXTRA_ARGS` | 字符串 | 空 | `run-ttbox-usb-proxy.sh` | RUNTIME |
+| `USB_PROXY_LIBDIR` | 路径 | `<usbproxy 目录>/lib` | `run-ttbox-usb-proxy.sh` | RUNTIME |
+| `USB_PROXY_UDC_WAIT_SECONDS` | 秒 | `60` | `run-ttbox-usb-proxy.sh` | RUNTIME |
+| `USB_PROXY_MOUSE_WAIT_SECONDS` | 秒 | `30` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 
 > **§6-6 裁定**：`USB_PROXY_*` 归属**脚本 `usbproxy/board/run-ttbox-usb-proxy.sh`**（RUNTIME），
 > 由 `deploy/systemd/ttbox-usbproxy.service` 的 `Environment=` 提供；前缀沿用既有 `USB_PROXY_`
