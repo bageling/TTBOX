@@ -137,6 +137,16 @@ print(json.dumps({"ok": True, "file": out_path, "size": len(edid),
                   "serial": f"0x{ser:08x}", "name": name}))
 PYEOF
 
+# 1.5.26 修复（客户侧实测 PermissionError）：
+#   上面那段权限收敛跑在**生成 current.bin 之前**——第一次运行时文件还不存在，
+#   那个 `if [ -f "$EDID_OUTPUT" ]` 直接跳过 ⇒ python 新建的 current.bin 是
+#   root:root 0644（受 umask）⇒ ttbox 用户的 web「保存并应用」写不进去（PermissionError）。
+#   故在生成之后再收敛一次（幂等；非 root 路径跳过，语义与上面一致）。
+if [ "$(id -u)" = "0" ] && [ -f "$EDID_OUTPUT" ]; then
+  chgrp ttbox "$EDID_OUTPUT" 2>/dev/null || true
+  chmod 0664 "$EDID_OUTPUT" 2>/dev/null || true
+fi
+
 set_hpd() {
   local state="$1"
   [ -n "$HPD_STATUS" ] || return 0
