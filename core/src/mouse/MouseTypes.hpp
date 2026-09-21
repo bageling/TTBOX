@@ -121,6 +121,32 @@ struct HumanizeConfig {
     float jitter_frequency = 8.0f; // 抖动频率 Hz
 };
 
+// 贝塞尔轨迹（BezierTrajectory）：把一次位移拆成多帧子位移点列
+enum class BezierDirection : int {
+    kRight = 0,
+    kLeft = 1,
+    kUp = 2,
+    kDown = 3,
+};
+
+struct BezierTrajectoryConfig {
+    bool enabled = false;          // 总开关（默认关，保持现有行为）
+    int generation = 1;            // 1=一代固定控制点；2=二代随机弧线
+    // -- 一代（path1）
+    float segments = 10.0f;        // 分段基数：seg = max(5, floor(segments × min(1.5, dist/100)))
+    // -- 二代（path2）
+    float linear_threshold = 45.0f;  // 距离 ≤ 它就直走（省开销）
+    float curvature = 0.2f;          // 曲率：弓高 = min(60, dist × curvature × 0.5)
+    float peak_min = 0.2f;           // 弓高比例抽签下界
+    float peak_max = 0.6f;           // 弓高比例抽签上界
+    bool dir_up = true;              // 允许的弧线方向（BB 默认 up/down 开、left/right 关）
+    bool dir_down = true;
+    bool dir_left = false;
+    bool dir_right = false;
+    // -- 公共
+    float min_move = 0.1f;         // 单段最小位移，小于它的段被丢弃（位移被下一段吸收）
+};
+
 // 拟人化整形引擎（personal_trajectory_shader：Fitts 时长 + 速度包络 + 垂直抖动 + 自适应抑制 + 安全守卫）
 // TTBOX 拟人化整形：Fitts 时长 + 速度包络 + 垂直抖动 + 自适应抑制 + 安全守卫。
 // 作用在 AimThread 输出链 move_x/move_y（int16 HID count）上、热键 Gate 之前：

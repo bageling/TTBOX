@@ -663,6 +663,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_hotkey_config PRIVATE ttbox_core)
   add_test(NAME test_hotkey_config COMMAND test_hotkey_config)
 
+  # 贝塞尔移动轨迹（一代分段自适应/二代随机弧线/抽签时机/弓高上限）单元测试
+  add_executable(test_bezier_trajectory tests/test_bezier_trajectory.cpp)
+  target_link_libraries(test_bezier_trajectory PRIVATE ttbox_core)
+  add_test(NAME test_bezier_trajectory COMMAND test_bezier_trajectory)
+
   # C6：TargetSelector 防横跳压力测试（交叉/抖动/消失/排序翻转）
   add_executable(test_selector_stress tests/test_selector_stress.cpp)
   target_link_libraries(test_selector_stress PRIVATE ttbox_core)
