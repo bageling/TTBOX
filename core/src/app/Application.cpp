@@ -27,6 +27,7 @@
 
 #include "common/Logger.hpp"
 #include "common/CpuAffinity.hpp"
+#include "common/RtSched.hpp"
 #include "common/Json.hpp"           // R5：启停意愿文件读写（json_parse_file / dump）
 #include "common/Paths.hpp"        // A-PATH-5：运行期路径字面量单点真源
 #include "common/ConfigDefaults.hpp"  // C-CFG-4：出厂默认值镜像（== deploy/config/00-factory.json）
@@ -519,6 +520,15 @@ int Application::initialize(int argc, char** argv) {
         runtime_intent_path_ = state_dir + "/" + paths::kRuntimeIntentFileName;
         ota_status_path_ = state_dir + "/" + paths::kOtaStatusFileName;
         apply_startup_runtime_intent(state_dir);
+    }
+
+    // ---- 实时调度准备：自己放开 RLIMIT_RTPRIO/MEMLOCK 并锁页 ----
+    // 必须在任何采集/推理线程起来之前做。不依赖 systemd 单元的 LimitRTPRIO：
+    // 板端实测 ttbox-core 单元 LimitRTPRIO=0，且 OTA 不保证覆盖单元文件。
+    // 失败只告警，线程会降级为普通调度。
+    {
+        std::string detail;
+        RtSched::prepare_process(&detail);
     }
 
     // ---- CPU 调频策略：使用系统默认动态调频，不强制拉满频率 ----

@@ -37,6 +37,9 @@
 | `TTBOX_LICENSE_SERVER` | URL | 内置默认（云端授权基址） | `TtboxLicenseClient.hpp` | 覆盖授权服务基址 | RUNTIME | `TtboxLicenseClient.hpp` |
 | `TTBOX_APP_KEY` | 字符串 | 空 | `TtboxLicenseClient.hpp` | 云端授权 app_key（**TEST/运维注入**，非产品默认） | RUNTIME | `TtboxLicenseClient.hpp` |
 | `TTBOX_CLIENT_SECRET` | 字符串 | 空 | `TtboxLicenseClient.hpp` | 云端授权 client_secret（同上） | RUNTIME | `TtboxLicenseClient.hpp` |
+| `TTBOX_CORE_MLOCK` | 开关 | `1`（`0`=关） | `core/src/common/RtSched.cpp`（`mlockall`，采集/推理路径防换页） | 覆盖进程级锁页开关 | RUNTIME | `Application::initialize` |
+| `TTBOX_CORE_CAPTURE_RT_PRIORITY` | SCHED_FIFO 优先级 | `60`（`0`=不启用，上限 `70`） | `core/src/capture/V4L2Capture.cpp`（**在采集线程内部**调用 `RtSched::apply_fifo`） | 覆盖采集线程实时优先级；失败降级为普通调度 | RUNTIME | `V4L2Capture::capture_loop` |
+| `TTBOX_CORE_CAPTURE_CPU` | CPU 编号 | `-1`（不绑，沿用大核掩码 CPU4~7） | `RtSched::apply_fifo` | 覆盖采集线程单核绑定 | RUNTIME | `V4L2Capture::capture_loop` |
 
 > **已删除（不得复活）**：`TTBOX_CONFIG_PATH`（同义异名，V-05），`TTBOX_MODEL_ROOT`（同义异名，V-04）。
 > 二者**不保留兼容读**（D-ENV-3 / D-ENV-5）。

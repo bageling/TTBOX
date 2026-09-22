@@ -23,6 +23,7 @@ namespace ttbox::core {
 #include "capture/DmaBuf.hpp"
 #include "common/Logger.hpp"
 #include "common/CpuAffinity.hpp"
+#include "common/RtSched.hpp"
 
 namespace ttbox::core {
 
@@ -429,16 +430,9 @@ bool V4L2Capture::start(std::string* error) {
 
     running_.store(true);
     capture_thread_ = std::thread(&V4L2Capture::capture_loop, this);
-    // 采集线程绑定大核（CPU4~7）：采集是硬实时链路，避免被调度到小核造成抖动。
-    // 失败仅告警（调度策略仍可用），不影响启动。
-    {
-        std::string aerr;
-        if (!CpuAffinity::set_thread_affinity(CpuAffinity::kBigCoreMask, &aerr)) {
-            TTBOX_LOG_WARN("capture 线程绑定大核失败: " + aerr);
-        } else {
-            TTBOX_LOG_INFO("capture 线程已绑定大核 (cpu4-7)");
-        }
-    }
+    // ★ 绑大核和上 RT 都在 capture_loop() 内部做，不在这里做：
+    // sched_setaffinity / pthread_setschedparam 作用于**调用线程**，在 start()
+    // 里调只会绑到启动采集的那个线程（main），采集线程自己一条都没生效。
     TTBOX_LOG_INFO("capture thread 已启动");
     return true;
 }
@@ -505,6 +499,23 @@ void V4L2Capture::close() {
 
 void V4L2Capture::capture_loop() {
     using clock = std::chrono::steady_clock;
+
+    // 采集线程调度策略：必须在**本线程内部**设置（在 start() 里设会作用于调用线程，
+    // 见上方 start() 的注释）。顺序：先绑大核，再上 SCHED_FIFO。
+    {
+        std::string aerr;
+        if (!CpuAffinity::set_thread_affinity(CpuAffinity::kBigCoreMask, &aerr)) {
+            TTBOX_LOG_WARN("capture 线程绑定大核失败: " + aerr);
+        } else {
+            TTBOX_LOG_INFO("capture 线程已绑定大核 (cpu4-7)");
+        }
+    }
+    {
+        // 默认 60；上限 70（低于 usb-proxy 的 98，别反过来抢鼠标通路）；
+        // 失败降级为普通调度，不让采集起不来。
+        std::string detail;
+        RtSched::apply_fifo("CAPTURE", 60, -1, &detail);
+    }
 
     // 滚动 1s 窗口：有帧则 +1，无帧（poll 超时/EAGAIN）也照常推进窗口，
     // 保证停流 1s 后 capture_fps 归零，Web 立刻能看到 degraded 而不是旧均值。

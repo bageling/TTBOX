@@ -98,6 +98,7 @@ set(CORE_SOURCES
   src/output/MouseControlClient.cpp
   src/common/Logger.cpp
   src/common/CpuAffinity.cpp
+  src/common/RtSched.cpp
   src/common/Json.cpp
   src/config/ConfigManager.cpp
   src/ipc/IpcServer.cpp
