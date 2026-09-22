@@ -1282,8 +1282,11 @@ def collect_web_state() -> dict:
     return {
         'ok': True,
         'data': {
-            'app_version': str(st.get('version', kAppVersion)) or kAppVersion,
-            'version': str(st.get('version', kAppVersion)) or kAppVersion,
+            # 对外可见版本 = 系统部署版本（current 软链名，与 /api/update/check 的 current_version 同源）。
+            # core 自报的 kCoreVersion 是「二进制编译版本」，core 未随包重编时会滞后
+            # （如 1.5.26 包复用 1.5.23 的 core 二进制），直接展示会与更新检查打架。
+            'app_version': _ota_current_version() or str(st.get('version', kAppVersion)) or kAppVersion,
+            'version': _ota_current_version() or str(st.get('version', kAppVersion)) or kAppVersion,
             'config': config_web,
             'auto_start': _auto_start_payload(),
             # 预览流健康：前端据此在服务重启/断线后自动重建 MJPEG 连接（防卡框冻结）
@@ -4601,7 +4604,8 @@ def _license_payload() -> dict:
     # S1-2026-09-18：无线/AP 热点已随无线页签整体移除，default_hotspot_ssid 仅剩品牌表展示字段。
     ui = _ui_block(license_data.get('ui_brand'))
     core_version = '2026.05.16'
-    app_version = kAppVersion
+    # 与 /api/state 同源：对外可见版本 = 系统部署版本（current 软链名），非 web 侧构建常量。
+    app_version = _ota_current_version() or kAppVersion
     return {
         'app_version': app_version,
         'auto_start': _auto_start_payload(),
