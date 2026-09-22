@@ -112,9 +112,17 @@ struct TestCtx {
     }
 };
 
-int wait_frames(TestCtx& ctx, int ms = 40) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-    return static_cast<int>(ctx.output->snapshot().size());
+// 时序加固（2026-09-22）：固定 sleep 在高负载（如全量构建后首跑）下会假红——
+// AimThread 可能 40ms 内一个 tick 都没跑。改为谓词轮询：条件满足立即返回，
+// 最长等 timeout_ms；谓词需要「线程确实活跃过」（acts 非空）来区分
+// 「等到了」与「根本没跑」，避免空 acts 让否定型断言（Case2/4）空洞通过。
+template <typename Pred>
+bool wait_until(TestCtx& ctx, Pred pred, int timeout_ms = 2000) {
+    for (int waited = 0; waited < timeout_ms; waited += 5) {
+        if (pred(ctx.output->snapshot())) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return pred(ctx.output->snapshot());
 }
 
 // 统计最后一次非零输出（排除热键关闭产生的 0）
@@ -138,11 +146,14 @@ int main() {
         if (!ctx.start()) { std::printf("[FAIL] start\n"); return 1; }
         ctx.buttons.store(0x02);                 // 热键 ON
         ctx.feed(1, 1000, make_far_box());       // 远距离目标
-        wait_frames(ctx);
+        // 等「线程活跃且已产出移动」，最长 2s；不再依赖固定 40ms（高负载假红）。
+        const bool got_move = wait_until(ctx, [](const std::vector<Action>& acts) {
+            return !acts.empty() && any_move(acts);
+        });
         ctx.thread.stop();
         auto acts = ctx.output->snapshot();
         bool moved = any_move(acts);
-        check(moved, "Case1 拉枪启用+远距离+热键ON -> 出移动");
+        check(got_move && moved, "Case1 拉枪启用+远距离+热键ON -> 出移动");
         // 拉枪只附加 Y 弧线；X 来自 PID 本身（err_x<0 -> move_x<0）。
         // 有移动即可证明注入点生效（对比 Case3 同配置拉枪关闭）。
     }
@@ -153,12 +164,14 @@ int main() {
         if (!ctx.start()) { std::printf("[FAIL] start\n"); return 1; }
         ctx.buttons.store(0x02);
         ctx.feed(1, 1000, make_near_box());      // 近距离目标
-        wait_frames(ctx);
+        // 先等线程确实跑过（acts 非空），再断言无移动——否则空 acts 让否定断言空洞通过。
+        const bool thread_ran = wait_until(ctx, [](const std::vector<Action>& acts) {
+            return !acts.empty();
+        });
         ctx.thread.stop();
         auto acts = ctx.output->snapshot();
-        // 近距离：PID 输出接近 0，且无弧线 -> 移动应基本为零
         bool moved = any_move(acts);
-        check(!moved, "Case2 近距离(<min_distance) -> 无拉枪附加、无移动");
+        check(thread_ran && !moved, "Case2 近距离(<min_distance) -> 无拉枪附加、无移动");
     }
 
     // Case3: 拉枪 disabled + 远距离 -> 与 Case1 对照（无弧线附加）
@@ -167,13 +180,13 @@ int main() {
         if (!ctx.start()) { std::printf("[FAIL] start\n"); return 1; }
         ctx.buttons.store(0x02);
         ctx.feed(1, 1000, make_far_box());
-        wait_frames(ctx);
+        const bool got_move = wait_until(ctx, [](const std::vector<Action>& acts) {
+            return !acts.empty() && any_move(acts);
+        });
         ctx.thread.stop();
         auto acts = ctx.output->snapshot();
-        // 拉枪关闭：PID 输出可能仍非零（大误差 -> 大 PID 输出）。
-        // 本用例只验证不崩溃 + 输出与拉枪开启时不同的弧线方向分量。
         bool moved = any_move(acts);
-        check(moved, "Case3 拉枪关闭 -> 仍有纯 PID 移动（注入点未破坏原链路）");
+        check(got_move && moved, "Case3 拉枪关闭 -> 仍有纯 PID 移动（注入点未破坏原链路）");
     }
 
     // Case4: 热键OFF + 拉枪激活 -> 最终输出仍被安全门吃成 {0,0}
@@ -182,12 +195,15 @@ int main() {
         if (!ctx.start()) { std::printf("[FAIL] start\n"); return 1; }
         ctx.buttons.store(0x00);                 // 热键 OFF
         ctx.feed(1, 1000, make_far_box());
-        wait_frames(ctx);
+        // 等安全门路径真实跑过：acts 非空即线程 tick 过且被门控成 0。
+        const bool thread_ran = wait_until(ctx, [](const std::vector<Action>& acts) {
+            return !acts.empty();
+        });
         ctx.thread.stop();
         auto acts = ctx.output->snapshot();
         bool all_zero = true;
         for (const auto& a : acts) if (a.move_x != 0 || a.move_y != 0) all_zero = false;
-        check(all_zero && !acts.empty(), "Case4 热键OFF+拉枪激活 -> 安全门优先，输出仍 0");
+        check(thread_ran && all_zero && !acts.empty(), "Case4 热键OFF+拉枪激活 -> 安全门优先，输出仍 0");
     }
 
     if (fails == 0) std::printf("test_pull_curve_aimthread: ALL PASS\n");
