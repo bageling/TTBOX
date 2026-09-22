@@ -362,10 +362,15 @@ if [ "${TTBOX_RELEASE_VERIFY_USBPROXY_REBUILD:-0}" = "1" ]; then
   UBP_TMP="$(mktemp -d)"
   echo "[release] usbproxy 重建对照：副本 = ${UBP_TMP}/usbproxy（不触碰仓库内入库件）"
   cp -r "$USBPROXY_DIR" "${UBP_TMP}/usbproxy"
+  # ★ 命令行 LDFLAGS 会**整个覆写** Makefile 里的 LDFLAGS（`+=` 全部失效），
+  #   若不把 `-Wl,-rpath,'$ORIGIN/lib'` 一起带上，重建产物就**没有 RUNPATH**
+  #   （T1.09 正是靠它找随包的 libjsoncpp.so.25），且与入库二进制的 sha 必然不同
+  #   ⇒ 对照变成"苹果比橘子"，还可能把一份缺 RUNPATH 的二进制误当成可用产物。
+  #   `$$` 是给 make 的转义（展开为 `$`），别改成单个 `$`。
   if ( cd "${UBP_TMP}/usbproxy" && \
        make CXX="${CACHED_CXX}" \
             CPPFLAGS="-I${UBP_INC} -I${UBP_INC}/lua5.4" \
-            LDFLAGS="-pthread -L${UBP_LIB}" \
+            LDFLAGS="-pthread -L${UBP_LIB} -Wl,-rpath,'\$\$ORIGIN/lib'" \
             LDLIBS="-lusb-1.0 -llua5.4 -ljsoncpp" clean all ) > "${UBP_TMP}/rebuild.log" 2>&1; then
     UBP_NEW_SHA="$(sha256sum "${UBP_TMP}/usbproxy/usb-proxy" | cut -d' ' -f1)"
     if [ "$UBP_NEW_SHA" = "$UBP_SHA" ]; then
