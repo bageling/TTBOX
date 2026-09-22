@@ -6630,6 +6630,10 @@ const state = {
   updateRefreshScheduled: false,
   // 安装已提交、更新器尚未写出 RUNNING 的窗口闩（毫秒时间戳）。期间端点回 idle 一律忽略。
   updateSessionDeadline: 0,
+  // 本页打开时刻（秒）。板端 ota_status.json 装完后永久停在 SUCCESS，
+  // 只有 finished_at 晚于本页打开时刻的 SUCCESS 才算「本次会话刚升完」，
+  // 其余一律当 idle 处理（2026-09-22 业主定案：进度条只认本次会话的升级）。
+  updatePageOpenedAtSec: Math.floor(Date.now() / 1000),
   licenseRecoveryInProgress: false,
   lastLicenseRecoveryMessage: "",
   displayRealMonitor: null,
@@ -11013,7 +11017,18 @@ const UPDATE_SESSION_TIMEOUT_MS = 180000;
 let updateRenderKey = "";
 function renderUpdateStatus(status) {
   const payload = status || {};
-  const statusValue = String(payload.status || "idle");
+  let statusValue = String(payload.status || "idle");
+  // 2026-09-22 业主定案：陈旧的成功一律不渲染。ota_status.json 永久停在 SUCCESS，
+  // 照实画就会让每次开新页面都看到一条「更新成功 100%」的绿条，并与空闲态来回跳。
+  // 判据同下方监视器：finished_at 必须晚于本页打开时刻（容忍 60s 时钟/写入误差）。
+  if (statusValue === "success") {
+    const finishedAt = Number(payload.finished_at) || 0;
+    const openedAt = Number(state.updatePageOpenedAtSec) || 0;
+    if (!finishedAt || !openedAt || finishedAt < openedAt - 60) {
+      statusValue = "idle";
+      payload.progress = 0;
+    }
+  }
   // 更新会话闩：从「安装已提交」到「更新器写出 RUNNING」之间，状态端点会先返回 idle。
   // 若照实渲染，进度条就会闪没、下一拍又冒出来。窗口内一律忽略 idle。
   if (statusValue === "idle" && state.updateSessionDeadline && Date.now() < state.updateSessionDeadline) {
@@ -11175,9 +11190,8 @@ function startUpdateCompletionWatcher() {
   if (state.updateCompletionTimer) {
     return;
   }
-  // 记录本页打开时刻（秒）。只有「完成时间晚于本页打开」的 SUCCESS 才算真的刚更新完；
-  // 板端 ota_status.json 装完后会永久停在 SUCCESS，不加这道判断就会每开一次新页面都误刷新。
-  const pageOpenedAtSec = Math.floor(Date.now() / 1000);
+  // 本页打开时刻：用 state 里那一份（脚本加载时写入），两条路径共用同一个基准。
+  const pageOpenedAtSec = Number(state.updatePageOpenedAtSec) || Math.floor(Date.now() / 1000);
   state.updateCompletionTimer = window.setInterval(async () => {
     if (document.visibilityState !== "visible") {
       return;
@@ -11195,7 +11209,10 @@ function startUpdateCompletionWatcher() {
       return;
     }
     try {
-      const status = await fetchUpdateStatus({ silent: true });
+      // render:false —— 这个监视器绝不能回写状态：它 5s 一次读到的多是 idle，
+      // 一写就把上面「已是最新 / 发现更新」的 pill 冲成「待检查」，正是业主看到的
+      // 「文字一会一变」。只有下面判定为「本次会话真升完」时才主动渲染。
+      const status = await fetchUpdateStatus({ silent: true, render: false });
       if (!status || status.status !== "success" || !status.version) {
         return;
       }

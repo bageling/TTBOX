@@ -120,6 +120,7 @@
 | `TTBOX_WEB` | `scripts/ttbox_m207_accept.py`、`scripts/ttbox_m2xx_console_accept.py` 的 `--base-url` 默认值 | TEST | 验收脚本覆盖 web 基址（默认 http://127.0.0.1:8000）；非产品变量，不进 RUNTIME allowlist |
 | `TTBOX_OTA_PRIV_PASSWORD` | `tools/ota/fake_ota_server.py` | TEST | 本地联调夹具注入签名私钥口令（正式签名口令只走本机 `C:\ttbox-ota-keys\PASSPHRASE.txt` / 运维手工输入，永不进环境或代码） |
 | `TTBOX_DTB_SRC` / `TTBOX_DTB_FIX_TEST` | `scripts/ttbox_dtb_fix.sh` | TEST | DTB 修复脚本的测试钩子：前者覆盖源 DTB 路径（默认真源 `deploy/dtb/…`）、后者放行非 root 并跳过重启安排（仅离线夹具用）。正式运行两值均不设 ⇒ 走真源 + 真实重启；已同步登记进门禁 `ENV_ALLOW` |
+| `TTBOX_DTB_GOOD_SHA` / `TTBOX_DTB_BAD_SHA` / `TTBOX_DTB_REPORT` | `scripts/ttbox_dtb_fix.sh` | TEST | 2026-09-22 从板端回流修复脚本时新增：前两者覆盖「修复后/损坏后 DTB 期望哈希」（默认值即真源 `277d9de8…` / `7b8cc892…`），后者覆盖报告落点（默认 `/opt/ttbox/presets/_dtbfix.json`）。生产不设、走默认；已同步登记进门禁 `ENV_ALLOW` |
 
 > **§6-5 裁定**：`10015` 属 **TEST** 域（验收脚本常量），登记后**不改值**。
 
