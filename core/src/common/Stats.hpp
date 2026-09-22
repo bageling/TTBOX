@@ -1,4 +1,12 @@
 // Stats.hpp — 通用耗时统计（min/avg/p50/p95/p99/max），header-only
+//
+// S6 内存泄漏修复（2026-09-22）：samples_ 曾是无界 push_back——worker 每帧多路
+// add 且 stats_ 从不清空（engine/decoder 的统计有逐帧 reset，worker 自身没有），
+// 3 个 worker 各自堆 arena 以 ~112 kB/min/worker 线性累积、填满后随 vector 容量
+// 翻倍出现 +60 MB 级台阶（板上 smaps 实证，见 .workbuddy/artifacts/长稳-2h-结论-2026-09-19.md）。
+// 现改为**滑动窗口**：上限 kMaxSamples，满后环形覆盖最旧样本。消费方（CoreRuntime
+// snapshot）只用 avg/percentile/max，「最近 N 个样本」的语义完全兼容且更有代表性；
+// 顺带把 percentile 的全量拷贝+排序从无界降为 O(kMax)。
 #pragma once
 
 #include <algorithm>
@@ -11,21 +19,31 @@ namespace ttbox::core {
 
 class StatsCollector {
 public:
+    // 窗口上限：30 fps 下约 2 分钟样本量，p95/p99 统计意义充分；
+    // 内存上界 = kMaxSamples × 8 B ≈ 32 kB/实例。
+    static constexpr size_t kMaxSamples = 4096;
+
     void add(uint64_t us) {
         std::lock_guard<std::mutex> lock(mutex_);
-        samples_.push_back(us);
+        append_locked(us);
     }
 
     void clear() {
         std::lock_guard<std::mutex> lock(mutex_);
         samples_.clear();
+        head_ = 0;
     }
 
     void absorb(const StatsCollector& other) {
         if (this == &other) return;
         std::lock_guard<std::mutex> lock(mutex_);
         std::lock_guard<std::mutex> other_lock(other.mutex_);
-        samples_.insert(samples_.end(), other.samples_.begin(), other.samples_.end());
+        if (head_ == 0 && samples_.size() + other.samples_.size() <= kMaxSamples) {
+            // 快路径：本端仍是顺序未满窗口，直接追加不越界。
+            samples_.insert(samples_.end(), other.samples_.begin(), other.samples_.end());
+            return;
+        }
+        for (const uint64_t v : other.samples_) append_locked(v);
     }
 
     size_t count() const {
@@ -66,8 +84,19 @@ public:
     }
 
 private:
+    // 调用方必须已持有 mutex_。未满顺序追加；满后环形覆盖最旧样本。
+    void append_locked(uint64_t us) {
+        if (samples_.size() < kMaxSamples) {
+            samples_.push_back(us);
+            return;
+        }
+        samples_[head_] = us;
+        head_ = (head_ + 1) % kMaxSamples;
+    }
+
     mutable std::mutex mutex_;
     std::vector<uint64_t> samples_;
+    size_t head_ = 0;  // 窗口满后的写入游标（指向最旧样本）
 };
 
 }  // namespace ttbox::core

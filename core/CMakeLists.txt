@@ -603,6 +603,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_aim_target_mailbox PRIVATE ttbox_core)
   add_test(NAME test_aim_target_mailbox COMMAND test_aim_target_mailbox)
 
+  # S6：StatsCollector 滑动窗口回归（内存泄漏修复，不需要硬件）
+  add_executable(test_stats_window tests/test_stats_window.cpp)
+  target_link_libraries(test_stats_window PRIVATE ttbox_core)
+  add_test(NAME test_stats_window COMMAND test_stats_window)
+
   # 第11阶段：合成 DFL-dist 坐标闭环测试（模型坐标 → 解码 → 原图映射，host 可跑）
   add_executable(test_decode_coords tests/test_decode_coords.cpp)
   target_link_libraries(test_decode_coords PRIVATE ttbox_core)
