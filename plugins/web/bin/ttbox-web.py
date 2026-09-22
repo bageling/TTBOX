@@ -4063,13 +4063,20 @@ def get_mouse_hardware():
     except Exception:
         pass
     service_enabled = bool(mouse.get('enabled', False)) or service_active
+    requested_mode = _mouse_current_mode(mouse)
+    effective_mode = _usbproxy_effective_mode() or requested_mode
     return jsonify({
         'ok': True,
         'data': {
             'config': usb_cfg,
             'config_source': 'sysfs_usb_mouse' if connected else 'default',
             'connected': connected,
-            'mode': _mouse_current_mode(mouse),
+            'mode': requested_mode,
+            # 2026-09-22：真值与请求值分开报。effective_mode 是进程实际在跑的模式，
+            # mode_degraded=True 表示「单元要 full、实际跑 synthetic」（没插物理鼠标）。
+            'effective_mode': effective_mode,
+            'mode_degraded': bool(
+                requested_mode == 'full_passthrough' and effective_mode == 'synthetic'),
             'physical_mouse': physical,
             'service_active': service_active,
             'service_active_text': 'active' if service_active else 'inactive',
@@ -4203,6 +4210,34 @@ def _usbproxy_unit_mode() -> str:
     for token in out.replace('"', ' ').split():
         if token.startswith('USB_PROXY_MODE='):
             return token.split('=', 1)[1].strip()
+    return ''
+
+
+def _usbproxy_effective_mode() -> str:
+    """usb-proxy 进程**实际**跑的模式：命令行含 `--synthetic_mouse` 即合成。
+
+    为什么必须有这个（2026-09-22）：单元里的 USB_PROXY_MODE 只是「请求值」。
+    启动脚本在没有物理鼠标时会自行降级合成（run-ttbox-usb-proxy.sh 的 30s 超时分支），
+    单元里却仍写着 full ⇒ 只看单元会把「已降级」说成「完整透传」。
+    读不到进程返回 ''（不编造）。
+    """
+    try:
+        for pid in os.listdir('/proc'):
+            if not pid.isdigit():
+                continue
+            try:
+                with open(f'/proc/{pid}/cmdline', 'rb') as fh:
+                    cmd = fh.read().decode('utf-8', 'replace')
+            except Exception:
+                continue
+            if 'usb-proxy' not in cmd:
+                continue
+            if '--synthetic_mouse' in cmd:
+                return 'synthetic'
+            if '--vendor_id' in cmd:
+                return 'full_passthrough'
+    except Exception:
+        pass
     return ''
 
 

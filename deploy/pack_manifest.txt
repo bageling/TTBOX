@@ -42,6 +42,9 @@ scripts/ttbox_dtb_fix.sh
 scripts/ttbox_release_install.sh
 scripts/ttbox_fhs_init.sh
 scripts/ttbox-web-reset-credentials.sh
+#   ttbox_usb_mode.sh：USB 鼠标透传模式的**唯一运维入口**（面板已去掉假开关，改为只读展示，
+#     2026-09-22）。客户按「鼠标不动」排查口径要执行它 ⇒ 必须随包，否则板端没有这个文件。
+scripts/ttbox_usb_mode.sh
 
 # ---- deploy：验签公钥 / systemd 单元 / 出厂配置基线 ----
 #   公钥：doctor 检查 ttbox-ota-2026b.pub；OTA 更新器验签用（私钥永不入包）

@@ -221,6 +221,8 @@ ENV_ALLOW = {
     # 2026-09-22 回流板端 dtb 修复脚本时登记（TEST 钩子：覆盖 DTB 期望哈希与报告路径）
     "TTBOX_DTB_SRC", "TTBOX_DTB_FIX_TEST", "TTBOX_DTB_REPORT",
     "TTBOX_DTB_GOOD_SHA", "TTBOX_DTB_BAD_SHA",
+    # 2026-09-22 USB 透传模式运维脚本的测试钩子（放行非 root 写 drop-in）
+    "TTBOX_USB_MODE_TEST",
     # ---- BUILD（编译期/门禁；不得进运行期业务路径）----
     "TTBOX_BUILD_DIR", "TTBOX_PROJECT_ROOT", "TTBOX_GIT_SHA", "TTBOX_RKNNRT_SO",
     "TTBOX_USBPROXY_INCLUDE", "TTBOX_USBPROXY_LIBDIR",

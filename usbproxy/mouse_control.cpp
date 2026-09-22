@@ -508,6 +508,69 @@ void mouse_control_stop() {
     g_state.mouse_control_enabled.store(false);
 }
 
+// ── 布局不匹配诊断（2026-09-22）─────────────────────────────────
+//
+// 为何存在：g_state 里的报告布局（report_id/x_offset/y_offset/report_len）是**写死的罗技
+// c53f 常量**，全仓没有任何代码从物理鼠标的 report descriptor 里解出来（hpp 那句注释是
+// 假的）。对不上时 merge/notify 直接 return false —— 表现为客户机上「AI 完全不修正、
+// 面板看不到物理按键」，而日志里一个字都没有，现场只能靠猜。
+//
+// 所以这里先把「说不了话」补上：首次 5 次逐条打印实测值 vs 期望值，
+// 之后每 5s 一条汇总。真正的布局自动解析（阶段二）另做。
+// 频率控制：首 5 次 + 5s 一次汇总，1kHz 报告下也不会刷爆 journal。
+enum LayoutMismatch {
+    kMismatchLen = 0,
+    kMismatchRid = 1,
+    kMismatchOffset = 2,
+};
+
+struct LayoutDiag {
+    std::atomic<uint64_t> merge_ok{0};
+    std::atomic<uint64_t> len_mismatch{0};
+    std::atomic<uint64_t> rid_mismatch{0};
+    std::atomic<uint64_t> offset_invalid{0};
+    std::atomic<int> first_logs{0};
+    std::atomic<int64_t> last_summary_us{0};
+};
+
+static LayoutDiag g_layout_diag;
+
+static void diag_layout_mismatch(const char* who, uint32_t len, const uint8_t* data,
+                                 LayoutMismatch kind) {
+    uint64_t n = 0;
+    switch (kind) {
+    case kMismatchLen:    n = g_layout_diag.len_mismatch.fetch_add(1) + 1; break;
+    case kMismatchRid:    n = g_layout_diag.rid_mismatch.fetch_add(1) + 1; break;
+    default:              n = g_layout_diag.offset_invalid.fetch_add(1) + 1; break;
+    }
+    const int expected_len = g_state.report_len.load();
+    const int expected_rid = g_state.report_id.load();
+    const int xo = g_state.x_offset.load();
+    const int yo = g_state.y_offset.load();
+    if (g_layout_diag.first_logs.fetch_add(1) < 5) {
+        fprintf(stderr,
+                "[mouse_control][LAYOUT] %s 不匹配（第%llu 次，kind=%d）：实测 len=%u rid=0x%02x；"
+                "期望 len=%d rid=0x%02x X@%d Y@%d。本次 AI 位移不合并；"
+                "若持续出现 = 这只鼠标的报告布局与写死的常量不同。\n",
+                who, (unsigned long long)n, static_cast<int>(kind), len,
+                len ? data[0] : 0, expected_len, expected_rid, xo, yo);
+        return;
+    }
+    const int64_t now = now_us();
+    int64_t last = g_layout_diag.last_summary_us.load();
+    if (now - last >= 5000000 &&
+        g_layout_diag.last_summary_us.compare_exchange_strong(last, now)) {
+        fprintf(stderr,
+                "[mouse_control][LAYOUT] 5s 汇总：merge_ok=%llu len_mismatch=%llu "
+                "rid_mismatch=%llu offset_invalid=%llu（期望 len=%d rid=0x%02x X@%d Y@%d）\n",
+                (unsigned long long)g_layout_diag.merge_ok.load(),
+                (unsigned long long)g_layout_diag.len_mismatch.load(),
+                (unsigned long long)g_layout_diag.rid_mismatch.load(),
+                (unsigned long long)g_layout_diag.offset_invalid.load(),
+                expected_len, expected_rid, xo, yo);
+    }
+}
+
 // 物理 HID 报告到达时：将挂起 AI 位移合并进 X/Y（int16 LE）。
 // 布局: [0]=report_id, [1..2]=buttons u16 LE, [x_offset..+2]=X, [y_offset..+2]=Y
 bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
@@ -516,16 +579,27 @@ bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
     // 防止键盘/消费类/厂商报告被当成鼠标 X/Y 改写。
     const uint8_t report_rid = g_state.report_id.load();
     const int rlen = g_state.report_len.load();
-    if (len != static_cast<uint32_t>(rlen) || data[0] != report_rid) return false;
+    if (len != static_cast<uint32_t>(rlen)) {
+        diag_layout_mismatch("merge", len, data, kMismatchLen);
+        return false;
+    }
+    if (data[0] != report_rid) {
+        diag_layout_mismatch("merge", len, data, kMismatchRid);
+        return false;
+    }
     int xo = g_state.x_offset.load();
     int yo = g_state.y_offset.load();
     if (xo < 1 || yo < 1 || xo + 2 > static_cast<int>(len) ||
         yo + 2 > static_cast<int>(len)) {
+        diag_layout_mismatch("merge", len, data, kMismatchOffset);
         return false;
     }
     int32_t dx = g_state.pending_dx.exchange(0);
     int32_t dy = g_state.pending_dy.exchange(0);
-    if (dx == 0 && dy == 0) return false;
+    if (dx == 0 && dy == 0) {
+        g_layout_diag.merge_ok.fetch_add(1);
+        return false;
+    }
 
     auto read_i16 = [&](int off) -> int32_t {
         return static_cast<int16_t>(static_cast<uint16_t>(data[off]) |
@@ -541,6 +615,7 @@ bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
     write_i16(xo, read_i16(xo) + dx);
     write_i16(yo, read_i16(yo) + dy);
     g_state.merge_count.fetch_add(1);
+    g_layout_diag.merge_ok.fetch_add(1);
     g_state.last_move_ts_us.store(now_us());
     return true;
 }
@@ -552,7 +627,14 @@ void mouse_control_notify_physical_report(const uint8_t* data, uint32_t len) {
     // 只解析真正的鼠标报告；键盘/厂商/消费类报告的 data[1..2] 不是按钮掩码。
     const uint8_t report_rid = g_state.report_id.load();
     const int rlen = g_state.report_len.load();
-    if (len != static_cast<uint32_t>(rlen) || data[0] != report_rid) return;
+    if (len != static_cast<uint32_t>(rlen)) {
+        diag_layout_mismatch("notify", len, data, kMismatchLen);
+        return;
+    }
+    if (data[0] != report_rid) {
+        diag_layout_mismatch("notify", len, data, kMismatchRid);
+        return;
+    }
     static std::atomic<int> report_samples{0};
     if (report_samples.fetch_add(1) < 5) {
         fprintf(stderr, "[mouse_control] phys_report len=%u first12:", len);

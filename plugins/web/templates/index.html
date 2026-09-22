@@ -3483,47 +3483,32 @@ html[data-theme="light"] .model-game-suggestion-list {
   background: rgba(255, 255, 255, 0.045);
 }
 
-.hardware-mode-toggle {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+/* 2026-09-22 业主定案：模式单选删除，改只读展示。
+   原「完整透传 / 合成模式」单选点了必然失败（PUT /api/hardware/mouse/mode 恒返回
+   ok:false —— 真源是 systemd 单元的 Environment=USB_PROXY_MODE，Web 无 root 改不了），
+   而且激活向导那一步也因为这个 ok:false 直接抛错。详见 artifacts/鼠标透传优化方案-2026-09-22.md。 */
+.hardware-mode-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
   gap: 8px;
   margin-top: 16px;
-  padding: 4px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.045);
-}
-
-.hardware-mode-toggle label {
-  min-width: 0;
-}
-
-.hardware-mode-toggle input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.hardware-mode-toggle span {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  border-radius: 6px;
-  color: var(--muted-strong);
   font-size: 12px;
-  font-weight: 850;
-  cursor: pointer;
-  transition:
-    background 160ms ease,
-    color 160ms ease,
-    box-shadow 160ms ease;
+  color: var(--muted-strong);
 }
 
-.hardware-mode-toggle input:checked + span {
-  color: #061210;
-  background: var(--accent);
-  box-shadow: 0 8px 20px rgba(121, 214, 197, 0.18);
+.hardware-mode-note strong {
+  color: var(--accent-strong);
+  font-weight: 850;
+}
+
+.hardware-mode-note em {
+  font-style: normal;
+  opacity: 0.78;
 }
 
 .import-type-toggle label {
@@ -5979,9 +5964,9 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 <h3>USB 鼠标硬件信息</h3>
                 <span id="mouseHardwareStatus" class="pill">未读取</span>
               </div>
-              <div class="hardware-mode-toggle" aria-label="USB 鼠标模式">
-                <label><input type="radio" name="mouse_proxy_mode" value="full_passthrough" checked><span>完整透传</span></label>
-                <label><input type="radio" name="mouse_proxy_mode" value="synthetic"><span>合成模式</span></label>
+              <div class="hardware-mode-note" aria-label="USB 鼠标模式">
+                <span>当前模式</span><strong id="mouseProxyModeText">读取中…</strong>
+                <em>由板端服务决定，此页只读；切换用 sudo scripts/ttbox_usb_mode.sh set full|synthetic</em>
               </div>
               <div class="field-grid compact">
                 <label class="field">VID<input id="mouse_usb_vid" type="text" placeholder="0x046d" autocomplete="off"><span class="field-hint">0x0001-0xffff</span></label>
@@ -7099,14 +7084,13 @@ async function runFirstActivationSetup() {
   setActivationSetupProgress(58, 2, "显示器模式已应用，等待显示链路稳定 10 秒。");
   await sleep(10000);
 
-  setActivationSetupProgress(82, 3, "正在启用完整透传，保留真实鼠标硬件信息。");
-  const mouseResult = await api("/api/hardware/mouse/mode", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode: "full_passthrough", apply_now: true }),
-  });
-  await sleep(2500);
-  populateMouseHardware(mouseResult);
+  setActivationSetupProgress(82, 3, "正在读取鼠标透传状态（模式由板端服务决定，此处只读）。");
+  // 2026-09-22：原来这里 PUT /api/hardware/mouse/mode —— 该端点恒返回 ok:false
+  // （真源是 systemd 单元，Web 无 root 改不了），api() 见到 ok:false 会抛错，
+  // 导致激活向导在 82% 处直接失败。改为只读 GET，不再制造假失败。
+  const mouseState = await api("/api/hardware/mouse");
+  await sleep(500);
+  populateMouseHardware(mouseState);
   setActivationSetupProgress(100, 4, "初始化完成，Windows 会重新枚举完整鼠标设备，页面保持可用。");
 }
 
@@ -12580,7 +12564,9 @@ function randomizeDisplayHardware() {
 }
 
 function populateMouseHardware(payload) {
-  const mode = (payload && payload.mode) || "full_passthrough";
+  // 2026-09-22：认「实际在跑的模式」（effective_mode），不是单元里的请求值——
+  // 单元写 full、启动脚本因没插物理鼠标自行降级合成时，必须按合成模式渲染。
+  const mode = (payload && (payload.effective_mode || payload.mode)) || "full_passthrough";
   const isSynthetic = mode === "synthetic";
   const connected = !!(payload && payload.connected);
   // 合成模式（或没探到物理鼠标）下，面板该显示 usb-proxy 实际落盘的 gadget 配置
@@ -12594,9 +12580,15 @@ function populateMouseHardware(payload) {
   });
   const usingOriginalProfile = payload && payload.config_source === "original_mouse_profile";
   const usingPhysicalMouse = payload && payload.config_source === "sysfs_usb_mouse";
-  const modeInput = document.querySelector(`input[name="mouse_proxy_mode"][value="${mode}"]`);
-  if (modeInput) {
-    modeInput.checked = true;
+  // 2026-09-22：单选删除，模式改只读展示。展示的必须是**实际在跑**的模式：
+  // 单元里写 full、启动脚本因无鼠标自行降级合成，只看单元会把降级说成完整透传。
+  state.mouseProxyMode = (payload && (payload.effective_mode || payload.mode)) || "full_passthrough";
+  const modeText = $("mouseProxyModeText");
+  if (modeText) {
+    const label = isSynthetic ? "合成模式" : "完整透传";
+    modeText.textContent = payload && payload.mode_degraded
+      ? `${label}（已降级合成：未找到物理鼠标）`
+      : label;
   }
   setHardwareStatus(
     "mouseHardwareStatus",
@@ -12611,8 +12603,9 @@ function populateMouseHardware(payload) {
 }
 
 function updateMouseHardwareModeUi(payload = null) {
-  const selected = document.querySelector('input[name="mouse_proxy_mode"]:checked');
-  const mode = selected ? selected.value : ((payload && payload.mode) || "full_passthrough");
+  // 2026-09-22：不再读单选（已删除），只认实际模式。
+  const mode = (payload && (payload.effective_mode || payload.mode))
+    || state.mouseProxyMode || "full_passthrough";
   const isSynthetic = mode === "synthetic";
   const editableIds = [
     "mouse_usb_vid",
@@ -13865,8 +13858,7 @@ function bindEvents() {
   }
 
   on("randomMouseHardwareButton", "click", () => {
-    const selected = document.querySelector('input[name="mouse_proxy_mode"]:checked');
-    if (selected && selected.value !== "synthetic") {
+    if (state.mouseProxyMode !== "synthetic") {
       showToast("透传模式使用真实鼠标身份，不能随机");
       return;
     }
@@ -13897,8 +13889,7 @@ function bindEvents() {
   }));
 
   on("saveMouseHardwareButton", "click", () => runUiAction(async () => {
-    const selected = document.querySelector('input[name="mouse_proxy_mode"]:checked');
-    if (selected && selected.value !== "synthetic") {
+    if (state.mouseProxyMode !== "synthetic") {
       throw new Error("透传模式使用真实鼠标身份，不能保存伪装信息");
     }
     const confirmed = window.confirm("应用鼠标硬件信息会重启 usb-proxy 服务，Windows 会重新枚举 USB 鼠标。确认现在保存并应用？");
@@ -13916,39 +13907,10 @@ function bindEvents() {
     showToast("鼠标信息已保存并应用，Windows 会重新枚举");
   }));
 
-  Array.from(document.querySelectorAll('input[name="mouse_proxy_mode"]')).forEach((radio) => {
-    radio.addEventListener("change", () => runUiAction(async () => {
-      if (!radio.checked) {
-        return;
-      }
-      updateMouseHardwareModeUi({ mode: radio.value });
-      const fullWarning = radio.value === "full_passthrough"
-        ? "\n\n完整透传会暴露原始复合 HID 接口。若切换后鼠标异常，请切换到“合成模式”。"
-        : "";
-      const confirmed = window.confirm(`切换 USB 鼠标模式会重启 usb-proxy 服务，Windows 会重新枚举 USB 设备。确认切换？${fullWarning}`);
-      if (!confirmed) {
-        await loadHardware();
-        return;
-      }
-      markMouseModeSwitching();
-      setHardwareStatus("mouseHardwareStatus", "切换中");
-      const switchingLabel = radio.value === "synthetic"
-        ? "合成模式"
-        : "完整透传";
-      showToast(`${switchingLabel}切换中，Windows 正在重新枚举`);
-      const result = await api("/api/hardware/mouse/mode", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: radio.value, apply_now: true }),
-      });
-      markMouseModeSwitching(15000);
-      showToast(`已切换为${switchingLabel}`);
-      await sleep(1000);
-      await loadHardware().catch(() => {
-        populateMouseHardware(result);
-      });
-    }));
-  });
+  // 2026-09-22：原「完整透传 / 合成模式」单选的 change 监听整块删除。
+  // 该分支 PUT /api/hardware/mouse/mode，而端点恒返回 ok:false（真源在 systemd 单元，
+  // Web 无 root），api() 见 ok:false 抛错 ⇒ 用户点一下就得一个红色失败提示，
+  // 且模式从未真的切过。模式改由板端运维通道切换，本页只读展示（见 populateMouseHardware）。
 
   on("refreshLicenseButton", "click", () => runUiAction(refreshLicenseStatus));
   on("licenseGateRefreshButton", "click", () => runUiAction(refreshLicenseStatus));
