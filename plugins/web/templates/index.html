@@ -1232,6 +1232,26 @@ html[data-theme="light"] .control-section-tab.is-active span {
   background: var(--accent);
 }
 
+/* 2026-09-22：内核未实现的区块不可进入 —— 保留可见（展示功能规划），
+   但禁用点击，避免用户改完配置才发现"保存时会被忽略"。功能实现后去掉 disabled 即恢复。 */
+.control-section-tab:disabled,
+.control-section-tab[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.control-section-tab:disabled:hover,
+.control-section-tab[aria-disabled="true"]:hover {
+  color: var(--muted-strong);
+  border-color: transparent;
+  background: transparent;
+}
+
+.control-section-tab:disabled .unimplemented-tag,
+.control-section-tab[aria-disabled="true"] .unimplemented-tag {
+  opacity: 0.9;
+}
+
 .control-section-stack {
   min-width: 0;
 }
@@ -5593,16 +5613,16 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             <button id="assistSectionTabRecoil" class="control-section-tab is-active" type="button" data-assist-section-target="assist-section-recoil" aria-selected="true">
               <span>01</span>压枪
             </button>
-            <button id="assistSectionTabTrigger" class="control-section-tab" type="button" data-assist-section-target="assist-section-trigger" aria-selected="false">
+            <button id="assistSectionTabTrigger" class="control-section-tab" type="button" data-assist-section-target="assist-section-trigger" aria-selected="false" disabled aria-disabled="true" title="内核尚未实现，暂不可进入；功能实现后自动放开">
               <span>02</span>自动开火<span class="unimplemented-tag">未实现</span>
             </button>
-            <button id="assistSectionTabRapid" class="control-section-tab" type="button" data-assist-section-target="assist-section-rapid" aria-selected="false">
+            <button id="assistSectionTabRapid" class="control-section-tab" type="button" data-assist-section-target="assist-section-rapid" aria-selected="false" disabled aria-disabled="true" title="内核尚未实现，暂不可进入；功能实现后自动放开">
               <span>03</span>连点<span class="unimplemented-tag">未实现</span>
             </button>
-            <button id="assistSectionTabBackFlick" class="control-section-tab" type="button" data-assist-section-target="assist-section-back-flick" aria-selected="false">
+            <button id="assistSectionTabBackFlick" class="control-section-tab" type="button" data-assist-section-target="assist-section-back-flick" aria-selected="false" disabled aria-disabled="true" title="内核尚未实现，暂不可进入；功能实现后自动放开">
               <span>04</span>自动背闪<span class="unimplemented-tag">未实现</span>
             </button>
-            <button id="assistSectionTabCrosshair" class="control-section-tab" type="button" data-assist-section-target="assist-section-crosshair" aria-selected="false">
+            <button id="assistSectionTabCrosshair" class="control-section-tab" type="button" data-assist-section-target="assist-section-crosshair" aria-selected="false" disabled aria-disabled="true" title="内核尚未实现，暂不可进入；功能实现后自动放开">
               <span>05</span>准星找色<span class="unimplemented-tag">未实现</span>
             </button>
           </nav>
@@ -12885,6 +12905,11 @@ function initAssistSectionNavigation() {
   }
 
   function activate(sectionId, shouldScroll = false) {
+    // 2026-09-22：内核未实现的区块不接受激活（state 被外部污染时也兜底回落到压枪）
+    const target = tabs.find((tab) => tab.dataset.assistSectionTarget === sectionId);
+    if (!target || target.disabled) {
+      sectionId = "assist-section-recoil";
+    }
     state.activeAssistSectionId = sectionId;
     updateAssistModuleCollapseStates();
     if (shouldScroll) {
@@ -12896,6 +12921,10 @@ function initAssistSectionNavigation() {
   }
 
   tabs.forEach((tab) => {
+    // 未实现区块页签为 disabled：不注册跳转（disabled 本身也不派发 click，这里再显式跳过一层）
+    if (tab.disabled) {
+      return;
+    }
     tab.addEventListener("click", () => activate(tab.dataset.assistSectionTarget, true));
   });
   activate(state.activeAssistSectionId, false);
