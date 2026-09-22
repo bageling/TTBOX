@@ -34,7 +34,8 @@ import urllib.parse
 CLOUD_HOST = '38.127.133.6'
 CLOUD_PORT = 10015
 CLOUD_USER = 'root'
-CLOUD_PASS = 'q20001124Q'
+# ★ 口令不落库（本仓库可能被公开）。从环境变量取；未设置时在真正连云端那一步明确报错。
+CLOUD_PASS = os.environ.get('TTBOX_CLOUD_PASS', '')
 CLOUD_DB = '/opt/license-saas/license-saas.db'
 CARD = 'LS-TTBOX-TEST-0001-M2X7'
 
@@ -76,6 +77,11 @@ def cloud_cmd(sql_py: str, timeout: int = 40) -> str:
         return b.decode('utf-8', 'replace') if isinstance(b, (bytes, bytearray)) else str(b)
 
     t = paramiko.Transport(s)
+    if not CLOUD_PASS:
+        raise SystemExit(
+            '缺少服务器口令：请先设置环境变量 TTBOX_CLOUD_PASS 再重跑本脚本。\n'
+            '（口令不再硬编码在源码里，见 config/README.md「凭据纪律」。）'
+        )
     t.connect(username=CLOUD_USER, password=CLOUD_PASS)
     chan = t.open_session(timeout=timeout)
     chan.exec_command("python3 - << 'PYEOF'\n%s\nPYEOF" % sql_py)
