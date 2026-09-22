@@ -934,6 +934,14 @@ void *ep_loop_read(void *arg) {
 	// Check both per-endpoint flag (interface change) and global flag (device reset)
 	bool hid_gate_logged = false;
 	int consecutive_receive_errors = 0;
+
+	// One ring per endpoint: each endpoint owns its reader thread.  Created
+	// lazily below, after the HID report-descriptor gate opens, so we never
+	// buffer reports that would then be flushed as one stale burst.
+	bool use_iring = (ep.bEndpointAddress & USB_DIR_IN) &&
+		((ep.bmAttributes & USB_ENDPOINT_XFERTYPE_MASK) == USB_ENDPOINT_XFER_INT);
+	struct interrupt_ring *iring = NULL;
+
 	while (!*please_stop && !please_stop_eps) {
 		assert(ep_num != -1);
 		struct usb_raw_transfer_io io;
@@ -1028,15 +1036,36 @@ void *ep_loop_read(void *arg) {
 				unsigned char *data = NULL;
 				int nbytes = -1;
 
-				int rv = receive_data(thread_info.device_bEndpointAddress, ep.bmAttributes,
-							usb_endpoint_maxp(&ep),
-							&data, &nbytes, USB_REQUEST_TIMEOUT);
+				// Interrupt IN: keep several transfers in flight.  With a
+				// single in-flight URB the host controller misses every
+				// other frame and the report rate is halved (500 Hz
+				// measured vs 1000 Hz with 2+ transfers in flight).
+				if (use_iring && !iring) {
+					iring = interrupt_ring_create(thread_info.device_bEndpointAddress,
+								      usb_endpoint_maxp(&ep), INT_RING_DEPTH);
+					if (!iring)
+						use_iring = false;	/* fall back to the sync path */
+				}
+
+				int rv;
+				if (iring)
+					rv = interrupt_ring_next(iring, &data, &nbytes);
+				else
+					rv = receive_data(thread_info.device_bEndpointAddress, ep.bmAttributes,
+								usb_endpoint_maxp(&ep),
+								&data, &nbytes, USB_REQUEST_TIMEOUT);
 						if (rv == LIBUSB_ERROR_NO_DEVICE) {
 							printf("EP%x(%s_%s): device likely reset, stopping thread\n",
 								ep.bEndpointAddress, transfer_type.c_str(), dir.c_str());
 							if (data)
 								delete[] data;
 							stop_proxy_after_physical_disconnect();
+							break;
+						}
+						if (rv == LIBUSB_ERROR_INTERRUPTED) {
+							/* the ring is being torn down */
+							if (data)
+								delete[] data;
 							break;
 						}
 					if (rv != LIBUSB_SUCCESS && rv != LIBUSB_ERROR_TIMEOUT) {
@@ -1130,6 +1159,9 @@ void *ep_loop_read(void *arg) {
 						transfer_type.c_str(), dir.c_str(), rv);
 		}
 	}
+
+	if (iring)
+		interrupt_ring_destroy(iring);
 
 	printf("End reading thread for EP%02x, thread id(%d)\n",
 		ep.bEndpointAddress, gettid());

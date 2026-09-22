@@ -48,3 +48,27 @@ int receive_data(uint8_t endpoint, uint8_t attributes, uint16_t maxPacketSize,
 			uint8_t **dataptr, int *length, int timeout);
 int receive_iso_data_batched(uint8_t endpoint, uint16_t maxPacketSize,
 			struct iso_batch_result *result, int batch_size, int timeout);
+
+/*
+ * Interrupt IN receive ring (2026-09-22).
+ *
+ * Reading an interrupt endpoint with a single in-flight libusb transfer
+ * halves the effective report rate: measured on this board's full-speed
+ * link, 1 transfer gives ~2.00 ms between reports (500 Hz) while 2+ give
+ * ~1.00 ms (1000 Hz).  The host controller walks the periodic list once
+ * per frame, so if the endpoint has no transfer queued at that instant the
+ * frame is lost.  Keeping N transfers queued closes the gap between
+ * completion and resubmission.
+ *
+ * One ring per endpoint (every endpoint owns a reader thread).  Completions
+ * are served by the existing hotplug_monitor event thread.
+ */
+#define INT_RING_DEPTH		8	/* transfers kept in flight */
+#define INT_RING_DEPTH_MAX	32
+#define INT_RING_QUEUE_MAX	64	/* completed reports buffered before drop */
+
+struct interrupt_ring;		/* opaque */
+
+struct interrupt_ring *interrupt_ring_create(uint8_t endpoint, uint16_t maxPacketSize, int depth);
+int interrupt_ring_next(struct interrupt_ring *ring, unsigned char **dataptr, int *length);
+void interrupt_ring_destroy(struct interrupt_ring *ring);

@@ -1,4 +1,11 @@
+#include <errno.h>
+#include <pthread.h>
+#include <time.h>
+#include <unistd.h>
+
 #include <atomic>
+#include <deque>
+#include <vector>
 
 #include "device-libusb.h"
 
@@ -498,4 +505,282 @@ int receive_data(uint8_t endpoint, uint8_t attributes, uint16_t maxPacketSize,
 	}
 
 	return result;
+}
+
+/*
+ * ---- Interrupt IN receive ring -------------------------------------------
+ * See the comment in device-libusb.h for why this exists.  Summary of the
+ * measured effect on a full-speed link: 1 transfer in flight = 500 Hz,
+ * 2+ transfers in flight = 1000 Hz.
+ *
+ * Conventions followed from the rest of this file:
+ *  - we never call libusb_handle_events here; hotplug_monitor is the sole
+ *    event pump and it invokes interrupt_transfer_cb().
+ *  - a transfer that is not resubmitted decrements inflight exactly once,
+ *    so stop() can safely wait for the pipe to drain.
+ */
+
+struct interrupt_slot {
+	struct libusb_transfer *transfer;
+	uint8_t *buffer;
+};
+
+struct interrupt_ring {
+	uint8_t			endpoint;
+	int			max_packet;
+	int			depth;
+	struct interrupt_slot	*slots;
+
+	std::deque<std::vector<uint8_t> > pending;
+
+	pthread_mutex_t		lock;
+	pthread_cond_t		cond;
+
+	std::atomic<bool>	stopping;
+	std::atomic<bool>	stalled;	/* endpoint halted, cleared by the reader */
+	std::atomic<int>	inflight;
+	std::atomic<int>	fatal;		/* libusb error that ends the reader */
+	std::atomic<long>	dropped;	/* queue overflows, diagnostic only */
+	std::atomic<long>	window_count;	/* reports since the last rate print */
+	uint64_t		window_start;	/* CLOCK_MONOTONIC, ms */
+};
+
+/* Rate self-diagnostic: this is the number the whole change is judged on
+   (500 Hz before, 1000 Hz after).  Printed from the reader thread, so it
+   also reports 0 while the mouse is idle — which is the normal state of a
+   mouse that is not being moved. */
+#define INT_RING_RATE_WINDOW_MS	2000
+
+static uint64_t now_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void interrupt_transfer_cb(struct libusb_transfer *transfer)
+{
+	struct interrupt_ring *ring =
+		(struct interrupt_ring *)transfer->user_data;
+	if (!ring)
+		return;
+
+	if (transfer->status == LIBUSB_TRANSFER_COMPLETED) {
+		if (transfer->actual_length > 0) {
+			pthread_mutex_lock(&ring->lock);
+			if ((int)ring->pending.size() >= INT_RING_QUEUE_MAX) {
+				ring->pending.pop_front();
+				ring->dropped++;
+			}
+			ring->pending.push_back(std::vector<uint8_t>(
+				transfer->buffer,
+				transfer->buffer + transfer->actual_length));
+			ring->window_count++;
+			pthread_cond_signal(&ring->cond);
+			pthread_mutex_unlock(&ring->lock);
+		}
+	} else if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
+		ring->fatal = LIBUSB_ERROR_NO_DEVICE;
+	} else if (transfer->status == LIBUSB_TRANSFER_STALL) {
+		/* We are running inside the event thread, so a sync control
+		   transfer here (libusb_clear_halt) would need the very thread
+		   we are blocking.  Hand it to the reader instead. */
+		ring->stalled = true;
+		pthread_mutex_lock(&ring->lock);
+		pthread_cond_signal(&ring->cond);
+		pthread_mutex_unlock(&ring->lock);
+	}
+
+	/* Keep the pipe full unless we are tearing down. */
+	if (!ring->stopping) {
+		int rv = libusb_submit_transfer(transfer);
+		if (rv == LIBUSB_SUCCESS)
+			return;		/* still in flight, do not decrement */
+		if (verbose_level)
+			fprintf(stderr, "interrupt ring: resubmit on EP%02x failed: %s\n",
+				transfer->endpoint, libusb_strerror((libusb_error)rv));
+		ring->fatal = rv;
+	}
+
+	ring->inflight--;
+	if (ring->inflight <= 0 || ring->stopping) {
+		pthread_mutex_lock(&ring->lock);
+		pthread_cond_broadcast(&ring->cond);
+		pthread_mutex_unlock(&ring->lock);
+	}
+}
+
+struct interrupt_ring *interrupt_ring_create(uint8_t endpoint,
+			uint16_t maxPacketSize, int depth)
+{
+	if (!dev_handle)
+		return NULL;
+	if (depth < 2)
+		depth = INT_RING_DEPTH;
+	if (depth > INT_RING_DEPTH_MAX)
+		depth = INT_RING_DEPTH_MAX;
+	int pkt = maxPacketSize ? maxPacketSize : 64;
+
+	struct interrupt_ring *ring = new struct interrupt_ring;
+
+	ring->endpoint = endpoint;
+	ring->max_packet = pkt;
+	ring->depth = depth;
+	ring->slots = new struct interrupt_slot[depth]();
+	pthread_mutex_init(&ring->lock, NULL);
+	pthread_cond_init(&ring->cond, NULL);
+	ring->stopping = false;
+	ring->stalled = false;
+	ring->inflight = 0;
+	ring->fatal = 0;
+	ring->dropped = 0;
+	ring->window_count = 0;
+	ring->window_start = now_ms();
+
+	for (int i = 0; i < depth; i++) {
+		ring->slots[i].buffer = new uint8_t[pkt];
+		ring->slots[i].transfer = libusb_alloc_transfer(0);
+		if (!ring->slots[i].transfer) {
+			fprintf(stderr, "interrupt ring: out of transfers on EP%02x\n",
+				endpoint);
+			interrupt_ring_destroy(ring);
+			return NULL;
+		}
+		libusb_fill_interrupt_transfer(ring->slots[i].transfer, dev_handle,
+				endpoint, ring->slots[i].buffer, pkt,
+				interrupt_transfer_cb, ring, 0);
+	}
+
+	for (int i = 0; i < depth; i++) {
+		int rv = libusb_submit_transfer(ring->slots[i].transfer);
+		if (rv != LIBUSB_SUCCESS) {
+			if (verbose_level)
+				fprintf(stderr, "interrupt ring: submit on EP%02x failed: %s\n",
+					endpoint, libusb_strerror((libusb_error)rv));
+			ring->fatal = rv;
+			break;
+		}
+		ring->inflight++;
+	}
+
+	if (verbose_level)
+		printf("interrupt ring: EP%02x started, %d transfers in flight, %d bytes each\n",
+			endpoint, ring->inflight.load(), pkt);
+
+	return ring;
+}
+
+int interrupt_ring_next(struct interrupt_ring *ring, unsigned char **dataptr,
+			int *length)
+{
+	*dataptr = NULL;
+	*length = 0;
+	if (!ring)
+		return LIBUSB_ERROR_INVALID_PARAM;
+
+	for (;;) {
+		/* Rate self-diagnostic.  Runs on the way in as well as on the
+		   timeout path, so an idle mouse reports "0 reports" instead of
+		   printing nothing at all. */
+		uint64_t now = now_ms();
+		uint64_t dt = now - ring->window_start;
+		if (dt >= INT_RING_RATE_WINDOW_MS) {
+			long got = ring->window_count.exchange(0);
+			if (verbose_level)
+				printf("interrupt ring: EP%02x %ld reports in %llums (%.0f/s)\n",
+					ring->endpoint, got, (unsigned long long)dt,
+					got * 1000.0 / (double)dt);
+			ring->window_start = now;
+		}
+
+		/* Clear a halt from the reader thread, never from the callback
+		   (libusb_clear_halt() is a sync transfer and the callback runs
+		   inside the event thread). */
+		if (ring->stalled.exchange(false))
+			libusb_clear_halt(dev_handle, ring->endpoint);
+
+		pthread_mutex_lock(&ring->lock);
+		while (ring->pending.empty()) {
+			if (ring->fatal.load()) {
+				int err = ring->fatal.load();
+				pthread_mutex_unlock(&ring->lock);
+				return err;
+			}
+			if (ring->stopping.load()) {
+				pthread_mutex_unlock(&ring->lock);
+				return LIBUSB_ERROR_INTERRUPTED;
+			}
+
+			/* Bounded wait: the caller's loop polls its own stop flags,
+			   so we must come back for air even when the device is idle.
+			   A mouse only reports on movement. */
+			struct timespec deadline;
+			clock_gettime(CLOCK_REALTIME, &deadline);
+			deadline.tv_nsec += 100 * 1000 * 1000;	/* 100 ms */
+			if (deadline.tv_nsec >= 1000000000) {
+				deadline.tv_nsec -= 1000000000;
+				deadline.tv_sec += 1;
+			}
+			int waited = pthread_cond_timedwait(&ring->cond, &ring->lock,
+							    &deadline);
+			if (waited == ETIMEDOUT && ring->pending.empty()) {
+				pthread_mutex_unlock(&ring->lock);
+				return LIBUSB_ERROR_TIMEOUT;
+			}
+		}
+		std::vector<uint8_t> one = ring->pending.front();
+		ring->pending.pop_front();
+		pthread_mutex_unlock(&ring->lock);
+
+		*dataptr = new unsigned char[one.size()];
+		memcpy(*dataptr, &one[0], one.size());
+		*length = (int)one.size();
+		return LIBUSB_SUCCESS;
+	}
+}
+
+void interrupt_ring_destroy(struct interrupt_ring *ring)
+{
+	if (!ring)
+		return;
+
+	ring->stopping = true;
+
+	/* Wake any reader blocked in interrupt_ring_next(). */
+	pthread_mutex_lock(&ring->lock);
+	pthread_cond_broadcast(&ring->cond);
+	pthread_mutex_unlock(&ring->lock);
+
+	for (int i = 0; i < ring->depth; i++)
+		if (ring->slots[i].transfer)
+			libusb_cancel_transfer(ring->slots[i].transfer);
+
+	/* Wait for the callbacks to retire.  300 ms is plenty; the transfers
+	   have no timeout but cancellation is serviced by the event thread. */
+	for (int w = 0; w < 300 && ring->inflight.load() > 0; w++)
+		usleep(1000);
+
+	if (ring->inflight.load() > 0) {
+		/* Freeing now would be a use-after-free if a callback is still
+		   pending.  Leak instead: this only happens at teardown. */
+		fprintf(stderr, "interrupt ring: EP%02x still has %d transfers in flight,"
+			" leaking ring to avoid use-after-free\n",
+			ring->endpoint, ring->inflight.load());
+		return;
+	}
+
+	for (int i = 0; i < ring->depth; i++) {
+		if (ring->slots[i].transfer)
+			libusb_free_transfer(ring->slots[i].transfer);
+		delete[] ring->slots[i].buffer;
+	}
+	delete[] ring->slots;
+
+	if (verbose_level && ring->dropped.load())
+		printf("interrupt ring: EP%02x dropped %ld reports (queue overflow)\n",
+			ring->endpoint, ring->dropped.load());
+
+	pthread_cond_destroy(&ring->cond);
+	pthread_mutex_destroy(&ring->lock);
+	delete ring;
 }
