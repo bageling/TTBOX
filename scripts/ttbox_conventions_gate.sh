@@ -84,8 +84,14 @@ def st_bad(msg):
 # 文件发现 / 注释剥离
 # ---------------------------------------------------------------------------
 INCLUDE_EXT = {".cpp", ".hpp", ".h", ".py", ".sh", ".js", ".service", ".json"}
+# SKIP_TOP：不属「仓库版本化源码」的顶层目录，扫描它们只会产出与交付无关的噪声。
+#   · docs/third_party/... = 非出货源码（历史既定）；
+#   · .workbuddy = 本机 agent 状态（.gitignore:204，0 跟踪）；
+#   · image / game-assist-lab = 本机未跟踪的镜像工具链与他项目残留（0 跟踪、无基线）；
+#   · dist = 本地打包产物（.gitignore，与 build-* 同为构建输出）。
 SKIP_TOP = {"docs", "third_party", ".git", "__pycache__",
-            ".archive-2026-09-17", ".archive-2026-09-18", "node_modules", ".mypy_cache"}
+            ".archive-2026-09-17", ".archive-2026-09-18", "node_modules", ".mypy_cache",
+            ".workbuddy", "image", "game-assist-lab", "dist"}
 # 门禁脚本自身含字面量样例，必须排除，否则自检自恰失败。
 SKIP_FILES = {"scripts/ttbox_conventions_gate.sh"}
 
@@ -228,6 +234,8 @@ ENV_ALLOW = {
     "USB_PROXY_EXTRA_ARGS", "USB_PROXY_GADGET_CONFIG_FILE",
     # 1.5.26 新增（自带库目录 + 两处死等超时；登记册 §2.3）
     "USB_PROXY_LIBDIR", "USB_PROXY_UDC_WAIT_SECONDS", "USB_PROXY_MOUSE_WAIT_SECONDS",
+    # 1.5.22 起 ttbox_dtb_fix.sh 的 TEST 域钩子（源 DTB 路径覆盖 / 免 root 免重启开关；登记册 §2.5）
+    "TTBOX_DTB_SRC", "TTBOX_DTB_FIX_TEST",
 }
 # 已删除 / 禁止复活的同义异名（D-ENV-3 / D-ENV-5）
 ENV_BANNED = [

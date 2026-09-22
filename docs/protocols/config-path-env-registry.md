@@ -119,6 +119,7 @@
 | `TTBOX_RESTART_UNITS` / `TTBOX_HEALTH_TIMEOUT` / `TTBOX_RELEASE_SELFTEST` / `TTBOX_RELEASE_VERIFY_REPRO` / `TTBOX_RELEASE_VERIFY_USBPROXY_REBUILD` / `TTBOX_REAL_CORE_MAIN` | `scripts/*_selftest.sh` / `*_verify.sh` | TEST | 自测/体检脚本开关 |
 | `TTBOX_WEB` | `scripts/ttbox_m207_accept.py`、`scripts/ttbox_m2xx_console_accept.py` 的 `--base-url` 默认值 | TEST | 验收脚本覆盖 web 基址（默认 http://127.0.0.1:8000）；非产品变量，不进 RUNTIME allowlist |
 | `TTBOX_OTA_PRIV_PASSWORD` | `tools/ota/fake_ota_server.py` | TEST | 本地联调夹具注入签名私钥口令（正式签名口令只走本机 `C:\ttbox-ota-keys\PASSPHRASE.txt` / 运维手工输入，永不进环境或代码） |
+| `TTBOX_DTB_SRC` / `TTBOX_DTB_FIX_TEST` | `scripts/ttbox_dtb_fix.sh` | TEST | DTB 修复脚本的测试钩子：前者覆盖源 DTB 路径（默认真源 `deploy/dtb/…`）、后者放行非 root 并跳过重启安排（仅离线夹具用）。正式运行两值均不设 ⇒ 走真源 + 真实重启；已同步登记进门禁 `ENV_ALLOW` |
 
 > **§6-5 裁定**：`10015` 属 **TEST** 域（验收脚本常量），登记后**不改值**。
 
