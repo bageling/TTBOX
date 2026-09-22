@@ -63,6 +63,14 @@ WARN      ?= -Wall -Wextra
 CPPFLAGS  += -I$(LUA_INCDIR)
 CXXFLAGS  += $(CXXSTD) $(OPT) $(WARN) -pthread
 LDFLAGS   += -pthread
+# T1.09（2026-09-21）：显式写入 RUNPATH=$ORIGIN/lib，与 board/run-ttbox-usb-proxy.sh 里
+# 的 LD_LIBRARY_PATH=$PROJECT_DIR/lib 指向**同一目录**（随包自带的 libjsoncpp.so.25）。
+# 背景：入库的 usb-proxy 是预编译产物、**无 RPATH**，而部分出厂镜像没装 libjsoncpp25
+# ⇒ 板端 `ldd` 报 `libjsoncpp.so.25 => not found` ⇒ 启动即失败（崩溃重启循环）。
+# 给上 RUNPATH 后，板端原生 `make` 出来的二进制自带库搜索路径，不再依赖启动器设环境变量
+# （启动器那份保留作冗余，两者不冲突：RUNPATH 与 LD_LIBRARY_PATH 都会生效）。
+# 写法说明：Makefile 里 `$$ORIGIN` 展开为 shell 的 `$ORIGIN`，单引号防止 shell 再展开。
+LDFLAGS   += -Wl,-rpath,'$$ORIGIN/lib'
 LDLIBS    += -lusb-1.0 -llua5.4 -ljsoncpp
 
 .PHONY: all clean checksum install

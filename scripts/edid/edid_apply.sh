@@ -53,14 +53,29 @@ fi
 
 mkdir -p "$EDID_DIR" || { echo '{"ok": false, "error": "无法创建 EDID 输出目录: '"$EDID_DIR"'"}'; exit 1; }
 
-# V-EDID-3（板端实测 2026-09-19）：web「保存并应用」以 ttbox 身份跑本脚本，需要：
+# V-EDID-3（板端实测 2026-09-19）＋T1.08（2026-09-21 二次修正）：web「保存并应用」
+# 以 ttbox 身份跑本脚本，需要：
 #   a) 写 $EDID_DIR/current.bin —— 开机 ttbox-edid.service 以 root 重写后属主归
 #      root:root，ttbox 写不进（PermissionError 实录）；
 #   b) 写 HPD 节点触发重协商 —— sysfs 节点内核默认 root:root 0644。
-# 本脚本开机以 root 跑，正好在此时收敛：目录 root:ttbox 0775、current.bin
-# root:ttbox 0664、HPD/status 与 edid 节点 root:ttbox 0660（全部幂等）。
-# 非 root（ttbox 的 web 路径）跳过 —— 那时只依赖开机时 root 已收敛好的权限。
-if [ "$(id -u)" = "0" ]; then
+# 收敛目标（全部幂等）：目录 root:ttbox 0775、current.bin root:ttbox 0664、
+# HPD/status 与 edid 节点 root:ttbox 0660。
+#
+# ★ 为什么 09-19 那版没修好、以及本次怎么修（2026-09-21 实机定位）：
+#   旧版把这个收敛块放在 `if [ "$(id -u)" = "0" ]` 里，且位置在**生成 current.bin 之前**。
+#   而 current.bin 由下方 python 块创建 ⇒ **首次运行时文件尚不存在**，收敛里的
+#   `if [ -f "$EDID_OUTPUT" ]` 判空跳过；随后 python 以 root 建出 0644 root:root。
+#   此后若没有 root 再跑一次，文件就永久是 root:root 0644 ⇒ web（ttbox）写不进。
+#   板上实证：`-rw-r--r-- 1 root root current.bin` ＋ ttbox 写入 Permission denied。
+#   故本次三点修正：
+#     ① 收敛抽成函数并**无条件调用**（非 root 每条 chgrp/chmod 都失败，被 || true 吞掉，
+#        不报错、不改语义；root 时抢先修好目录与 HPD 节点，供非 root 路径写 HPD）；
+#     ② python 侧改为「同目录临时文件 + 原子替换」——目录是 root:ttbox 0775，ttbox 有
+#        目录写权限 ⇒ 能新建临时文件、能用 rename 覆盖 root 建出的文件（rename 不需要
+#        目标文件本身的写权限）。这样即便开机收敛从未生效，非 root 路径也能自愈；
+#     ③ 生成完成后**再收敛一次**，保证 root 路径下新文件的属主/权限立刻正确。
+converge_perms()
+{
   chgrp ttbox "$EDID_DIR" 2>/dev/null || true
   chmod 0775 "$EDID_DIR" 2>/dev/null || true
   if [ -f "$EDID_OUTPUT" ]; then
@@ -79,7 +94,11 @@ if [ "$(id -u)" = "0" ]; then
       break
     fi
   done
-fi
+  # 恒返回 0：本函数只在 root 下才可能真正生效，非 root 下全部失败属预期，
+  # 绝不能让 set -e 因"权限收敛失败"把整条 EDID 流程判死。
+  return 0
+}
+converge_perms
 
 # 1. 生成 + 校验 EDID
 python3 - "$CONFIG" "$EDID_OUTPUT" <<'PYEOF' || exit 1
@@ -126,8 +145,29 @@ ok, errors = verify_edid(edid)
 if not ok:
     print(json.dumps({"ok": False, "error": "EDID 验证失败", "errors": errors}))
     sys.exit(1)
-with open(out_path, "wb") as f:
-    f.write(edid)
+# T1.08（2026-09-21）：写 current.bin 必须兼顾 root 与 ttbox 两种身份。
+#   直接 open(out_path,"wb") 在文件为 root:root 0644 时，ttbox 必然 PermissionError
+#   （面板「保存并应用」实测报错）。改为「同目录临时文件 + os.replace」：
+#   目录是 root:ttbox 0775，ttbox 有目录写权限 ⇒ 能建临时文件并用 rename 覆盖目标，
+#   rename 只需目录权限、不需目标文件写权限，故对两种身份都成立，且写入是原子的
+#   （不会出现半截 EDID——半截 EDID 会让驱动 EDID 状态损坏、源端 fallback 800x600）。
+#   极端兜底：目录也不可写（非标准镜像）时退回直写，并给出干净 JSON 错误而非裸 traceback。
+_tmp = "%s.tmp.%d" % (out_path, os.getpid())
+try:
+    with open(_tmp, "wb") as f:
+        f.write(edid)
+    os.replace(_tmp, out_path)
+except OSError:
+    try:
+        os.unlink(_tmp)
+    except OSError:
+        pass
+    try:
+        with open(out_path, "wb") as f:
+            f.write(edid)
+    except OSError as _e2:
+        print(json.dumps({"ok": False, "error": "EDID 写入失败: %s" % _e2}))
+        sys.exit(1)
 vendor = _pnp_decode(edid[8:10])
 pid = struct.unpack("<H", edid[10:12])[0]
 ser = struct.unpack("<I", edid[12:16])[0]
@@ -137,15 +177,9 @@ print(json.dumps({"ok": True, "file": out_path, "size": len(edid),
                   "serial": f"0x{ser:08x}", "name": name}))
 PYEOF
 
-# 1.5.26 修复（客户侧实测 PermissionError）：
-#   上面那段权限收敛跑在**生成 current.bin 之前**——第一次运行时文件还不存在，
-#   那个 `if [ -f "$EDID_OUTPUT" ]` 直接跳过 ⇒ python 新建的 current.bin 是
-#   root:root 0644（受 umask）⇒ ttbox 用户的 web「保存并应用」写不进去（PermissionError）。
-#   故在生成之后再收敛一次（幂等；非 root 路径跳过，语义与上面一致）。
-if [ "$(id -u)" = "0" ] && [ -f "$EDID_OUTPUT" ]; then
-  chgrp ttbox "$EDID_OUTPUT" 2>/dev/null || true
-  chmod 0664 "$EDID_OUTPUT" 2>/dev/null || true
-fi
+# T1.08：生成完成后再次收敛——root 路径下把刚建出的 current.bin 立即修正为
+# root:ttbox 0664（否则下次仍以 root 身份覆盖时正确、但 ttbox 路径依旧写不进）。
+converge_perms
 
 set_hpd() {
   local state="$1"

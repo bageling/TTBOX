@@ -7,10 +7,13 @@
 #   2）二进制缺失时【人话报错】并给出两条可复制的修复命令；绝不落到 shell 的裸 127
 #      （"not found"）——旧写法删掉二进制后只有一行费解的 127，排障无从下手。
 #
-# 1.5.26（三处修复，2026-09-21 客户侧报障 + 本机镜像实测）：
-#   a) 自带运行库目录 —— 出厂镜像缺 libjsoncpp.so.25，usb-proxy 起不来（详见下方注释）
-#   b) find_mouse 三级判定 —— 旧判据只认 protocol=02，客户那只鼠标是 00，永远匹配不上
-#   c) 两处 while 死等加超时 —— 旧写法找不到就永远等，进程根本不启动
+# T1.07（2026-09-21 板端实测）：find_mouse 的口径过窄导致 full 模式永久卡死。
+#   旧实现只认 bInterfaceProtocol=02（HID boot 鼠标），而现代复合游戏鼠标走
+#   report protocol（sub=00/proto=00）—— 实机 MCHOSE A7 V3 Pro+（3837:1014）
+#   三个 HID 接口全是 00/00 ⇒ 永不匹配 ⇒ 无限"等鼠标"⇒ 不建 cmd.sock/event.sock、
+#   gadget 不绑定、UDC 恒 not attached、core 的 PhysicalMouseReader 也连不上。
+#   新实现改为三级判定（R1 proto=02 / R2 udev ID_INPUT_MOUSE / R3 rel 能力），
+#   并在等待期每 10s 打一张接口诊断表。细节见下方 mouse_device_rule 注释。
 set -eu
 
 USB_PROXY_DEVICE=${USB_PROXY_DEVICE:-fc000000.usb}
@@ -24,21 +27,6 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PROJECT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 # 二进制与脚本同属 release 树的 usbproxy/ 目录（T1.01 布局：releases/<ver>/usbproxy/）。
 USB_PROXY_BIN=${USB_PROXY_BIN:-$PROJECT_DIR/usb-proxy}
-
-# ---- 1.5.26(a)：自带运行库目录（出厂镜像缺 libjsoncpp，必须随包走）--------------
-# 事由（2026-09-21 客户侧报障 + 只读挂载出厂镜像 work.img 实测）：
-#   usb-proxy 的 NEEDED 含 libjsoncpp.so.25，而**出厂镜像 V4/V5 里没有这个库**
-#   （实测：/usr/lib/aarch64-linux-gnu 下无 libjsoncpp*）。根因是镜像装依赖那步的
-#   清单（image/steps/01_install_deps.sh）**只照 core 一个二进制的 ldd 实测**得出，
-#   不含 usb-proxy 的依赖；开发板能跑只因装过 libjsoncpp-dev（台面污染）。
-#   而 usb-proxy 二进制**无 RUNPATH 段**（Makefile 只有 `LDFLAGS += -pthread`），
-#   只能靠 LD_LIBRARY_PATH 或系统库路径 —— 故在此显式前置自带目录。
-#   本目录随 release 树整体换版本，不会跨版本串库。
-USB_PROXY_LIBDIR=${USB_PROXY_LIBDIR:-$PROJECT_DIR/lib}
-if [ -d "$USB_PROXY_LIBDIR" ]; then
-	LD_LIBRARY_PATH="$USB_PROXY_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-	export LD_LIBRARY_PATH
-fi
 
 # ---- 预检：二进制存在且可执行，缺失则人话报错（绝不裸 127）-------------------
 if [ ! -e "$USB_PROXY_BIN" ]; then
@@ -59,6 +47,39 @@ if [ ! -x "$USB_PROXY_BIN" ]; then
 	exit 1
 fi
 
+# T1.09（2026-09-21 板端实测）：usb-proxy 动态依赖 libjsoncpp.so.25，而部分出厂镜像
+# **没有装 libjsoncpp25**（板上 `ldd` 实录 `libjsoncpp.so.25 => not found`；
+# `find / -name 'libjsoncpp*'` 为空）。该二进制是**预编译的、无 RPATH**
+# （`readelf -d` 只有 NEEDED、没有 RPATH/RUNPATH），所以只要走到"启动二进制"这一步
+# 就必然加载失败 ⇒ systemd（Restart=always）进入崩溃重启循环。
+# OTA 只能替换 /opt/ttbox 下的 release 树、**改不了镜像 rootfs**，故只能随包自带：
+# 本 release 的 usbproxy/lib/ 里放了该库，这里显式把该目录放到搜索路径**最前**
+# （避免被外部同名的旧版本抢先命中）。注意目录是 $PROJECT_DIR/lib（= usbproxy/lib），
+# 与二进制同目录，归属清晰；Makefile 亦已补 `-Wl,-rpath,$ORIGIN/lib` 使原生重建同样自洽。
+if [ -d "$PROJECT_DIR/lib" ]; then
+	LD_LIBRARY_PATH="$PROJECT_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+	export LD_LIBRARY_PATH
+fi
+
+# 启动前自检动态依赖：缺库时给【人话】错误 + 可复制的修复命令，而不是等 exec 抛
+# 一句费解的 "error while loading shared libraries"（与 T1.06「绝不裸报错」同源）。
+if command -v ldd >/dev/null 2>&1; then
+	_missing="$(ldd "$USB_PROXY_BIN" 2>/dev/null | awk '/not found/{printf "%s ", $1}')"
+	if [ -n "$_missing" ]; then
+		cat >&2 <<EOF
+Stopped: usb-proxy has unresolved shared libraries: $_missing
+Reason: the prebuilt binary links them without RPATH; a stripped image may not ship them.
+Check:  ls -l $PROJECT_DIR/lib/
+Fix (pick ONE):
+  1) Re-publish a complete payload that contains usbproxy/lib/ (e.g. libjsoncpp.so.25), then activate:
+       scripts/ttbox_release_install.sh <ver> <payload_dir> --activate
+  2) Install the library on the board:
+       apt-get update && apt-get install -y libjsoncpp25
+EOF
+		exit 1
+	fi
+fi
+
 stop_conflicting_services()
 {
 	# TTBOX 独占 UDC：把板端其它 USB 透传服务先停掉，避免和 raw-gadget 抢控制器。
@@ -71,53 +92,124 @@ stop_conflicting_services()
 	done
 }
 
-# 1.5.26(b)：三级判定。客户实测 MCHOSE 鼠标 bInterfaceClass=03 / bInterfaceProtocol=00。
-#   一级 03/02 —— 标准 HID 鼠标，精确命中
-#   二级 03/≠01 —— 无协议描述符的 HID 复合设备（客户那只落在这级）
-#   三级 找不到 —— 由调用方超时后降级 synthetic，绝不无限死等
-#   旧判据只认 02 ⇒ 客户那只永远匹配不上 ⇒ while 死等 ⇒ usb-proxy 永不启动
-#   ⇒ 电脑侧连"鼠标不存在"都看不到（进程都没起来）。这是报障的真根因。
-#   不认 protocol=01（键盘），避免把键盘当鼠标。
-# 输出：<idVendor> <idProduct> <protocol>
+# 输入节点(eventN)所属的 USB 设备 sysfs 真实路径。
+# 必须【向上走到最近的 idVendor 目录再比相等】，不能拿设备路径做前缀匹配 ——
+# Hub 是鼠标的祖先，前缀匹配会把父 Hub 也判成鼠标（2026-09-21 实机踩到）。
+usb_dev_of_input()
+{
+	_d=$(readlink -f "$1/device" 2>/dev/null) || return 1
+	while [ -n "$_d" ] && [ "$_d" != "/" ] && [ "$_d" != "/sys" ]; do
+		if [ -f "$_d/idVendor" ] && [ -f "$_d/idProduct" ]; then
+			readlink -f "$_d"
+			return 0
+		fi
+		_d=$(dirname "$_d")
+	done
+	return 1
+}
+
+# 判定单个 USB 设备是否含「鼠标」，命中则打印命中的规则名。
+# 三级口径（命中任一即算）：
+#   R1 bInterfaceProtocol = 02 —— 传统 HID boot 鼠标（旧实现唯一口径，保留）
+#   R2 udev ID_INPUT_MOUSE=1   —— 内核/udev 公认判定（权威，需 /dev/input/eventN）
+#   R3 输入节点 rel 能力非 0    —— 兜底（无 udevadm / 无 udev 属性时）
+#
+# 为什么必须放宽（T1.07，2026-09-21 板端实测）：
+#   现代复合游戏鼠标走 report protocol，HID 接口是 sub=00/proto=00，
+#   实机 MCHOSE A7 V3 Pro+（3837:1014）三个 HID 接口全是 00/00。
+#   旧实现只认 proto=02 ⇒ 永不匹配 ⇒ 无限 "Waiting for a USB HID mouse"
+#   ⇒ 不建 cmd.sock/event.sock、gadget 不绑定、UDC 恒 not attached、
+#   core 的 PhysicalMouseReader 也连不上（透传整体不可用）。
+#
+# 排除项：Hub / 根 Hub（bDeviceClass=09）。
+# 不需要排除 TTBOX 自身 gadget：它挂在 UDC 上，不出现在本机 host 总线（lsusb 实证）。
+mouse_device_rule()
+{
+	_dev="$1"
+	_devreal=$(readlink -f "$_dev" 2>/dev/null) || return 1
+	if [ "$(cat "$_dev/bDeviceClass" 2>/dev/null || printf '00')" = "09" ]; then
+		return 1
+	fi
+
+	for intf in "$_dev":*; do
+		[ -f "$intf/bInterfaceClass" ] || continue
+		if [ "$(cat "$intf/bInterfaceClass" 2>/dev/null)" = "03" ] &&
+			[ "$(cat "$intf/bInterfaceProtocol" 2>/dev/null)" = "02" ]; then
+			printf 'R1'
+			return 0
+		fi
+	done
+
+	for _ev in /sys/class/input/event*; do
+		[ -e "$_ev" ] || continue
+		_own=$(usb_dev_of_input "$_ev") || continue
+		[ "$_own" = "$_devreal" ] || continue
+
+		if command -v udevadm >/dev/null 2>&1; then
+			if udevadm info --query=property --name="/dev/input/$(basename "$_ev")" 2>/dev/null |
+				grep -q '^ID_INPUT_MOUSE=1$'; then
+				printf 'R2'
+				return 0
+			fi
+		fi
+
+		_rel=$(cat "$_ev/device/capabilities/rel" 2>/dev/null || printf '')
+		if [ -n "$_rel" ] && [ "$_rel" != "0" ]; then
+			printf 'R3'
+			return 0
+		fi
+	done
+
+	return 1
+}
+
+# find_mouse：回显 "<vid> <pid> <命中规则>"。第三字段仅供日志诊断，调用方只取前两个。
 find_mouse()
 {
 	for dev in /sys/bus/usb/devices/*; do
 		[ -f "$dev/idVendor" ] || continue
 		[ -f "$dev/idProduct" ] || continue
-
-		for intf in "$dev":*; do
-			[ -f "$intf/bInterfaceClass" ] || continue
-			[ "$(cat "$intf/bInterfaceClass")" = "03" ] || continue
-			[ "$(cat "$intf/bInterfaceProtocol" 2>/dev/null || printf '00')" = "02" ] || continue
-			printf '%s %s 02\n' "$(cat "$dev/idVendor")" "$(cat "$dev/idProduct")"
+		if _rule=$(mouse_device_rule "$dev"); then
+			printf '%s %s %s\n' "$(cat "$dev/idVendor")" "$(cat "$dev/idProduct")" "$_rule"
 			return 0
-		done
-	done
-
-	# 二级：class=03 但协议非 02 且非 01 的 HID（协议字段 00 = 未声明，复合设备常见）
-	for dev in /sys/bus/usb/devices/*; do
-		[ -f "$dev/idVendor" ] || continue
-		[ -f "$dev/idProduct" ] || continue
-
-		for intf in "$dev":*; do
-			[ -f "$intf/bInterfaceClass" ] || continue
-			[ "$(cat "$intf/bInterfaceClass")" = "03" ] || continue
-			protocol=$(cat "$intf/bInterfaceProtocol" 2>/dev/null || printf '00')
-			[ "$protocol" = "01" ] && continue   # 01 = 键盘，不认
-			printf '%s %s %s\n' "$(cat "$dev/idVendor")" "$(cat "$dev/idProduct")" "$protocol"
-			return 0
-		done
+		fi
 	done
 
 	return 1
+}
+
+# 等待期诊断表：卡在"等鼠标"时，一眼看出是"没插"还是"插了但被判成非鼠标"。
+mouse_scan_report()
+{
+	for dev in /sys/bus/usb/devices/*; do
+		[ -f "$dev/idVendor" ] || continue
+		[ -f "$dev/idProduct" ] || continue
+		printf '  [scan] %s %s:%s devclass=%s "%s"' \
+			"$(basename "$dev")" "$(cat "$dev/idVendor")" "$(cat "$dev/idProduct")" \
+			"$(cat "$dev/bDeviceClass" 2>/dev/null || printf '00')" \
+			"$(cat "$dev/product" 2>/dev/null || printf '?')"
+		for intf in "$dev":*; do
+			[ -f "$intf/bInterfaceClass" ] || continue
+			printf ' | %s c=%s s=%s p=%s' "$(basename "$intf")" \
+				"$(cat "$intf/bInterfaceClass")" \
+				"$(cat "$intf/bInterfaceSubClass")" \
+				"$(cat "$intf/bInterfaceProtocol")"
+		done
+		if _r=$(mouse_device_rule "$dev"); then
+			printf ' => MOUSE(%s)\n' "$_r"
+		else
+			printf ' => -\n'
+		fi
+	done
 }
 
 cd "$PROJECT_DIR"
 mkdir -p "$USB_PROXY_SOCKET_DIR"
 stop_conflicting_services
 
-# 1.5.26(c)-1：等 UDC。旧写法是无限死等（只能靠 systemd 超时杀，日志看不出为什么）。
-# 现在超时即人话报错 + 退出 → 交 systemd 重启 + unit 的 StartLimit 兜底。
+# 1.5.26(c)-1（并入 T1.07 版，2026-09-22）：等 UDC 加超时。旧写法（含 09-21 发布的 T1.07 版）
+# 是无限死等——只能靠 systemd 超时杀，日志看不出为什么。现在超时即人话报错 + 退出，
+# 交 systemd 重启 + unit 的 StartLimit 兑底。
 UDC_WAIT=${USB_PROXY_UDC_WAIT_SECONDS:-60}
 _waited=0
 while [ ! -e "/sys/class/udc/$USB_PROXY_DEVICE" ]; do
@@ -138,9 +230,11 @@ ARGS="--device=$USB_PROXY_DEVICE --driver=$USB_PROXY_DRIVER"
 ARGS="$ARGS --mouse_control_cmd_socket=$USB_PROXY_SOCKET_DIR/cmd.sock"
 ARGS="$ARGS --mouse_control_event_socket=$USB_PROXY_SOCKET_DIR/event.sock"
 
-# 1.5.26(c)-2：full 模式先找物理鼠标，超时降级 synthetic（AI 注入可用、物理透传不可用）。
 ids=""
 if [ "$USB_PROXY_MODE" != "synthetic" ]; then
+	# 1.5.26(c)-2（并入 T1.07 版，2026-09-22）：full 模式找物理鼠标加超时降级。旧写法（含 09-21 发布的
+	# T1.07 版）是无限死等——非鼠标环境 = usb-proxy 永不启动、电脑侧看不到鼠标。
+	# 现在超时后降级 synthetic：AI 注入可用、物理透传不可用，插回鼠标 restart 即恢复。
 	MOUSE_WAIT=${USB_PROXY_MOUSE_WAIT_SECONDS:-30}
 	_waited=0
 	while ! ids=$(find_mouse); do
@@ -154,6 +248,11 @@ if [ "$USB_PROXY_MODE" != "synthetic" ]; then
 		fi
 		printf 'Waiting for a USB HID mouse on the Orange Pi side... (%ss/%ss)\n' \
 			"$_waited" "$MOUSE_WAIT"
+		# 每 10 次（默认 10s）打一张全量接口表：
+		# 区分「没插鼠标」与「插了但被判成非鼠标」——后者是旧实现的经典故障形态。
+		if [ "$((_waited % 10))" = 0 ]; then
+			mouse_scan_report
+		fi
 		sleep "$USB_PROXY_WAIT_SECONDS"
 		_waited=$((_waited + USB_PROXY_WAIT_SECONDS))
 	done
@@ -166,8 +265,9 @@ else
 	set -- $ids
 	vendor_id=$1
 	product_id=$2
+	rule=${3:-?}
 
-	printf 'Using USB mouse %s:%s\n' "$vendor_id" "$product_id"
+	printf 'Using USB mouse %s:%s (matched by %s)\n' "$vendor_id" "$product_id" "$rule"
 	ARGS="$ARGS --vendor_id=$vendor_id --product_id=$product_id --hid_passthrough_compat --enable_mouse_control"
 fi
 
