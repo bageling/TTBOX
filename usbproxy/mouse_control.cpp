@@ -16,26 +16,18 @@
 #include <vector>
 #include <fstream>
 #include <jsoncpp/json/json.h>
+#include "misc.h"
 
 extern bool please_stop_ep0;
 
-// RT：realtime=fifo:98 + CPU affinity（大核）
+// RT：realtime=fifo:98 + CPU affinity（默认最后一颗核，RK3588 大核）
+// 两者都可用环境变量覆盖：USB_PROXY_MOUSE_CONTROL_RT_PRIORITY（0=关）、
+// USB_PROXY_MOUSE_CONTROL_CPU_AFFINITY（-1=不绑）。
 void apply_rt_thread_policy() {
-    struct sched_param sp{};
-    sp.sched_priority = 98;
-    if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) != 0) {
-        fprintf(stderr, "[rt] pthread_setschedparam(SCHED_FIFO,98) failed: %s\n",
-                strerror(errno));
-    }
-    // CPU affinity：优先绑到最后核（RK3588 大核），失败不致命
-    cpu_set_t set;
-    CPU_ZERO(&set);
     int ncpu = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
     int target = ncpu - 1;  // 板端 run_usb_proxy.sh 用 cpu_affinity=7（8 核的最后核）
-    if (target >= 0 && target < CPU_SETSIZE) {
-        CPU_SET(target, &set);
-        pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
-    }
+    usbproxy_rt_apply("MOUSE_CONTROL", 98,
+                      "USB_PROXY_MOUSE_CONTROL_CPU_AFFINITY", target);
 }
 
 namespace ttbox_usbproxy {

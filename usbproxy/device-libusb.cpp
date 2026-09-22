@@ -32,6 +32,8 @@ int hotplug_callback(struct libusb_context *ctx __attribute__((unused)),
 
 void *hotplug_monitor(void *arg __attribute__((unused))) {
 	printf("Start hotplug_monitor/event thread, thread id(%d)\n", gettid());
+	// 唯一的 libusb 事件泵：回调（含中断环）都靠它驱动，掉队就直接体现为丢帧。
+	usbproxy_rt_apply("THREAD", 55, "USB_PROXY_CPU_AFFINITY", -1);
 	while(!please_stop_ep0) {
 		// This is the SOLE thread that calls libusb_handle_events.
 		// All other threads (ISO IN, ISO OUT) submit async transfers

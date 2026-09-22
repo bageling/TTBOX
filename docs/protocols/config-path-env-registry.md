@@ -90,6 +90,13 @@
 | `USB_PROXY_LIBDIR` | 路径 | `<usbproxy 目录>/lib` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_UDC_WAIT_SECONDS` | 秒 | `60` | `run-ttbox-usb-proxy.sh` | RUNTIME |
 | `USB_PROXY_MOUSE_WAIT_SECONDS` | 秒 | `30` | `run-ttbox-usb-proxy.sh` | RUNTIME |
+| `USB_PROXY_MLOCK` | 开关 | `1`（`0`=关） | `usbproxy/misc.cpp`（`mlockall`，转发路径防换页） | RUNTIME |
+| `USB_PROXY_ENDPOINT_RT_PRIORITY` | SCHED_FIFO 优先级 | `60`（`0`=不启用） | `usbproxy/proxy.cpp` 端点读/写线程 | RUNTIME |
+| `USB_PROXY_EP0_RT_PRIORITY` | SCHED_FIFO 优先级 | `65`（`0`=不启用） | `usbproxy/proxy.cpp` `ep0_loop` | RUNTIME |
+| `USB_PROXY_THREAD_RT_PRIORITY` | SCHED_FIFO 优先级 | `55`（`0`=不启用） | `usbproxy/device-libusb.cpp` 事件泵 | RUNTIME |
+| `USB_PROXY_MOUSE_CONTROL_RT_PRIORITY` | SCHED_FIFO 优先级 | `98`（`0`=不启用） | `usbproxy/mouse_control.cpp` | RUNTIME |
+| `USB_PROXY_CPU_AFFINITY` | CPU 编号 | `-1`（不绑） | `usbproxy/proxy.cpp` / `device-libusb.cpp` | RUNTIME |
+| `USB_PROXY_MOUSE_CONTROL_CPU_AFFINITY` | CPU 编号 | `<核数-1>` | `usbproxy/mouse_control.cpp` | RUNTIME |
 
 > **§6-6 裁定**：`USB_PROXY_*` 归属**脚本 `usbproxy/board/run-ttbox-usb-proxy.sh`**（RUNTIME），
 > 由 `deploy/systemd/ttbox-usbproxy.service` 的 `Environment=` 提供；前缀沿用既有 `USB_PROXY_`

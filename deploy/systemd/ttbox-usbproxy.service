@@ -34,6 +34,10 @@ Restart=always
 RestartSec=3
 KillSignal=SIGINT
 TimeoutStopSec=5
+# mlockall / SCHED_FIFO 需要这两个额度（代码里也会自己 setrlimit 兜底，
+# 因为客户机上跑的可能是镜像里那份旧 unit）。
+LimitMEMLOCK=infinity
+LimitRTPRIO=infinity
 SendSIGKILL=yes
 
 [Install]

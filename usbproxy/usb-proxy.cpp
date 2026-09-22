@@ -405,30 +405,27 @@ int setup_host_usb_desc() {
 						.bRefresh =		temp_device_altsetting.endpoint[l].bRefresh,
 						.bSynchAddress = 	temp_device_altsetting.endpoint[l].bSynchAddress,
 					};
-					// When a full-speed device is proxied through a high-speed
-					// gadget, convert isochronous bInterval from FS (ms) to HS
-					// (125µs microframes): HS interval = 2^(bInterval-1) * 125µs.
-					// FS bInterval=1 (1ms) → HS bInterval=4 (1ms).
+					// bInterval 的**单位随速度域变化**：全速/低速是毫秒，高速是
+					// 2^(n-1) 个 125µs 微帧。物理设备跑全速、而 gadget 以高速连电脑时，
+					// 描述符必须换算，否则电脑把一个"1ms"的端点当成 125µs（8kHz）来轮询
+					// ——语义差 8 倍。规则：HS interval = 2^(bInterval-1) * 125µs，
+					// 即 FS bInterval=1 (1ms) → HS bInterval=4。
+					//
+					// 中断端点与等时端点同样适用（批量端点不用 bInterval，跳过）。
+					// 旧代码只换算了 ISO，中断端点漏掉 ⇒ 满速鼠标在高速侧被当成 8kHz。
+					uint8_t xfer_type = temp_endpoint.bmAttributes &
+							USB_ENDPOINT_XFERTYPE_MASK;
 					if (device_speed == USB_SPEED_FULL &&
-					    (temp_endpoint.bmAttributes & USB_ENDPOINT_XFERTYPE_MASK)
-					     == USB_ENDPOINT_XFER_ISOC) {
+					    (xfer_type == USB_ENDPOINT_XFER_ISOC ||
+					     xfer_type == USB_ENDPOINT_XFER_INT)) {
 						uint8_t fs_interval = temp_endpoint.bInterval;
 						// Convert ms to nearest 125µs exponent:
 						// fs_interval ms = fs_interval * 8 microframes
 						// 2^(n-1) = fs_interval * 8 → n = log2(fs_interval*8) + 1
 						// For bInterval=1: n = log2(8)+1 = 4
-						uint8_t hs_interval = 4;
-						if (fs_interval > 1) {
-							int val = fs_interval * 8;
-							hs_interval = 1;
-							while (val > 1) {
-								val >>= 1;
-								hs_interval++;
-							}
-						}
-						if (hs_interval > 16)
-							hs_interval = 16;
-						printf("Converting ISO bInterval %d (FS ms) -> %d (HS 125us)\n",
+						uint8_t hs_interval = fs_ms_to_hs_interval(fs_interval);
+						printf("Converting %s bInterval %d (FS ms) -> %d (HS 125us)\n",
+							xfer_type == USB_ENDPOINT_XFER_ISOC ? "ISO" : "INT",
 							fs_interval, hs_interval);
 						temp_endpoint.bInterval = hs_interval;
 					}
@@ -636,6 +633,9 @@ int main(int argc, char **argv)
 			return 1;
 		}
 	}
+
+	// 锁住地址空间：转发路径上一次换页就够丢一帧（USB_PROXY_MLOCK=0 可关）。
+	usbproxy_mlockall();
 
 	if (synthetic_mode) {
 		// ── synthetic 模式：无物理鼠标，使用 gadget-config.json 描述符 ──

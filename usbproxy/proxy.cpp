@@ -815,6 +815,8 @@ void *ep_loop_write(void *arg) {
 	printf("Start writing thread for EP%02x, thread id(%d)\n",
 		ep.bEndpointAddress, gettid());
 
+	usbproxy_rt_apply("ENDPOINT", 60, "USB_PROXY_CPU_AFFINITY", -1);
+
 	// Set a no-op handler for SIGUSR1. Sending this signal to the thread
 	// will thus interrupt a blocking ioctl call without other side-effects.
 	signal(SIGUSR1, noop_signal_handler);
@@ -926,6 +928,10 @@ void *ep_loop_read(void *arg) {
 
 	printf("Start reading thread for EP%02x, thread id(%d)\n",
 		ep.bEndpointAddress, gettid());
+
+	// 端点转发线程上实时调度（SCHED_FIFO）+ 可选绑核，降低转发路径抖动。
+	// 默认 60；环境变量 USB_PROXY_ENDPOINT_RT_PRIORITY=0 可关（排障第一步）。
+	usbproxy_rt_apply("ENDPOINT", 60, "USB_PROXY_CPU_AFFINITY", -1);
 
 	// Set a no-op handler for SIGUSR1. Sending this signal to the thread
 	// will thus interrupt a blocking ioctl call without other side-effects.
@@ -1278,6 +1284,9 @@ void ep0_loop(int fd) {
 	bool set_configuration_status_succeeded = false;
 
 	printf("Start for EP0, thread id(%d)\n", gettid());
+
+	// EP0 控制传输（枚举/SET_IDLE/报告描述符）不能被端点转发饿死，优先级比它高一点。
+	usbproxy_rt_apply("EP0", 65, "USB_PROXY_CPU_AFFINITY", -1);
 
 	if (verbose_level)
 		print_eps_info(fd);

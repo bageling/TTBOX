@@ -127,7 +127,12 @@ int setup_synthetic_gadget_desc() {
     g_synth.ep.bEndpointAddress = 0x81;  // IN
     g_synth.ep.bmAttributes = USB_ENDPOINT_XFER_INT;
     g_synth.ep.wMaxPacketSize = 8;
-    g_synth.ep.bInterval = g_gadget_config.hid_interval;  // 1ms
+    // hid_interval 配置的是**毫秒**（全速语义，默认 1 = 1ms），而 gadget（dwc3）
+    // 是以高速连到电脑的 —— 高速下 bInterval 的单位是 2^(n-1) 个 125µs 微帧，
+    // 原样写 1 会被电脑当成 125µs（8kHz）轮询，与真实注入节奏差 8 倍。
+    // 这里换算成等时长的高速编码（1ms → 4），与 usb-proxy.cpp 的物理端点同一套公式。
+    g_synth.ep.bInterval = fs_ms_to_hs_interval(
+                    (uint8_t)g_gadget_config.hid_interval);
     g_synth.ep.bRefresh = 0;
     g_synth.ep.bSynchAddress = 0;
     return 0;
