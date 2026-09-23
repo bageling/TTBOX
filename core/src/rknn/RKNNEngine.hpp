@@ -137,7 +137,17 @@ public:
     bool zero_copy_ready() const { return zero_copy_ready_; }
     bool run_zero_copy(std::string* error = nullptr);
 
+    // external DMA-BUF 直绑是否**可能**成立（= 输入是 UINT8 原生）。
+    // 判定在 init_zero_copy() 一次性做出（mode == kUint8Native），运行时只读。
+    //   · true  → 每帧可尝试 bind_external_input_fd()
+    //   · false → 模型是 INT8（kXorShift128），直绑会绕过 XOR，恒不成立 ⇒
+    //             调用方应**根本不要每帧尝试**，否则每帧一次 rknn_query + 一条 WARN
+    //             （144 fps 下 = 每秒 144 条日志刷爆 journal，2026-09-23 板端实测）。
+    bool external_dma_supported() const { return external_dma_supported_; }
+
     // 绑定外部 DMA-BUF 为 RKNN 输入，避免每帧复制到 runtime 自有内存。
+    // 注意：不支持时（external_dma_supported()==false）本函数只**首次**打一条 WARN，
+    // 之后静默返回 false —— 调用方不得依赖它做每帧回退判定。
     bool bind_external_input_fd(int fd, void* virt_addr, size_t size,
                                 std::string* error = nullptr);
 
@@ -170,6 +180,10 @@ private:
     // 详见 input_pass_mode() 上方注释）。默认兼容 I/O —— 永远正确、永远可用。
     InputPassMode pass_mode_ = InputPassMode::kCompatible;
     bool zero_copy_ready_ = false;
+    // external DMA-BUF 直绑可行性（init_zero_copy 一次性判定；destroy 同 pass_mode_ 复位）。
+    bool external_dma_supported_ = false;
+    // "直绑被拒"只报一次的标志（防每帧刷屏）。
+    bool dma_bind_reject_logged_ = false;
 };
 
 }  // namespace ttbox::core

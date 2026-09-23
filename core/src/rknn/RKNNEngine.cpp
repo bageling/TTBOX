@@ -306,9 +306,14 @@ bool RKNNEngine::init_zero_copy(std::string* error) {
     }
     zero_copy_ready_ = true;
     pass_mode_ = mode;  // ← 写入点②：唯一写入 classify_input_pass() 结论之处，与 zero_copy_ready_ 同处（design §G2.3.1 结构保证 1）；另两处（缺省 kCompatible、destroy 复位）不携带分类结论
+    // external DMA-BUF 直绑只对 UINT8 原生成立；INT8（kXorShift128）直绑会绕过 XOR。
+    // 这里一次性定死，WorkerPool 据此决定"要不要每帧尝试直绑"——避免每帧一次
+    // rknn_query + 一条 WARN（144 fps 下每秒 144 条，2026-09-23 板端实测刷爆 journal）。
+    external_dma_supported_ = (mode == InputPassMode::kUint8Native);
     TTBOX_LOG_INFO("RKNN 零拷贝 I/O 已绑定: input=" +
                    std::to_string(impl_->input_mem_size) + " bytes, outputs=" +
-                   std::to_string(impl_->output_mems.size()));
+                   std::to_string(impl_->output_mems.size()) +
+                   ", external_dma=" + (external_dma_supported_ ? "可用" : "不可用（非 UINT8 原生输入，直绑恒被拒）"));
     return true;
 }
 
@@ -363,11 +368,20 @@ bool RKNNEngine::bind_external_input_fd(int fd, void* virt_addr, size_t size,
     // 外部 DMA-BUF 直传不做 XOR，仅 UINT8 原生（方案 D）正确；
     // INT8（kXorShift128）直传会绕过 XOR → 必错，故一律拒绝（design §G2.3.1）。
     // 拒绝发生在 rknn_create_mem_from_fd 之前 ⇒ 无副作用，impl_->input_mem 不被破坏。
+    //
+    // ★ 日志只报一次：本函数在逐帧路径上被调用（WorkerPool 每帧尝试直绑），
+    //   INT8 模型下恒定被拒 ⇒ 144 fps 时每秒 144 条 WARN 会把 journal 刷爆
+    //   （2026-09-23 板端实测）。后续调用静默返回 false，理由由
+    //   external_dma_supported()/init 阶段那条 INFO 承载。
     if (input_pass_mode() != InputPassMode::kUint8Native) {
         if (error) {
             *error = "external DMA-BUF 直传仅支持 UINT8 原生输入；当前模式非 kUint8Native，拒绝（回退拷贝+XOR）";
         }
-        TTBOX_LOG_WARN("拒绝 external DMA-BUF 直绑：input_pass_mode != kUint8Native（避免绕过 XOR）");
+        if (!dma_bind_reject_logged_) {
+            dma_bind_reject_logged_ = true;
+            TTBOX_LOG_WARN("拒绝 external DMA-BUF 直绑：input_pass_mode != kUint8Native（避免绕过 XOR）；"
+                           "本模型为 INT8，后续每帧走拷贝+XOR，此提示不再重复");
+        }
         return false;
     }
     attr.type = RKNN_TENSOR_UINT8;
@@ -415,6 +429,8 @@ void RKNNEngine::destroy() {
     inited_ = false;
     zero_copy_ready_ = false;
     pass_mode_ = InputPassMode::kCompatible;  // ← 写入点③：复位，保证 destroy→init 重建一致（不携带分类结论）
+    external_dma_supported_ = false;          // ← 与 pass_mode_ 同时复位（换模型后重新判定）
+    dma_bind_reject_logged_ = false;          // ← 复位后允许新模型再报一次被拒提示
 }
 
 void RKNNEngine::reset_stats() {

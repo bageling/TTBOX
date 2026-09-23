@@ -37,13 +37,18 @@ static void worker_loop(rknn_context ctx, const uint8_t *input, size_t bytes) {
 
 int main(int argc, char **argv) {
     if (argc < 4) {
-        printf("Usage: %s <rknn_model> <num_threads> <seconds>\n", argv[0]);
+        printf("Usage: %s <rknn_model> <num_threads> <seconds> [core_mask]\n", argv[0]);
+        printf("  core_mask: 省略 = 旧行为（每个 ctx 独占一核 1/2/4）；\n");
+        printf("             1/2/4 单核、3/5/6 双核、7 三核全开，且所有 ctx 同 mask。\n");
+        printf("             给 mask 时 ctx 数 = num_threads（避免多余 ctx 占 NPU 资源）。\n");
         return 1;
     }
     const char *model_path = argv[1];
     int num_threads = atoi(argv[2]);
     int seconds = atoi(argv[3]);
-    int num_ctxs = 3;
+    // 第 4 参：显式 core_mask（0 = 未给，走旧的多核独占分配）
+    const int mask_arg = (argc >= 5) ? atoi(argv[4]) : 0;
+    int num_ctxs = mask_arg > 0 ? num_threads : 3;
 
     int model_size = 0;
     unsigned char *model_data = load_model(model_path, &model_size);
@@ -72,8 +77,10 @@ int main(int argc, char **argv) {
         input_mems[i] = rknn_create_mem(ctx, input_attr.size_with_stride);
         rknn_set_io_mem(ctx, input_mems[i], &input_attr);
 
-        rknn_core_mask mask = (rknn_core_mask)((i == 0) ? 1 : (i == 1) ? 2 : 4);
+        const rknn_core_mask mask =
+            static_cast<rknn_core_mask>(mask_arg > 0 ? mask_arg : ((i == 0) ? 1 : (i == 1) ? 2 : 4));
         rknn_set_core_mask(ctx, mask);
+        printf("  ctx[%d] core_mask=%d\n", i, static_cast<int>(mask));
 
         memset(input_mems[i]->virt_addr, 0, input_attr.size_with_stride);
     }
@@ -105,6 +112,9 @@ int main(int argc, char **argv) {
     printf("  elapsed:  %.3f s\n", elapsed);
     printf("  FPS:      %.2f\n", fps);
     printf("  per-core: %.2f ms\n", per_core);
+    // 单次推理墙钟耗时（线程并行下：总 CPU-等待时间 / 总次数）
+    const double per_run_ms = (total > 0) ? (elapsed * 1000.0 * num_threads / total) : 0.0;
+    printf("  per-run:  %.3f ms（单线程 = 单次推理延迟）\n", per_run_ms);
     printf("=========================\n");
 
     for (int i = 0; i < num_ctxs; ++i) {

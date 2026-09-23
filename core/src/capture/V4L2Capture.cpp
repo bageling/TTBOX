@@ -45,10 +45,37 @@ std::shared_ptr<FrameBuffer> LatestFrame::publish(std::shared_ptr<FrameBuffer> f
     // 消除 publish 阻塞导致的帧延迟抖动。
     auto old = std::atomic_load_explicit(&current_, std::memory_order_acquire);
     std::atomic_store_explicit(&current_, std::move(frame), std::memory_order_release);
+    // 唤醒等待中的 consumer。只在"确实有人在等"时才碰这把锁，且锁内只做
+    // notify_all（不做任何数据处理），采集线程被 consumer 阻塞的风险可忽略。
+    if (waiters_.load(std::memory_order_relaxed) > 0) {
+        std::lock_guard<std::mutex> lk(notify_mutex_);
+        notify_cv_.notify_all();
+    }
     return old;
 }
 
 std::shared_ptr<FrameBuffer> LatestFrame::get() const {
+    return std::atomic_load_explicit(&current_, std::memory_order_acquire);
+}
+
+std::shared_ptr<FrameBuffer> LatestFrame::wait_new(uint32_t after_seq, int timeout_us) const {
+    // 快路径：新帧已到（稳态下绝大多数是这一支），不碰锁。
+    auto cur = std::atomic_load_explicit(&current_, std::memory_order_acquire);
+    if (cur && cur->info.sequence != after_seq) return cur;
+
+    waiters_.fetch_add(1, std::memory_order_relaxed);
+    std::unique_lock<std::mutex> lk(notify_mutex_);
+    bool woken = true;
+    if (timeout_us <= 0) {
+        notify_cv_.wait(lk);
+    } else {
+        woken = notify_cv_.wait_for(lk, std::chrono::microseconds(timeout_us), [&] {
+            auto c = std::atomic_load_explicit(&current_, std::memory_order_acquire);
+            return c && c->info.sequence != after_seq;
+        });
+    }
+    waiters_.fetch_sub(1, std::memory_order_relaxed);
+    if (!woken) return nullptr;
     return std::atomic_load_explicit(&current_, std::memory_order_acquire);
 }
 

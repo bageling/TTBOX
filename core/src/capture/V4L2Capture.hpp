@@ -14,6 +14,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -37,11 +38,25 @@ public:
     // 获取当前最新帧（shared_ptr 保活：旧帧在 consumer 使用时不会提前归还）。
     std::shared_ptr<FrameBuffer> get() const;
 
+    // 阻塞等待"sequence != after_seq"的新帧，最多等 timeout_us 微秒；
+    // 超时返回 nullptr（调用方据此检查退出标志）。
+    //
+    // 存在的理由：consumer（3 个推理 worker）此前是固定 400 µs 轮询 get()，
+    // 平均要空等 ~200 µs 才能发现新帧 —— 板端实测 queue_wait ≈ 0.239 ms 正是
+    // 这笔开销（2026-09-23）。改成事件唤醒后，帧到达即被唤醒（微秒级），
+    // 且锁/原子操作次数从 ~7500 次/秒降到 ~600 次/秒。
+    // 仍保留超时（不永久 wait）：① 停止时能退出；② 极端情况下丢通知也能自愈。
+    std::shared_ptr<FrameBuffer> wait_new(uint32_t after_seq, int timeout_us) const;
+
     void clear();
 
 private:
-    mutable std::mutex mutex_;
     std::shared_ptr<FrameBuffer> current_;
+    // 仅用于"有新帧"这一事件的通知，**不保护 current_**（current_ 走原子 shared_ptr）。
+    // publish 持本锁的时间只有一次 notify_all，不会让采集线程阻塞在 consumer 上。
+    mutable std::mutex notify_mutex_;
+    mutable std::condition_variable notify_cv_;
+    mutable std::atomic<int> waiters_{0};
 };
 
 // ---------------------------------------------------------------------------

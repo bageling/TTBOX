@@ -260,18 +260,13 @@ void InferenceWorker::loop() {
         }
     }
     while (running_.load()) {
-        auto frame = params_.latest->get();
-        if (!frame) {
-            // 启动初期无帧：低频轮询，避免空转唤醒大核。
-            std::this_thread::sleep_for(std::chrono::microseconds(400));
-            continue;
-        }
+        // ★ 事件唤醒取帧（替代固定 400 µs 轮询）：帧一发布就被唤醒，
+        //   消除"平均空等 ~200 µs"这笔 queue_wait（板端实测 0.239 ms，2026-09-23）。
+        //   仍给 400 µs 超时做兜底：① 停止时能退出循环；② 极端丢通知可自愈。
+        auto frame = params_.latest->wait_new(last_seq_, 400);
+        if (!frame) continue;             // 超时（无新帧 / 正在停止）
         const uint32_t seq = frame->info.sequence;
-        if (seq == last_seq_) {
-            // 本 worker 已处理过该帧：等新帧时放宽轮询，降低无效唤醒。
-            std::this_thread::sleep_for(std::chrono::microseconds(400));
-            continue;  // 本 worker 已处理过该帧
-        }
+        if (seq == last_seq_) continue;   // 极小概率的重复唤醒
         // 固定轮转分配：避免多个 worker 同时处理同一张 latest frame。
         if (seq % static_cast<uint32_t>(params_.total_workers) !=
             static_cast<uint32_t>(params_.id)) {
@@ -324,7 +319,11 @@ void InferenceWorker::loop() {
             } else {
                 // INT8/NHWC 模型可把 RGA 常驻 DMA-BUF 直接交给 RKNN，
                 // 省掉每帧 RGA->CPU/RKNN 输入 memcpy；fd 变化时才重新绑定。
-                if (params_.external_dma_input && prepared.dma_fd >= 0 &&
+                // ★ 只有 UINT8 原生输入才**可能**直绑（engine->external_dma_supported()，
+                //   init 时一次性判定）。INT8（kXorShift128）恒被拒，此处必须跳过：
+                //   否则每帧一次 rknn_query + 一条 WARN（144fps 下每秒 144 条刷爆 journal）。
+                if (params_.external_dma_input && engine_->external_dma_supported() &&
+                    prepared.dma_fd >= 0 &&
                     prepared.dma_fd != bound_input_dma_fd_) {
                     if (engine_->bind_external_input_fd(prepared.dma_fd,
                             const_cast<uint8_t*>(input_ptr), input_bytes, &ierr)) {
