@@ -59,9 +59,13 @@ std::string unix_timestamp_sec() {
 std::string generate_nonce(int len = 16) {
     static const char chars[] =
         "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    unsigned seed = static_cast<unsigned>(
-        std::chrono::system_clock::now().time_since_epoch().count());
-    std::mt19937 gen(seed);
+    // ★ 2026-09-23：原来用 system_clock 播种 mt19937 ⇒ nonce **可预测**
+    //   （攻击者只要知道大致时间就能枚举），HMAC 签名里的 nonce 等于没起作用。
+    //   改用 random_device（Linux 下读 /dev/urandom）。
+    //   注：本文件当前被 AUTH 门控、线上只装 OfflineCardClient，但 T2.03 一旦
+    //   打开在线接入就会走到这里 ⇒ 现在改比那时改便宜。
+    std::random_device rd;
+    std::mt19937 gen(rd());
     std::uniform_int_distribution<> dist(0, sizeof(chars) - 2);
     std::string s;
     s.reserve(len);

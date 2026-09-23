@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <sched.h>
+#include <atomic>
 #include <cerrno>
 #include <cstring>
 #include <chrono>
@@ -125,22 +126,27 @@ void encode_config_payload(std::vector<uint8_t>& out) {
 // ── SET_CONFIG 解码（协议逐字节对应）──
 // 输入：payload 指向固定字段+字符串区（不含 apply_now 字节）
 bool decode_config_payload(const uint8_t* payload, size_t plen) {
+    // ★ 2026-09-23：原来截断时静默返回 0/空串却继续解析，函数**恒返回 true**
+    //   ⇒ 畸形 SET_CONFIG 会把 gadget-config.json 写成一堆空字段，
+    //   重启后设备直接无法枚举；而且下面那句 "bad set-config payload" 永远走不到。
+    //   改成任何一次越界读取都置 ok=false，由调用方拒绝整个报文。
+    bool ok = true;
     auto rd16 = [&](size_t& off) -> uint16_t {
         uint16_t v = 0;
-        if (off + 2 > plen) return 0;
+        if (off + 2 > plen) { ok = false; return 0; }
         v = static_cast<uint16_t>(payload[off] | (payload[off + 1] << 8));
         off += 2;
         return v;
     };
     auto rd8 = [&](size_t& off) -> uint8_t {
-        if (off + 1 > plen) return 0;
+        if (off + 1 > plen) { ok = false; return 0; }
         return payload[off++];
     };
     auto rd_str = [&](size_t& off) -> std::string {
-        if (off + 2 > plen) return "";
+        if (off + 2 > plen) { ok = false; return ""; }
         uint16_t n = static_cast<uint16_t>(payload[off] | (payload[off + 1] << 8));
         off += 2;
-        if (off + n > plen) return "";
+        if (off + n > plen) { ok = false; return ""; }
         std::string s(reinterpret_cast<const char*>(payload + off), n);
         off += n;
         return s;
@@ -165,6 +171,9 @@ bool decode_config_payload(const uint8_t* payload, size_t plen) {
     c.serial = rd_str(off);
     c.configuration = rd_str(off);
     c.hid_report_desc_hex = rd_str(off);
+    // ★ 任一字段读取越界 ⇒ 整包作废。绝不用半截配置覆盖 gadget-config.json，
+    //   否则重启后 USB 描述符是空的，设备直接枚举不上。
+    if (!ok) return false;
     g_gadget_config = c;
     return true;
 }
@@ -203,6 +212,27 @@ int persist_gadget_config() {
     return 0;
 }
 
+// ── 位移累积（钳位 + 饱和）────────────────────────────────────────
+// ★ 2026-09-23：原实现 `pending_dx.fetch_add(dx)` 无任何钳位 ⇒
+//   ① int32 溢出是**未定义行为**；② 客户端连续发大值会让累积位移无限增长，
+//   表现为鼠标"飞"出去且几十秒内回不来（累积量要慢慢消费完）。
+//   单次值夹到 HID 报告能表达的范围，累积值用 64 位中间量算出后再饱和夹回 int32。
+static constexpr int32_t kMoveStepLimit = 32767;      // 单次位移上界
+static constexpr int32_t kPendingLimit = 1 << 20;     // 累积位移上界 ±1048575
+
+static void add_pending(std::atomic<int32_t>& acc, int32_t delta) {
+    if (delta > kMoveStepLimit) delta = kMoveStepLimit;
+    else if (delta < -kMoveStepLimit) delta = -kMoveStepLimit;
+    int32_t cur = acc.load();
+    for (;;) {
+        int64_t s = static_cast<int64_t>(cur) + static_cast<int64_t>(delta);
+        if (s > kPendingLimit) s = kPendingLimit;
+        else if (s < -kPendingLimit) s = -kPendingLimit;
+        const int32_t want = static_cast<int32_t>(s);
+        if (acc.compare_exchange_weak(cur, want)) return;
+    }
+}
+
 // ── 命令分发：处理单个 cmd.sock 连接 ────────────────────────────
 void handle_cmd_connection(int fd) {
     uint8_t buf[sizeof(PacketHeader) + kMaxPayload];
@@ -231,9 +261,9 @@ void handle_cmd_connection(int fd) {
             std::memcpy(&dx, payload, 4);
             std::memcpy(&dy, payload + 4, 4);
             std::memcpy(&wheel, payload + 8, 4);
-            g_state.pending_dx.fetch_add(dx);
-            g_state.pending_dy.fetch_add(dy);
-            g_state.pending_wheel.fetch_add(wheel);
+            add_pending(g_state.pending_dx, dx);
+            add_pending(g_state.pending_dy, dy);
+            add_pending(g_state.pending_wheel, wheel);
             g_state.move_count.fetch_add(1);
             g_state.last_move_ts_us.store(now_us());
             break;
@@ -368,6 +398,30 @@ static bool spawn_connection(void* (*entry)(void*), int fd) {
     return true;
 }
 
+// ── 控制口对端身份校验（2026-09-23）──────────────────────────────
+//   cmd.sock 上任何能连上的进程都能发 SET_CONFIG + apply_now 把 usb-proxy 直接
+//   _exit(0) 杀掉（靠 systemd Restart=always 拉起），并把 gadget-config.json
+//   写坏（重启后 Windows 无法枚举设备）。此前唯一的防护是文件权限 0660
+//   ⇒ 同组用户、以及任何拿到 ttbox 组身份的进程都能为所欲为。
+//
+//   这里再加一道**内核级**对端凭据校验（SO_PEERCRED，由内核填、无法伪造）：
+//   只放行 root、与本进程同 uid、或属本进程主组（ttbox）的对端。
+//   合法客户端正好落在这三类里：Core 以 root 跑、Web 面板以 ttbox 组跑。
+static bool cmd_peer_allowed(int fd) {
+    struct ucred cred{};
+    socklen_t len = sizeof(cred);
+    if (::getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0) {
+        fprintf(stderr, "cmd.sock: 取不到对端凭据，拒绝连接: %s\n", strerror(errno));
+        return false;
+    }
+    if (cred.uid == 0) return true;                 // root（Core）
+    if (cred.uid == ::getuid()) return true;        // 本进程同 uid
+    if (cred.gid == ::getgid()) return true;        // 本进程主组（ttbox，Web 面板）
+    fprintf(stderr, "cmd.sock: 拒绝未授权对端 uid=%u gid=%u\n",
+            static_cast<unsigned>(cred.uid), static_cast<unsigned>(cred.gid));
+    return false;
+}
+
 // ── 监听线程：accept 循环 ────────────────────────────────────────
 void* cmd_listen_loop(void* arg) {
     apply_rt_thread_policy();  // RT 线程
@@ -378,6 +432,11 @@ void* cmd_listen_loop(void* arg) {
             if (errno == EINTR) continue;
             if (errno == EBADF) break;
             ::usleep(50000);
+            continue;
+        }
+        // ★ 先验身份再建处理线程：未授权对端直接关掉，连一个字节都不读。
+        if (!cmd_peer_allowed(cfd)) {
+            ::close(cfd);
             continue;
         }
         spawn_connection(cmd_connection_entry, cfd);

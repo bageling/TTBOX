@@ -414,10 +414,25 @@ void PreviewModule::loop() {
     const auto interval = std::chrono::milliseconds(1000 / params_.fps);
     auto next_tick = start_time;
 
+    // ★ 连续异常计数 + 静默开关（2026-09-23）
+    //   encode_frame() 内部会构造 cv::Mat、做 cv::resize、扩容 crop_buffer_/jpeg_out，
+    //   这些**都会抛异常**（std::bad_alloc / cv::Exception）。异常一旦穿过线程函数就是
+    //   std::terminate() —— 预览只是锦上添花，却能把采集 + NPU 推理 + HID 注入一起带走。
+    //   所以这里必须兜住，且失败最多只意味着"这一帧不出图"。
+    //   连续失败到阈值后转入静默：不再尝试编码（不再刷日志、不再抛），
+    //   **但线程继续活着** —— 因为 stop() 靠 running_.exchange(false) 判断是否 join，
+    //   若在循环里自己把 running_ 置 false，stop() 会直接早退、线程不被 join，
+    //   析构时 joinable 的 std::thread 照样 terminate（与 HidForwarder 是同一类坑）。
+    constexpr uint32_t kMaxEncodeFaults = 30;
+    uint32_t consecutive_faults = 0;
+    bool fault_quiet = false;
+
     while (running_.load()) {
         const auto now = clock::now();
         if (now < next_tick) std::this_thread::sleep_for(next_tick - now);
         next_tick = clock::now() + interval;
+
+        if (fault_quiet) continue;
 
         auto frame = latest_ ? latest_->get() : nullptr;
         if (!frame || frame->size == 0 || frame->info.cpu_va == nullptr) {
@@ -428,11 +443,37 @@ void PreviewModule::loop() {
         const auto encode_start = clock::now();
         std::vector<uint8_t> jpeg;
         std::string error;
-        if (!encode_frame(*frame, &jpeg, &error)) {
+        try {
+            if (!encode_frame(*frame, &jpeg, &error)) {
+                metrics_.dropped.fetch_add(1);
+                if (metrics_.dropped.load() <= 3) TTBOX_LOG_WARN("Preview 编码失败: " + error);
+                continue;
+            }
+        } catch (const std::exception& e) {
             metrics_.dropped.fetch_add(1);
-            if (metrics_.dropped.load() <= 3) TTBOX_LOG_WARN("Preview 编码失败: " + error);
+            ++consecutive_faults;
+            if (consecutive_faults >= kMaxEncodeFaults) {
+                fault_quiet = true;
+                TTBOX_LOG_ERROR("Preview 编码连续 " + std::to_string(consecutive_faults) +
+                                " 次抛异常（最后一条: " + e.what() +
+                                "）⇒ 预览转入静默，AI 链路不受影响");
+            } else if (consecutive_faults <= 3) {
+                TTBOX_LOG_WARN("Preview 编码抛异常（已忽略，不中断预览线程）: " + e.what());
+            }
+            continue;
+        } catch (...) {
+            metrics_.dropped.fetch_add(1);
+            ++consecutive_faults;
+            if (consecutive_faults >= kMaxEncodeFaults) {
+                fault_quiet = true;
+                TTBOX_LOG_ERROR("Preview 编码连续 " + std::to_string(consecutive_faults) +
+                                " 次抛未知异常 ⇒ 预览转入静默，AI 链路不受影响");
+            } else if (consecutive_faults <= 3) {
+                TTBOX_LOG_WARN("Preview 编码抛未知异常（已忽略，不中断预览线程）");
+            }
             continue;
         }
+        consecutive_faults = 0;
 
         {
             std::lock_guard<std::mutex> lock(jpeg_mutex_);

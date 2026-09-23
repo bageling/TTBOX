@@ -73,6 +73,20 @@ bool InferenceWorker::start(const Params& params, std::string* error) {
     if (params.pass_through) {
         std::string zero_copy_error;
         if (!engine_->init_zero_copy(&zero_copy_error)) {
+            // ★ 2026-09-23：分两种失败。
+            //   · 普通失败（查询不过、输入没绑上）⇒ ctx 干净，照旧回退兼容 I/O；
+            //   · zero_copy_fatal() ⇒ 输入已绑上且**无解绑 API**，ctx 处于半绑态，
+            //     兼容 I/O 会与它冲突 ⇒ 这个 worker 会永久 100% 推理失败。
+            //     宁可让 worker 启动失败（错误可见），也不能留一个静默坏的推理通道。
+            if (engine_->zero_copy_fatal()) {
+                std::string fatal = "worker[" + std::to_string(id_) +
+                                    "] 零拷贝半绑失败，本引擎不可用（需重建）: " + zero_copy_error;
+                TTBOX_LOG_ERROR(fatal);
+                if (error) *error = fatal;
+                engine_->destroy();
+                engine_.reset();
+                return false;
+            }
             TTBOX_LOG_WARN("worker[" + std::to_string(id_) + "] 零拷贝不可用，回退兼容 I/O: " + zero_copy_error);
         }
     }

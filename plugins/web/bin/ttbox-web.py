@@ -1475,6 +1475,18 @@ app = Flask(
 
 )
 
+# ★ 2026-09-23：请求体体积上限。此前**完全没有限制**——模型上传直接落盘到
+#   models/_incoming，一次请求就能把磁盘写满（配合面板无鉴权，代价极低）。
+#   现役模型 4~11 MB，256 MB 留了充足余量。超限由 Flask 抛 413。
+MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
+
+
+@app.errorhandler(413)
+def _handle_payload_too_large(_exc):
+    """请求体超限：给前端一个能看懂的 JSON，而不是默认的 HTML 413 页。"""
+    return jsonify({'ok': False, 'error': f'上传内容过大（上限 {MAX_UPLOAD_BYTES // (1024 * 1024)} MB）'}), 413
+
 
 @app.errorhandler(CoreUnavailableError)
 def _handle_core_unavailable(exc: CoreUnavailableError):

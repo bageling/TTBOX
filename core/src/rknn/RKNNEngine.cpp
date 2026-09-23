@@ -254,6 +254,17 @@ bool RKNNEngine::init_zero_copy(std::string* error) {
         return false;
     }
 
+    // =====================================================================
+    // ★ 2026-09-23 重构：拆成「只查询」→「才分配绑定」两个阶段。
+    //   原因：rknn_set_io_mem 把输入绑成"用户内存"后，**没有解绑 API**。
+    //   原来在绑定输入之后才去查询输出属性 / 创建输出 mem，任一步失败就直接
+    //   return false —— 已创建的 mem 不销毁（NPU 内存泄漏），ctx 停在半绑态，
+    //   而兼容路径的 rknn_inputs_set 与半绑态冲突 ⇒ 该 worker **永久** 100%
+    //   推理失败，上层却只当"零拷贝不可用"照常跑（静默坏掉）。
+    //   查询是廉价的、也是最可能失败的环节 ⇒ 全部前置，绑定阶段就几乎不会失败。
+    // =====================================================================
+
+    // ---- 阶段一：只查询 ----
     rknn_tensor_attr input_attr{};
     input_attr.index = 0;
     int rc = rknn_query(impl_->ctx, RKNN_QUERY_INPUT_ATTR, &input_attr, sizeof(input_attr));
@@ -261,6 +272,40 @@ bool RKNNEngine::init_zero_copy(std::string* error) {
         if (error) *error = "查询零拷贝输入属性失败 rc=" + std::to_string(rc);
         return false;
     }
+    rknn_input_output_num io_num{};
+    rc = rknn_query(impl_->ctx, RKNN_QUERY_IN_OUT_NUM, &io_num, sizeof(io_num));
+    if (rc != RKNN_SUCC) {
+        if (error) *error = "查询零拷贝 I/O 数量失败";
+        return false;
+    }
+    std::vector<rknn_tensor_attr> output_attrs;
+    output_attrs.reserve(io_num.n_output);
+    for (uint32_t i = 0; i < io_num.n_output; ++i) {
+        rknn_tensor_attr output_attr{};
+        output_attr.index = i;
+        rc = rknn_query(impl_->ctx, RKNN_QUERY_OUTPUT_ATTR, &output_attr, sizeof(output_attr));
+        if (rc != RKNN_SUCC) {
+            if (error) *error = "查询零拷贝输出属性失败 index=" + std::to_string(i);
+            return false;
+        }
+        output_attrs.push_back(output_attr);
+    }
+
+    // ---- 阶段二：分配 + 绑定（任何失败都整体回滚）----
+    // 回滚销毁**已创建的全部** mem，不是只销毁失败那一个。
+    auto rollback_zero_copy = [this]() {
+        if (impl_->input_mem) {
+            rknn_destroy_mem(impl_->ctx, impl_->input_mem);
+            impl_->input_mem = nullptr;
+        }
+        impl_->input_mem_size = 0;
+        for (auto* mem : impl_->output_mems) {
+            if (mem) rknn_destroy_mem(impl_->ctx, mem);
+        }
+        impl_->output_mems.clear();
+        impl_->output_mem_sizes.clear();
+    };
+
     rknn_tensor_attr input_binding = input_attr;
     // 此处 mode 必为 kXorShift128 / kUint8Native（kCompatible 已在上面 return false）。
     input_binding.type = (mode == InputPassMode::kUint8Native) ? RKNN_TENSOR_UINT8
@@ -270,35 +315,40 @@ bool RKNNEngine::init_zero_copy(std::string* error) {
     impl_->input_mem = rknn_create_mem(impl_->ctx, input_binding.size_with_stride);
     if (!impl_->input_mem) {
         if (error) *error = "rknn_create_mem 输入失败";
-        return false;
+        return false;  // 还没绑定 ⇒ ctx 干净，可直接走兼容 I/O
     }
     rc = rknn_set_io_mem(impl_->ctx, impl_->input_mem, &input_binding);
     if (rc != RKNN_SUCC) {
-        rknn_destroy_mem(impl_->ctx, impl_->input_mem);
-        impl_->input_mem = nullptr;
+        // 绑定未成功 ⇒ ctx 仍干净，回滚后走兼容 I/O（与修复前行为一致）。
+        // 只有"绑定已成功"之后的失败才置 zero_copy_fatal_。
+        rollback_zero_copy();
         if (error) *error = "rknn_set_io_mem 输入失败 rc=" + std::to_string(rc);
         return false;
     }
     impl_->input_mem_size = input_binding.size_with_stride;
 
-    rknn_input_output_num io_num{};
-    rc = rknn_query(impl_->ctx, RKNN_QUERY_IN_OUT_NUM, &io_num, sizeof(io_num));
-    if (rc != RKNN_SUCC) {
-        if (error) *error = "查询零拷贝 I/O 数量失败";
-        return false;
-    }
-    for (uint32_t i = 0; i < io_num.n_output; ++i) {
-        rknn_tensor_attr output_attr{};
-        output_attr.index = i;
-        rc = rknn_query(impl_->ctx, RKNN_QUERY_OUTPUT_ATTR, &output_attr, sizeof(output_attr));
-        if (rc != RKNN_SUCC) {
-            if (error) *error = "查询零拷贝输出属性失败 index=" + std::to_string(i);
+    for (uint32_t i = 0; i < output_attrs.size(); ++i) {
+        rknn_tensor_attr output_attr = output_attrs[i];
+        auto* mem = rknn_create_mem(impl_->ctx, output_attr.size_with_stride);
+        if (!mem) {
+            rollback_zero_copy();
+            // ★ 输入已绑定且无解绑 API ⇒ 这个 ctx 不能再拿去跑兼容 I/O，
+            //   标致命让上层直接判定 worker 失败，别留一个永久静默坏的 worker。
+            zero_copy_fatal_ = true;
+            if (error) {
+                *error = "创建零拷贝输出内存失败 index=" + std::to_string(i) +
+                         "（输入已绑定且无法解绑，本引擎不可用）";
+            }
             return false;
         }
-        auto* mem = rknn_create_mem(impl_->ctx, output_attr.size_with_stride);
-        if (!mem || rknn_set_io_mem(impl_->ctx, mem, &output_attr) != RKNN_SUCC) {
-            if (mem) rknn_destroy_mem(impl_->ctx, mem);
-            if (error) *error = "创建或绑定零拷贝输出失败 index=" + std::to_string(i);
+        if (rknn_set_io_mem(impl_->ctx, mem, &output_attr) != RKNN_SUCC) {
+            rknn_destroy_mem(impl_->ctx, mem);
+            rollback_zero_copy();
+            zero_copy_fatal_ = true;
+            if (error) {
+                *error = "绑定零拷贝输出失败 index=" + std::to_string(i) +
+                         "（输入已绑定且无法解绑，本引擎不可用）";
+            }
             return false;
         }
         impl_->output_mems.push_back(mem);
@@ -428,6 +478,7 @@ void RKNNEngine::destroy() {
     }
     inited_ = false;
     zero_copy_ready_ = false;
+    zero_copy_fatal_ = false;             // ← 与 zero_copy_ready_ 同时复位（新 ctx 是干净的）
     pass_mode_ = InputPassMode::kCompatible;  // ← 写入点③：复位，保证 destroy→init 重建一致（不携带分类结论）
     external_dma_supported_ = false;          // ← 与 pass_mode_ 同时复位（换模型后重新判定）
     dma_bind_reject_logged_ = false;          // ← 复位后允许新模型再报一次被拒提示

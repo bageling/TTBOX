@@ -135,6 +135,11 @@ public:
     void* output_memory(uint32_t index) const;
     size_t output_memory_size(uint32_t index) const;
     bool zero_copy_ready() const { return zero_copy_ready_; }
+    // ★ 2026-09-23：零拷贝**半绑致命**标志。init_zero_copy() 一旦把输入
+    //   rknn_set_io_mem 绑上、之后某步失败，ctx 就没有解绑 API，兼容 I/O 会与之冲突。
+    //   此时返回 true ⇒ 调用方必须判定本引擎不可用（重建 worker），
+    //   **不能**当成"零拷贝不可用"继续用同一个 ctx（那样该 worker 会永久静默失败）。
+    bool zero_copy_fatal() const { return zero_copy_fatal_; }
     bool run_zero_copy(std::string* error = nullptr);
 
     // external DMA-BUF 直绑是否**可能**成立（= 输入是 UINT8 原生）。
@@ -180,6 +185,8 @@ private:
     // 详见 input_pass_mode() 上方注释）。默认兼容 I/O —— 永远正确、永远可用。
     InputPassMode pass_mode_ = InputPassMode::kCompatible;
     bool zero_copy_ready_ = false;
+    // ★ 零拷贝半绑致命标志（见 zero_copy_fatal() 注释；destroy 时一并复位）。
+    bool zero_copy_fatal_ = false;
     // external DMA-BUF 直绑可行性（init_zero_copy 一次性判定；destroy 同 pass_mode_ 复位）。
     bool external_dma_supported_ = false;
     // "直绑被拒"只报一次的标志（防每帧刷屏）。

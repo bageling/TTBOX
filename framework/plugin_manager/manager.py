@@ -129,6 +129,9 @@ class PluginManager:
         self.store.uninstall(plugin_id); self.registry.remove(plugin_id); self.registry.save(); self.transactions.commit(); return True
     def upgrade(self, request):
         package=resolve_package(request, self.repository, self.root / ".downloads" if self.root else None)
+        # ★ 2026-09-23：upgrade 原来**完全没有**完整性校验（install 有、upgrade 漏了），
+        #   等于"换版本"这条路可以装进任何包。与 install 同口径补上。
+        verify_integrity(package, getattr(request, "expected_sha256", None))
         inspected=__import__("framework.plugin_manager.standard", fromlist=["PluginPackage"]).PluginPackage.inspect(package); old=self.registry.require(inspected.manifest.plugin_id); was_running=old.state==PluginState.RUNNING
         self._check_dependencies_for_manifest(inspected.manifest); self.transactions.begin("upgrade", old.plugin_id, old.version, inspected.manifest.version)
         try:
