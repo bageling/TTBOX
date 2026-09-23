@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -113,8 +114,21 @@ public:
     const WorkerStats& stats() const { return stats_; }
     int id() const { return id_; }
 
+    // ---- 预处理后端诊断（面板「预处理路径」用）----
+    // 为什么需要：面板那一格读的是 raw_preprocess_backend，后端此前从未产出该键，
+    // 前端只能显示 "-"。此处是首个真源。
+    enum class PreprocessBackendKind {
+        kNone = 0,        // 未初始化 / 无预处理实例
+        kRga = 1,         // 走 RGA 硬件（正常）
+        kCpuFallback = 2, // RGA 不可用，退 CPU
+        kFailed = 3,      // RGA 有错帧
+    };
+    PreprocessBackendKind preprocess_backend() const;
+    std::string last_preprocess_error() const;
+
 private:
     void loop();
+    void record_preprocess_error(const std::string& error);
     // A-8：应用最新 RuntimeProfile（conf/iou/filter/max/FOV/ROI）到 decoder/RGA
     void apply_runtime_profile();
 
@@ -136,6 +150,10 @@ private:
     WorkerStats stats_;
     // A-8：热更新跟踪（避免每帧重复设置）
     std::shared_ptr<const RuntimeProfile> applied_profile_;
+    // 最近一次预处理失败原因（面板「最后错误」用）。锁只在失败路径偶尔取，
+    // 成功路径不碰，不影响热路径。
+    mutable std::mutex preprocess_err_mu_;
+    std::string last_preprocess_error_;
 };
 
 // Worker 池：创建/启动/停止 N 个 InferenceWorker，聚合统计
@@ -183,6 +201,10 @@ public:
     uint64_t total_processed() const;
     uint64_t total_errors() const;
     uint64_t total_skipped() const;
+    // 预处理后端诊断：取所有 worker 里"最差"的那个——只要有一路退 CPU 或出错就该被看见，
+    // 不能因为 worker[0] 正常就把问题藏起来。
+    InferenceWorker::PreprocessBackendKind preprocess_backend() const;
+    std::string last_preprocess_error() const;
 
 private:
     std::vector<std::unique_ptr<InferenceWorker>> workers_;

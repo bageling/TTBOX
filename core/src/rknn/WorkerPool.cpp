@@ -1,6 +1,10 @@
 // WorkerPool.cpp — 多 Worker 并发推理实现
 #include "rknn/WorkerPool.hpp"
 
+#include <mutex>
+#include <string>
+#include <vector>
+
 #if defined(_WIN32)
 namespace ttbox::core {
 }
@@ -10,8 +14,8 @@ namespace ttbox::core {
 #include <chrono>
 #include <cstring>
 #include <future>
+#include <mutex>
 #include <thread>
-
 #include "common/Logger.hpp"
 #include "common/CpuAffinity.hpp"
 #include "rknn/InputQuant.hpp"  // T1.14：输入量化分类 + XOR 搬运（唯一判定入口）
@@ -292,6 +296,7 @@ void InferenceWorker::loop() {
     const auto preprocess_begin = clock::now();
     if (!preprocess_ || !preprocess_->process(*frame, &prepared, &preprocess_error)) {
         stats_.errors.fetch_add(1);
+        record_preprocess_error(preprocess_error);
         if (stats_.errors.load() <= 3) std::fprintf(stderr, "worker[%d] Preprocess: %s\n", id_, preprocess_error.c_str());
         continue;
     }
@@ -594,6 +599,49 @@ uint64_t WorkerPool::total_skipped() const {
     uint64_t s = 0;
     for (const auto& w : workers_) s += w->stats().skipped;
     return s;
+}
+
+// ---- 预处理后端诊断 ----
+// 这几个方法**故意放在平台无关区**：WorkerPool.cpp 主体被 `#if !_WIN32` 包着，
+// 但 CoreRuntime 在 Windows 本机构建里也会调用它们（面板指标走同一条代码路径），
+// 放主体里 ⇒ Windows 链接期 undefined reference。
+// 判定只用 Preprocess::using_rga() 与 RgaMetrics（两者在 Windows 上都有安全退化的 inline 实现）。
+InferenceWorker::PreprocessBackendKind InferenceWorker::preprocess_backend() const {
+    if (!preprocess_) return PreprocessBackendKind::kNone;
+    if (!preprocess_->using_rga()) return PreprocessBackendKind::kCpuFallback;
+    const RgaMetrics* m = preprocess_->rga_metrics();
+    if (m != nullptr && m->error_frames.load() > 0) return PreprocessBackendKind::kFailed;
+    return PreprocessBackendKind::kRga;
+}
+
+std::string InferenceWorker::last_preprocess_error() const {
+    std::lock_guard<std::mutex> lk(preprocess_err_mu_);
+    return last_preprocess_error_;
+}
+
+void InferenceWorker::record_preprocess_error(const std::string& error) {
+    if (error.empty()) return;
+    std::lock_guard<std::mutex> lk(preprocess_err_mu_);
+    last_preprocess_error_ = error;
+}
+
+InferenceWorker::PreprocessBackendKind WorkerPool::preprocess_backend() const {
+    using Kind = InferenceWorker::PreprocessBackendKind;
+    Kind worst = Kind::kNone;
+    for (const auto& w : workers_) {
+        const Kind k = w->preprocess_backend();
+        // 数字越大越差：kNone(0) < kRga(1) < kCpuFallback(2) < kFailed(3)
+        if (static_cast<int>(k) > static_cast<int>(worst)) worst = k;
+    }
+    return worst;
+}
+
+std::string WorkerPool::last_preprocess_error() const {
+    for (const auto& w : workers_) {
+        const std::string e = w->last_preprocess_error();
+        if (!e.empty()) return e;
+    }
+    return std::string();
 }
 
 }  // namespace ttbox::core

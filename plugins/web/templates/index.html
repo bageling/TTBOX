@@ -7735,6 +7735,8 @@ function formatStatus(status, running) {
   return STATUS_LABELS[status] || "已停止";
 }
 
+// 预处理路径：backend 由后端产出（core 侧按 RgaMetrics 判定），此前后端从未供给
+// raw_preprocess_backend ⇒ 这里恒返回 "-"，面板看着像"没有预处理数据"。
 function formatPreprocessBackend(latencyState) {
   const backend = latencyState && latencyState.raw_preprocess_backend;
   if (backend === "rga") {
@@ -7744,12 +7746,23 @@ function formatPreprocessBackend(latencyState) {
     return `CPU直拷 ${formatNumber(latencyState.rga_ms)} ms`;
   }
   if (backend === "cpu_fallback") {
-    return `CPU回退 ${formatNumber(latencyState.detect_total_ms)} ms`;
+    // 不拼耗时：CPU 回退时 rga_ms 不累加（core 只在 using_rga() 为真时统计），
+    // 拼上去会显示 0，看着像"预处理没花时间"。
+    return "CPU回退（RGA 不可用）";
   }
   if (backend === "failed") {
-    return "硬件预处理失败";
+    const reason = latencyState && latencyState.raw_preprocess_error;
+    return reason ? `硬件预处理失败：${reason}` : "硬件预处理失败";
   }
   return "-";
+}
+
+// 推理并发：路数 + 理论聚合吞吐（能力上限，不是实际帧率——实际被采集帧率封顶）。
+function formatConcurrency(detection) {
+  const total = Number(detection && detection.workers_total) || 0;
+  if (!total) return "-";
+  const capacity = Number(detection && detection.capacity_fps) || 0;
+  return capacity > 0 ? `${total} 路 · 聚合 ${formatNumber(capacity)} fps` : `${total} 路`;
 }
 
 function modelProfileLabel(value) {
@@ -10333,6 +10346,10 @@ function renderRuntime(payload) {
       <div class="runtime-stat">
         <span>预处理路径</span>
         <strong>${escapeHtml(preprocessBackend)}</strong>
+      </div>
+      <div class="runtime-stat">
+        <span>推理并发</span>
+        <strong>${escapeHtml(formatConcurrency(detection))}</strong>
       </div>
       <div class="runtime-stat">
         <span>最后错误</span>

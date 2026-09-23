@@ -1361,7 +1361,15 @@ def collect_web_state() -> dict:
                 },
                 'latency': {
                     'capture_to_mouse_send_ms': m.get('e2e_ms', 0),
-                    'preprocess_to_track_ms': m.get('e2e_ms', 0),
+                    'preprocess_to_track_ms': (
+                        # 真值 = 预处理(RGA) + 推理 + 解码。此前直接拿 e2e_ms 顶替，
+                        # 会把"端到端"当成"预处理→跟踪"显示，口径不对。
+                        (m.get('resize_ms', 0) or 0)
+                        + (m.get('infer_run_ms', 0) or 0)
+                        + (m.get('decode_ms', 0) or 0)
+                    ),
+                    'raw_preprocess_backend': m.get('raw_preprocess_backend', ''),
+                    'raw_preprocess_error': m.get('raw_preprocess_error', ''),
                     'queue_wait_ms': m.get('buffer_age_ms', 0),
                     'rga_ms': m.get('resize_ms', 0),
                     'rknn_set_input_ms': m.get('infer_set_input_ms', 0),
@@ -1394,6 +1402,8 @@ def collect_web_state() -> dict:
                     'workers_total': int(m.get('model_workers_total') or 0),
                     'workers_zero_copy': int(m.get('model_workers_zero_copy') or 0),
                     'workers_fast_path': int(m.get('model_workers_fast_path') or 0),
+                    # 聚合吞吐（能力上限，非实际帧率）：路数 ÷ 单帧 e2e
+                    'capacity_fps': m.get('inference_capacity_fps', 0.0),
                     'note': m.get('model_input_note', '') or '',
                 },
                 'motion_training': {

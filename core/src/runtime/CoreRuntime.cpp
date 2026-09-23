@@ -420,6 +420,24 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             out->model_input_note = summary.note;
         }
     }
+
+    // ---- 预处理后端 + 并发吞吐（面板「预处理路径」「推理并发」的真源）----
+    if (workers_) {
+        using Kind = InferenceWorker::PreprocessBackendKind;
+        switch (workers_->preprocess_backend()) {
+            case Kind::kRga:         out->preprocess_backend = "rga"; break;
+            case Kind::kCpuFallback: out->preprocess_backend = "cpu_fallback"; break;
+            case Kind::kFailed:      out->preprocess_backend = "failed"; break;
+            case Kind::kNone:        out->preprocess_backend.clear(); break;
+        }
+        out->preprocess_error = workers_->last_preprocess_error();
+        // 聚合吞吐 = 路数 ÷ 单帧 e2e。这是**能力上限**，不是实际帧率
+        //（实际被采集帧率封顶，144Hz 源就只会有 144）。
+        const size_t wc = workers_->worker_count();
+        if (wc > 0 && out->e2e_ms > 0.0) {
+            out->inference_capacity_fps = static_cast<double>(wc) * 1000.0 / out->e2e_ms;
+        }
+    }
     if (mailbox_) {
         aim::AimTargetTask task;
         if (mailbox_->take_latest(&task)) out->detect_count = task.detections.size();

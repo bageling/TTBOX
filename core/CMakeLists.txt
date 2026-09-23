@@ -11,7 +11,7 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言同值。
-project(ttbox_core VERSION 1.5.38 LANGUAGES CXX)
+project(ttbox_core VERSION 1.5.39 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -767,6 +767,11 @@ if(TTBOX_CORE_BUILD_TESTS)
     target_link_libraries(test_metrics_g1 PRIVATE ttbox_core)
     add_test(NAME test_metrics_g1 COMMAND test_metrics_g1)
   endif()
+
+  # 面板字段真源回归：只依赖 IpcServer::system_status_to_json 与 Metrics（无硬件依赖）
+  add_executable(test_preprocess_metric tests/test_preprocess_metric.cpp)
+  target_link_libraries(test_preprocess_metric PRIVATE ttbox_core)
+  add_test(NAME test_preprocess_metric COMMAND test_preprocess_metric)
 
   # ---- 硬件验收测试（板端：-DTTBOX_CORE_BUILD_HW_TESTS=ON）----
   if(TTBOX_CORE_BUILD_HW_TESTS AND UNIX AND NOT APPLE)

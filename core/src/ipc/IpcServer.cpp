@@ -1036,6 +1036,9 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("detect_count", JsonValue::number(static_cast<double>(status.metrics.detect_count)));
     m.set("tracks", JsonValue::number(static_cast<double>(status.metrics.tracks)));
     m.set("frames_superseded", JsonValue::number(static_cast<double>(status.metrics.frames_superseded)));
+    m.set("inference_capacity_fps", JsonValue::number(status.metrics.inference_capacity_fps));
+    m.set("raw_preprocess_backend", JsonValue::string(status.metrics.preprocess_backend));
+    m.set("raw_preprocess_error", JsonValue::string(status.metrics.preprocess_error));
     m.set("frames_total", JsonValue::number(static_cast<double>(status.metrics.frames_total)));
     data.set("metrics", std::move(m));
     return data;
