@@ -331,4 +331,14 @@ std::vector<std::pair<std::string, std::string>> ConfigManager::flatten() const 
     return out;
 }
 
+bool ConfigManager::device_layer_has(const std::string& key) const {
+    // 单文件模式不存在"继承"关系，恒为未显式设置。
+    if (!layered_ || path_.empty()) return false;
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path_, ec)) return false;
+    JsonParseResult parsed = json_parse_file(path_);
+    if (!parsed.ok || !parsed.value.is_object()) return false;
+    return parsed.value.find(key) != nullptr;
+}
+
 }  // namespace ttbox::core

@@ -84,6 +84,7 @@ public:
     // ---- Hotkey Gate / 总闸（基类实现）----
     //   判定顺序对齐 AiboxHidOutput::send；但"无配置源"分支已收紧为 fail-closed（详见 gate_allows）。
     void set_enabled(bool enabled) { enabled_ = enabled; }
+    bool enabled() const { return enabled_; }
     void set_button_source(std::atomic<uint16_t>* source) { button_source_ = source; }
     void set_config_source(RuntimeConfig* config) { config_source_ = config; }
 
@@ -131,6 +132,9 @@ public:
 
     BackendHealth health() const;
     const char* backend_name() const;
+    // 静态总闸实际生效值（output_enabled）。与 AimThread 的 injection_allowed 是
+    // 两个独立闸门，排障时必须一起看：任一为 false 都不会有任何注入。
+    bool enabled() const { return backend_ ? backend_->enabled() : false; }
 
     void set_enabled(bool enabled);
     void set_button_source(std::atomic<uint16_t>* source);

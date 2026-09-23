@@ -49,7 +49,7 @@
   "model_input_height": 256,
   "model_class_names_text": "",
   "model_notes": "",
-  "output_enabled": false,
+  "output_enabled": true,
   "pipeline_debug_enabled": false,
   "pipeline_debug_interval": 60,
   "crop_size": 640,

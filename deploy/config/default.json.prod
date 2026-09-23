@@ -81,7 +81,7 @@
   "output_backend": "usb_proxy",
   "output_proxy_socket": "/run/ttbox-mouse-passthrough/cmd.sock",
   "input_event_socket": "/run/ttbox-mouse-passthrough/event.sock",
-  "output_enabled": false,
+  "output_enabled": true,
   "pipeline_debug_enabled": false,
   "pipeline_debug_interval": 60,
   "crop_size": 640,

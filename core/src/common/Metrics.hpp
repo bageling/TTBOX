@@ -64,6 +64,10 @@ struct PipelineMetrics {
     // 「挂起」是用户主动刹的车，「没按热键」只是没在瞄。
     bool aim_hotkeys_suspended = false;
     bool mouse_control_connected = false;
+    // 后端静态总闸（output_enabled）的实际生效值。与 injection_allowed 是**两个独立闸门**：
+    // 只有两者同时为真才可能真的注入。历史上它恒为 false 而 injection_allowed 恒 true，
+    // 表现为"能识别但自瞄完全没效果" —— 排障时务必两个一起看。
+    bool output_backend_enabled = false;
     uint64_t mouse_control_socket_write_ok = 0;
     uint64_t mouse_control_socket_write_fail = 0;
     uint64_t mouse_control_send_count = 0;

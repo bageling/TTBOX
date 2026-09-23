@@ -47,6 +47,12 @@ public:
     bool loaded() const { return loaded_; }
     const std::string& path() const { return path_; }
 
+    // 分层模式：判断写回目标（设备层 10-device.json）里是否**显式**含有某个顶层键。
+    // 用途：区分「部署/用户显式设置」与「继承自出厂基线」——自愈类迁移只补齐
+    // 设备层缺失的键，绝不覆盖部署方显式写过的值。
+    // 单文件模式（未分层）恒返回 false：只有一个文件，"继承"无从谈起。
+    bool device_layer_has(const std::string& key) const;
+
     // 结构化读取：key 不存在时返回默认值（调用方显式给默认值，非静默兜底）
     std::string get_string(const std::string& key, const std::string& def = "") const;
     double get_double(const std::string& key, double def = 0.0) const;

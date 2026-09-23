@@ -243,6 +243,42 @@ void Application::apply_preview_degrade(CoreRuntime::Params* params,
     }
 }
 
+// 输出总闸自愈（一次性、只补不盖）
+//
+// 背景：出厂基线 00-factory.json 曾把 output_enabled 固定为 false，而设备层
+// 10-device.json 从不覆盖它 ⇒ 合并值恒为 false ⇒ OutputBackend::gate_allows()
+// 第一句就 return false，注入一条都发不出去。更糟的是 AimThread 自己的
+// injection_allowed 只看 mouse.enabled + 热键，面板因此显示"允许注入"，
+// 两个闸门判断不一致，排障时极易被误导（表现为"能识别但自瞄完全没效果"）。
+//
+// 触发条件（三条全满足才写，且写完后设备层就有了显式键 ⇒ 只跑一次）：
+//   1. 分层配置生效（存在可写的设备层）
+//   2. output_backend 是真实输出端点（usb_proxy / local_hid）
+//   3. 设备层**未显式**设置 output_enabled，且合并值仍为 false
+// 设备层显式写过的一律尊重，绝不覆盖（部署方可能真的要用它做 kill switch）。
+bool Application::migrate_output_enabled(std::string* note) {
+    if (note) note->clear();
+    if (!config_.is_layered()) return false;
+
+    const std::string kind = config_.get_string("output_backend", "aibox");
+    if (kind != "usb_proxy" && kind != "local_hid") return false;
+    if (config_.device_layer_has("output_enabled")) return false;
+    if (config_.get_bool("output_enabled", true)) return false;
+
+    JsonValue view = config_.root();
+    view.set("output_enabled", JsonValue::boolean(true));
+    std::string err;
+    if (!config_.persist(view, &err)) {
+        if (note) *note = "写回设备层失败: " + err;
+        return false;
+    }
+    config_.replace_root(std::move(view));
+    if (note) {
+        *note = "出厂基线 output_enabled=false 会永久封死注入，已在设备层补写 true";
+    }
+    return true;
+}
+
 bool Application::build_runtime_params(CoreRuntime::Params& out_params,
                                        const CoreRuntime::FeatureGates& gates,
                                        std::string* error) {
@@ -395,8 +431,19 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
     out_params.prediction_time_s =
         static_cast<float>(config_.get_double("prediction_time_s", 0.0));
 
+    // 先做一次输出总闸自愈（见 Application::migrate_output_enabled 说明）：
+    // 必须在读取 output_enabled 之前跑，否则读到的是出厂基线的陈旧值。
+    std::string migration_note;
+    if (migrate_output_enabled(&migration_note) && !migration_note.empty()) {
+        TTBOX_LOG_WARN("输出总闸自愈: " + migration_note);
+    }
+
     const std::string output_kind = config_.get_string("output_backend", "aibox");
-    bool enabled = config_.get_bool("output_enabled", false);
+    // output_enabled = 后端静态总闸（kill switch）：只有显式置 false 才关闭。
+    // 历史上出厂基线把它固定为 false 且没有任何 UI/流程会置 true，
+    // 等价于出厂即永久封死注入（表现为"能识别但自瞄完全没效果"）。
+    // 用户级开关是 runtime mouse.enabled（面板可控、实时生效），这里默认启用。
+    bool enabled = config_.get_bool("output_enabled", true);
     if (output_kind == "fifo") {
         const std::string fifo_path =
             config_.get_string("output_fifo_path", "/tmp/ttbox_hid.fifo");

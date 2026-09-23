@@ -104,6 +104,11 @@ private:
     // 通过同目录临时文件 + 原子 rename 发布，避免断电/崩溃留下半截 JSON。
     bool persist_runtime_profile(const RuntimeProfile& profile, std::string* error = nullptr);
 
+    // 输出总闸（output_enabled）一次性自愈：出厂基线曾把它固定为 false 且无人覆盖，
+    // 等价出厂即封死注入。仅当设备层未显式设置时才补写 true（只补不盖）。
+    // 必须在读取 output_enabled 之前调用。返回 true 表示发生了迁移或尝试过迁移。
+    bool migrate_output_enabled(std::string* note = nullptr);
+
     // 从配置构造 CoreRuntime 参数。
     // ★ M2.03：增 `gates`（特性级启停）—— `gates.inference==false` 时**跳过**模型解析/校验，
     //   使"仅采集"（受限卡 features=[capture]）在**未选模型**时也能起（否则 B6 必 FAIL）。

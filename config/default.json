@@ -81,7 +81,7 @@
   "model_registry_root": "",
   "hid_package_root": "",
   "output_backend": "usb_proxy",
-  "output_enabled": false,
+  "output_enabled": true,
   "pipeline_debug_enabled": false,
   "pipeline_debug_interval": 60
 }
