@@ -564,8 +564,27 @@ bool TtboxLicenseClient::do_card_login(
     if (token) out.cached_token = token->as_string();
     const auto* expire = data.find("expireAt");
     if (expire) {
-        std::string exp_str = expire->as_string();
-        try { out.expire_unix_ms = std::stoll(exp_str); } catch (...) {}
+        // ★ 2026-09-23：expireAt 在契约里 **0 = 永久**（LicenseCard.hpp），
+        //   所以「没带这个字段」和「带了但解析不出来」必须区别对待。
+        //   后者原来被 `catch (...) {}` 静默吞掉、字段留 0 ⇒ 一张订阅卡会被当成
+        //   永久卡 ⇒ 之后一断网就**永久**停在 kFallback（该状态在 LicenseGate 里放行）。
+        //   解析失败按响应无效处理，绝不伪造"永久"。
+        const std::string exp_str = expire->as_string("");
+        if (expire->is_number()) {
+            out.expire_unix_ms = expire->as_int(0);
+        } else if (!exp_str.empty()) {
+            int64_t v = 0;
+            try {
+                v = std::stoll(exp_str);
+            } catch (...) {
+                if (err) *err = "card-login: expireAt 不是合法整数: " + exp_str;
+                out.state = LicenseState::kInvalidCard;
+                out.last_error = "expireAt 无法解析为整数";
+                return true;
+            }
+            out.expire_unix_ms = v;
+        }
+        // 空串 / 非标量 ⇒ 按"服务端未提供"处理，保持 0（= 永久）的既有语义
     }
     // M2：签名卡内容（features / plan / uiBrand）。此处不回落也不过滤 ——
     // 回落由 apply_check_result、闭集过滤由 to_snapshot 各自负责（单一职责）。
@@ -750,8 +769,24 @@ bool TtboxLicenseClient::do_heartbeat(
     if (t) out.cached_token = t->as_string();
     const auto* exp = pr.value.find("expireAt");
     if (exp) {
-        std::string exp_str = exp->as_string();
-        try { out.expire_unix_ms = std::stoll(exp_str); } catch (...) {}
+        // 与上面 card-login 同口径：expireAt = 0 是契约里的"永久"，
+        // 但**解析失败**不能静默留 0（否则订阅卡会被误判成永久卡，断网后永不退出
+        // fail-open）。详见 TtboxLicenseClient 中同名的另一处注释。
+        const std::string exp_str = exp->as_string("");
+        if (exp->is_number()) {
+            out.expire_unix_ms = exp->as_int(0);
+        } else if (!exp_str.empty()) {
+            int64_t v = 0;
+            try {
+                v = std::stoll(exp_str);
+            } catch (...) {
+                if (err) *err = "heartbeat: expireAt 不是合法整数: " + exp_str;
+                out.state = LicenseState::kInvalidCard;
+                out.last_error = "expireAt 无法解析为整数";
+                return true;
+            }
+            out.expire_unix_ms = v;
+        }
     }
     const auto* hi = pr.value.find("heartbeatInterval");
     if (hi) out.heartbeat_interval = static_cast<int>(hi->as_number(60));

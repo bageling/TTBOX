@@ -133,6 +133,8 @@ private:
     //   曾经漏在 reload_workers 一条路径上（next = params 整体覆盖 ⇒ fps_meter 变 nullptr）
     //   ⇒ worker 从不 tick ⇒ fps() 恒 0 ⇒ 静默回退成"published ÷ 启动至今秒数"的累计平均
     //   ⇒ 面板帧率又变成"一点一点往上爬"（1.5.37 修了口径，却被这条路径绕过）。
+    // ★ 同理，frame_w/frame_h 也在这里从 capture_ 现取回填（2026-09-23）：外部构造的
+    //   Params 从不设这两个值，热切换后曾恒为 0 ⇒ 检测框不映射回原图坐标。
     void bind_worker_params(WorkerPool::Params& p);
     FrameRateMeter fps_meter_;
     std::unique_ptr<PreviewModule> preview_;  // G1：start() 时刻（steady 时钟，算推理 FPS 分母）

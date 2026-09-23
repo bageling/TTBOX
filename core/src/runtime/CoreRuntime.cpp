@@ -55,6 +55,17 @@ void CoreRuntime::bind_worker_params(WorkerPool::Params& p) {
     p.aim_mailbox = mailbox_.get();
     p.runtime_config = runtime_config_;
     p.fps_meter = &fps_meter_;
+    // ★ 原图尺寸也必须在唯一绑定点里回填，不能指望调用方带上。
+    //   外部构造的 Params（Application::build_runtime_params）从头到尾没设过
+    //   frame_w/frame_h，而 reload_workers 是 `next = params` 整体覆盖 ⇒ 热切换模型后
+    //   这两个值恒为 0 ⇒ DecodeNMS 走「0=不映射」分支 ⇒ 检测框不再映射回原图坐标。
+    //   （CoreRuntime::start() 原本单独赋过值，只有热切换这条路漏了。）
+    //   采集未启用时 format 为 0x0，保持 0，语义与原来一致（不映射）。
+    if (capture_) {
+        const auto& fmt = capture_->format();
+        p.frame_w = fmt.width;
+        p.frame_h = fmt.height;
+    }
 }
 
 bool CoreRuntime::preload_workers(std::string* error) {
@@ -139,8 +150,8 @@ bool CoreRuntime::start(std::string* error) {
     // ② WorkerPool（仅 gates.inference）。
     if (want_inference) {
         const auto& fmt = capture_->format();
-        worker_params_.frame_w = fmt.width;
-        worker_params_.frame_h = fmt.height;
+        // 原图尺寸由 bind_worker_params() 统一回填（见该函数注释），这里不再单独赋值，
+        // 免得「两处都能设」将来又漏掉一处。fmt 仍要取：下面预加载分支要用。
         bind_worker_params(worker_params_);
         bool workers_ok = false;
         if (workers_preloaded_) {
@@ -231,7 +242,9 @@ bool CoreRuntime::reload_workers(const WorkerPool::Params& params, std::string* 
         if (error) *error = "内部对象未初始化";
         return false;
     }
-    const auto fmt = capture_->format();
+    // ★ 原图尺寸不在入参里（build_runtime_params 从不设 frame_w/h），由下面的
+    //   bind_worker_params() 从 capture_ 现取后回填。此前这里取了 fmt 却没用，
+    //   热切换后 frame_w/h 恒为 0（详见 bind_worker_params 注释）。
     const WorkerPool::Params previous = worker_params_;
     WorkerPool::Params next = params;
     bind_worker_params(next);

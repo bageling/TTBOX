@@ -209,6 +209,13 @@ inline void apply_check_result(LicenseStatus& status,
 
     // 仅网络类失败 fail-open → kFallback（本地缓存仍在有效期内）
     // 健壮性②：expire == 0 视为无期限（永久卡）→ 不因"无到期时间"而拒绝 fail-open。
+    //
+    // ★ 2026-09-23 复核：这条**是设计，不是 bug**——`LicenseCard.hpp` 的契约写明
+    //   `"expires_at": 0 // unix 秒；0 = 永久`，OfflineCardClient 与 LicenseDaemon
+    //   的到期判据都按同一口径写，且有用例 `license_sm_zero_expire_is_permanent_and_
+    //   falls_back` 钉着。删掉它会让**永久卡一断网就停功能**，比原来更糟。
+    //   真正的隐患在客户端：expireAt **存在但解析失败**时字段静默留 0，一张订阅卡
+    //   就可能被当成永久卡。已在 TtboxLicenseClient 两处解析点修掉（解析失败即判响应无效）。
     const bool never_expires = (status.expire_unix_ms == 0);
     if (is_network_class_failure(req_ok, out.state) &&
         status.verified_at_ms > 0 &&

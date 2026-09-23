@@ -192,11 +192,11 @@ bool V4L2Capture::open(std::string* error) {
     // （从中间格式过渡到最终 2560x1440），如果格式不稳定就关闭重开。
     const int kMaxRetries = 5;
     for (int retry = 0; retry < kMaxRetries; ++retry) {
-        if (opened_) {
-            // 前一次重试的残余
-            close();
-            opened_ = false;
-        }
+        // 上一次尝试的残余一律先清干净。★ 原来写成 `if (opened_) close();`，
+        // 而 opened_ 只在成功后才为真 ⇒ 上一次**中途失败**留下的 fd/mmap/dma-buf
+        // 永远不会在重试前被释放（close() 内部还有一道 opened_ 早退，已一并去掉）。
+        // close() 现在幂等，无条件调用是安全的。
+        close();
 
         // ---- 1. open ----
         fd_ = ::open(params_.device.c_str(), O_RDWR);
@@ -507,9 +507,13 @@ void V4L2Capture::stop() {
 
 void V4L2Capture::close() {
     stop();
-    if (!opened_) {
-        return;
-    }
+    // ★ 2026-09-23 修：原来是 `if (!opened_) return;`，而 opened_ 只在 open() **末尾**
+    //   才置真 ⇒ open() 中途失败（QUERYBUF / mmap / EXPBUF / REQBUFS，见 :335/:364/:382
+    //   等处的 close() 调用）时这里直接早退，设备 fd、已 mmap 的 plane、已 EXPBUF 的
+    //   dma-buf fd 一个都不释放。叠加 open() 的 5 次 hdmirx 重试 ⇒ 失败一次漏一套，
+    //   CMA/ fd 耗尽后 V4L2 再也打不开设备。
+    //   改成按**实际持有状态**逐项释放：没开过时 buffers 为空、fd_ < 0，逐项判断天然
+    //   是空操作，因此幂等，可以无条件跑。
     // munmap + close dma fds（RAII：BufferRes 析构自动 close dma_fd）
     for (auto& bres : impl_->buffers) {
         for (auto& pres : bres.planes) {
