@@ -40,6 +40,7 @@
 | `TTBOX_CORE_MLOCK` | 开关 | `1`（`0`=关） | `core/src/common/RtSched.cpp`（`mlockall`，采集/推理路径防换页） | 覆盖进程级锁页开关 | RUNTIME | `Application::initialize` |
 | `TTBOX_CORE_CAPTURE_RT_PRIORITY` | SCHED_FIFO 优先级 | `60`（`0`=不启用，上限 `70`） | `core/src/capture/V4L2Capture.cpp`（**在采集线程内部**调用 `RtSched::apply_fifo`） | 覆盖采集线程实时优先级；失败降级为普通调度 | RUNTIME | `V4L2Capture::capture_loop` |
 | `TTBOX_CORE_CAPTURE_CPU` | CPU 编号 | `-1`（不绑，沿用大核掩码 CPU4~7） | `RtSched::apply_fifo` | 覆盖采集线程单核绑定 | RUNTIME | `V4L2Capture::capture_loop` |
+| `TTBOX_IPC_DEBUG` | 开关 | `0`（`1`=开；空串亦视为关） | `core/src/ipc/IpcServer.cpp::ipc_debug_enabled`（`IPCDBG` 宏） | 打开 IPC **服务端**逐事件日志（监听 / accept / 读到多少字节 / 是否回包 / recv 错误码），排查「客户端连接成功却读不到响应」；生产默认关闭、零开销 | RUNTIME | `IpcServer.cpp` 内 `IPCDBG` 各调用点 |
 
 > **已删除（不得复活）**：`TTBOX_CONFIG_PATH`（同义异名，V-05），`TTBOX_MODEL_ROOT`（同义异名，V-04）。
 > 二者**不保留兼容读**（D-ENV-3 / D-ENV-5）。

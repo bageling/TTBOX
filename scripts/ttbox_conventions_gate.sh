@@ -201,6 +201,9 @@ ENV_ALLOW = {
     # ---- Core (C++) ----
     "TTBOX_CONFIG", "TTBOX_IPC_SOCKET", "TTBOX_MODELS_ROOT", "TTBOX_HID_ROOT",
     "TTBOX_LICENSE_SERVER", "TTBOX_APP_KEY", "TTBOX_CLIENT_SECRET",
+    # 2026-09-23 登记：359f0f0（修 SO_RCVTIMEO 平台语义）引入的服务端诊断开关，
+    # 当时漏了登记 —— 出货前跑门禁才暴露（第②项 FAIL）。登记表 §2.1 已同步。
+    "TTBOX_IPC_DEBUG",
     # ---- Web / preview (Python) ----
     "TTBOX_ROOT", "TTBOX_PREFIX", "TTBOX_SCRIPTS_DIR", "TTBOX_PRESETS_DIR",
     "TTBOX_HDMIRX_EDID", "TTBOX_MOTION_PROFILES_DIR", "TTBOX_CONFIG_DIR",
