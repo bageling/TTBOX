@@ -457,7 +457,7 @@ bool V4L2Capture::start(std::string* error) {
     metrics_.capture_frames = 0;
     metrics_.dqbuf_frames = 0;
     metrics_.qbuf_frames = 0;
-    metrics_.dropped_latest_frames = 0;
+    metrics_.superseded_latest_frames = 0;
     metrics_.poll_timeouts = 0;
     metrics_.errors = 0;
     metrics_.capture_fps = 0.0;
@@ -641,7 +641,7 @@ void V4L2Capture::capture_loop() {
         metrics_.last_frame_ts_ms.store(static_cast<int64_t>(frame->info.timestamp_ms));
         auto old = latest_.publish(std::move(frame));
         if (old) {
-            metrics_.dropped_latest_frames.fetch_add(1);
+            metrics_.superseded_latest_frames.fetch_add(1);
             impl_->pending.push_back(PendingRelease{
                 index,
                 plane_lengths_of(old->info.buffer_index),

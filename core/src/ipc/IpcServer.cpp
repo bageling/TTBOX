@@ -1035,7 +1035,7 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     m.set("model_input_note", JsonValue::string(status.metrics.model_input_note));
     m.set("detect_count", JsonValue::number(static_cast<double>(status.metrics.detect_count)));
     m.set("tracks", JsonValue::number(static_cast<double>(status.metrics.tracks)));
-    m.set("dropped_frames", JsonValue::number(static_cast<double>(status.metrics.dropped_frames)));
+    m.set("frames_superseded", JsonValue::number(static_cast<double>(status.metrics.frames_superseded)));
     m.set("frames_total", JsonValue::number(static_cast<double>(status.metrics.frames_total)));
     data.set("metrics", std::move(m));
     return data;

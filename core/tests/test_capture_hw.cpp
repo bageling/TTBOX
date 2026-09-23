@@ -141,7 +141,7 @@ int main() {
     std::printf("capture_frames       = %llu\n", (unsigned long long)m.capture_frames.load());
     std::printf("dqbuf_frames         = %llu\n", (unsigned long long)m.dqbuf_frames.load());
     std::printf("qbuf_frames          = %llu\n", (unsigned long long)m.qbuf_frames.load());
-    std::printf("dropped_latest_frames= %llu\n", (unsigned long long)m.dropped_latest_frames.load());
+    std::printf("superseded_latest    = %llu\n", (unsigned long long)m.superseded_latest_frames.load());
     std::printf("poll_timeouts        = %llu\n", (unsigned long long)m.poll_timeouts.load());
     std::printf("errors               = %llu\n", (unsigned long long)m.errors.load());
     std::printf("capture_fps          = %.2f\n", m.capture_fps.load());

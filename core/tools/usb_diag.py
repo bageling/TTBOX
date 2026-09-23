@@ -45,7 +45,7 @@ try:
         d = data.get("data", {})
         m = d.get("metrics", {})
         for k in ["detect_count","injection_allowed","mouse_control_connected",
-                  "mouse_control_send_count","capture_fps","dropped_frames",
+                  "mouse_control_send_count","capture_fps","frames_superseded",
                   "gated_frames","aim_active","last_mouse_control_dx","last_mouse_control_dy",
                   "last_mouse_control_timestamp_us"]:
             print(f"  {k}: {m.get(k)}")

@@ -67,7 +67,8 @@ struct V4L2Metrics {
     std::atomic<uint64_t> capture_frames{0};        // 成功发布到 latest 的帧数
     std::atomic<uint64_t> dqbuf_frames{0};          // DQBUF 成功次数
     std::atomic<uint64_t> qbuf_frames{0};           // QBUF 归还次数
-    std::atomic<uint64_t> dropped_latest_frames{0}; // 被新帧覆盖丢弃的帧数（latest 语义）
+    // 被更新帧覆盖掉的帧数（latest 语义）。正常行为，不是丢帧；稳态下 ≈ capture_frames。
+    std::atomic<uint64_t> superseded_latest_frames{0};
     std::atomic<uint64_t> poll_timeouts{0};
     std::atomic<uint64_t> errors{0};
     std::atomic<double> capture_fps{0.0};

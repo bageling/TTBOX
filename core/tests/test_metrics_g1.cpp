@@ -37,7 +37,7 @@ int main() {
         PipelineMetrics m{};  // 全 0
         rt.collect_metrics(&m);
         check(m.fps == 0.0 && m.capture_fps == 0.0 && m.frames_total == 0 &&
-                  m.infer_total == 0 && m.dropped_frames == 0,
+                  m.infer_total == 0 && m.frames_superseded == 0,
               "未启动时 metrics 全 0（不伪造）");
         check(m.infer_ms == 0.0 && m.e2e_ms == 0.0 && m.decode_ms == 0.0,
               "未启动时耗时全 0");

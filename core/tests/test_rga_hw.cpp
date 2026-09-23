@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
                 (unsigned long long)vm.capture_frames.load(),
                 (unsigned long long)vm.dqbuf_frames.load(),
                 (unsigned long long)vm.qbuf_frames.load(),
-                (unsigned long long)vm.dropped_latest_frames.load(),
+                (unsigned long long)vm.superseded_latest_frames.load(),
                 (unsigned long long)vm.errors.load(),
                 vm.capture_fps.load());
     const uint64_t f = rm.frames.load();

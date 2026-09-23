@@ -50,7 +50,7 @@ def main() -> int:
         "preview_bytes",
         "preview_frames",
         "preview_dropped",
-        "dropped_frames",
+        "frames_superseded",
         "model_errors",
         "state",
         "runtime_status",

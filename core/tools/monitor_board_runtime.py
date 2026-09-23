@@ -23,7 +23,7 @@ SUMMARY_KEYS = (
     "preview_fps",
     "preview_encode_ms",
     "preview_dropped",
-    "dropped_frames",
+    "frames_superseded",
     "model_errors",
     "state",
     "runtime_status",
@@ -97,7 +97,7 @@ def main() -> int:
         "preview_fps",
         "preview_encode_ms",
         "preview_dropped",
-        "dropped_frames",
+        "frames_superseded",
         "model_errors",
         "temp_max_c",
     ]

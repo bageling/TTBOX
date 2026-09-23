@@ -36,7 +36,10 @@ struct PipelineMetrics {
     double decode_p50_ms = 0.0, decode_p95_ms = 0.0, decode_p99_ms = 0.0;
     size_t detect_count = 0;   // 最近一帧检测目标数（mailbox 最新任务）
     uint32_t tracks = 0;       // 跟踪中的目标数（detection.tracks 同语义）
-    size_t dropped_frames = 0; // 丢弃帧数（latest-frame 语义，被新帧覆盖）
+    // 被更新帧覆盖掉的帧数（latest-frame 语义）。
+    // 注意：这是"最新帧胜出"的正常行为，**不是丢帧**——稳态下它几乎等于 frames_total。
+    // 原字段名 dropped_frames 会让人误判成丢帧，故改名。
+    size_t frames_superseded = 0;
     uint64_t frames_total = 0; // 已发布帧总数（capture_frames）
     uint64_t infer_total = 0;  // 推理完成帧总数（worker published 累计）
     uint64_t last_frame = 0;        // 最近一次 AimThread 消费帧号（诊断）

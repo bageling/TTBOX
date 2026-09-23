@@ -318,7 +318,7 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
     if (capture_) {
         const auto& cm = capture_->metrics();
         out->frames_total = cm.capture_frames.load();
-        out->dropped_frames = cm.dropped_latest_frames.load();
+        out->frames_superseded = cm.superseded_latest_frames.load();
         out->capture_fps = cm.capture_fps.load();
         out->last_dequeued_count = capture_->in_use_count();
         out->buffer_count = capture_->buffer_count();
