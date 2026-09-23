@@ -5395,6 +5395,37 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                 </div>
               </div>
 
+              <!-- P-ZC-1 性能：采集层硬件裁剪 + 零拷贝 DMA 直入。
+                   与上面的「截取尺寸」不是一回事：上面是帧采到之后再裁一块送推理，
+                   这里是让 V4L2 采集时就只出这一块，决定 RGA 要不要缩放。 -->
+              <div class="slider-field crop-size-field">
+                <div class="label-row">
+                  <label for="video_crop_size">采集截取尺寸</label>
+                  <input id="video_crop_size" data-config class="value-input" type="number" min="0" max="3840" step="1" inputmode="numeric">
+                </div>
+                <input id="video_crop_size_range" class="crop-size-preset-range" type="range" min="0" max="4" step="1" aria-label="采集截取尺寸预设">
+                <div class="crop-size-presets" aria-hidden="true">
+                  <span>0</span>
+                  <span>256</span>
+                  <span>320</span>
+                  <span>640</span>
+                  <span>1080</span>
+                </div>
+                <p class="field-hint">
+                  0 = 不裁剪（采集全帧，RGA 负责缩放）。与模型输入同尺寸时 RGA 不用缩放，最省。改动需重启生效。
+                </p>
+              </div>
+
+              <div class="slider-field">
+                <div class="label-row">
+                  <label for="video_zero_copy_input">零拷贝 DMA 直入</label>
+                  <input id="video_zero_copy_input" data-config type="checkbox">
+                </div>
+                <p class="field-hint">
+                  RGA 输出的 DMA-BUF 直接喂给 NPU 输入，省掉每帧 CPU 拷贝。模型需 INT8 + NHWC，不满足会自动回退。
+                </p>
+              </div>
+
               <div class="slider-field">
                 <div class="label-row">
                   <label for="range_factor_range">FOV 半径</label>
@@ -6362,6 +6393,8 @@ const RANGE_BINDINGS = [
 ];
 const NUMERIC_RANGE_LIMITS = {
   capture_crop_size: [CROP_SIZE_MIN, CROP_SIZE_MAX],
+  // P-ZC-1：0 = 不裁剪（采集全帧），故下界是 0 而不是 CROP_SIZE_MIN
+  video_crop_size: [0, 3840],
   sens: [0, 5],
   aim_profile_sensitivity: [0.1, 3],
   aim_profile_fov_scale: [AIM_PROFILE_FOV_SCALE_MIN, AIM_PROFILE_FOV_SCALE_MAX],
@@ -6413,6 +6446,10 @@ const NUMERIC_RANGE_LIMITS = {
 };
 const OVERVIEW_DEFAULTS = {
   capture_crop_size: 320,
+  // P-ZC-1：默认 0（不裁剪）与 true（零拷贝）—— 前者保守不动既有行为，
+  // 后者是本项存在的理由（老机器全局配置里是 false 且 OTA 覆盖不到）。
+  video_crop_size: 0,
+  video_zero_copy_input: true,
   range_factor: 1,
   capture_crop_offset_x: 0,
   capture_crop_offset_y: 0,
@@ -8010,6 +8047,36 @@ function getAimReferenceOffsetLimit(cropSize = getCropSize(state.config && state
   return Math.floor(normalizeCropSize(cropSize) / 2);
 }
 
+// ---- P-ZC-1 采集截取尺寸（video.crop_size）：数值输入 ↔ 预设滑杆 ----
+//   与 capture_crop_size 的区别写在 HTML 的 field-hint 里：这里是让 V4L2 采集时
+//   就只出这一块，0 = 不裁剪。所以合法下界是 0，不能套用 CROP_SIZE_MIN(192)。
+const VIDEO_CROP_SIZE_OPTIONS = [0, 256, 320, 640, 1080];
+
+function nearestVideoCropSizeOptionIndex(value) {
+  const target = Number(value) || 0;
+  let closestIndex = 0;
+  let closestDelta = Infinity;
+  VIDEO_CROP_SIZE_OPTIONS.forEach((candidate, index) => {
+    const delta = Math.abs(candidate - target);
+    if (delta < closestDelta) {
+      closestDelta = delta;
+      closestIndex = index;
+    }
+  });
+  return closestIndex;
+}
+
+function syncVideoCropSizeRange(value) {
+  const range = $("video_crop_size_range");
+  if (!range) {
+    return;
+  }
+  range.min = "0";
+  range.max = String(Math.max(0, VIDEO_CROP_SIZE_OPTIONS.length - 1));
+  range.step = "1";
+  range.value = String(nearestVideoCropSizeOptionIndex(value));
+}
+
 function dynamicNumericRangeLimitsForId(id) {
   if (id === "capture_crop_offset_x" || id === "capture_crop_offset_y") {
     return [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX];
@@ -8156,6 +8223,16 @@ function enhanceNumericRangeControls() {
       }
       return;
     }
+    // P-ZC-1：采集截取尺寸同样是"档位滑杆"（0/256/320/640/1080），
+    // 不能走下面 0..3840 的连续映射，否则档位对不上。
+    if (input.id === "video_crop_size") {
+      syncVideoCropSizeRange(input.value || OVERVIEW_DEFAULTS.video_crop_size);
+      const presetRange = $("video_crop_size_range");
+      if (presetRange) {
+        enableThumbOnlyRangeInput(presetRange);
+      }
+      return;
+    }
 
     const rangeId = `${input.id}_range`;
     let rangeInput = $(rangeId);
@@ -8234,6 +8311,36 @@ function initRangeBindings() {
       updateDynamicOffsetControlLimits({ clampValues: true });
       updateAimRangeOverlay();
     });
+  }
+  // P-ZC-1：采集截取尺寸的档位滑杆 ↔ 数值输入（照上面 capture_crop_size 的模式）
+  {
+    const videoCropInput = $("video_crop_size");
+    const videoCropRange = $("video_crop_size_range");
+    if (videoCropInput && videoCropRange) {
+      enableThumbOnlyRangeInput(videoCropRange);
+      const applyIndex = (rawIndex) => {
+        const index = Math.round(clamp(Number(rawIndex), 0, VIDEO_CROP_SIZE_OPTIONS.length - 1));
+        const size = VIDEO_CROP_SIZE_OPTIONS[index] ?? OVERVIEW_DEFAULTS.video_crop_size;
+        videoCropInput.value = formatControlValue(videoCropInput, size);
+        videoCropRange.value = String(index);
+      };
+      videoCropRange.addEventListener("input", () => applyIndex(videoCropRange.value));
+      videoCropRange.addEventListener("change", () => {
+        applyIndex(videoCropRange.value);
+        requestConfigApply(70);
+      });
+      videoCropInput.addEventListener("input", () => {
+        if (videoCropInput.value !== "" && Number.isFinite(Number(videoCropInput.value))) {
+          syncVideoCropSizeRange(videoCropInput.value);
+        }
+      });
+      videoCropInput.addEventListener("change", () => {
+        if (videoCropInput.value !== "") {
+          clampNumberInputToLimits(videoCropInput);
+          syncVideoCropSizeRange(videoCropInput.value);
+        }
+      });
+    }
   }
   RANGE_BINDINGS.forEach(([numberId, rangeId]) => {
     const numberInput = $(numberId);
@@ -9777,6 +9884,13 @@ function populateForm(config) {
   setCheckbox("capture_nv12_uv_swapped", capture.nv12_uv_swapped);
   setCheckbox("capture_nv12_bt709", capture.nv12_bt709);
   setCheckbox("capture_nv12_full_range", capture.nv12_full_range);
+  // P-ZC-1：采集层硬件裁剪 + 零拷贝开关（与上面的 capture.* 不是一回事）
+  {
+    const video = config.video || {};
+    setValue("video_crop_size", video.crop_size ?? 0);
+    syncVideoCropSizeRange(video.crop_size ?? 0);
+    setCheckbox("video_zero_copy_input", video.zero_copy_input !== false);
+  }
   setValue("video_detection_confidence", config.video_detection_confidence);
   setValue("video_detection_iou", config.video_detection_iou);
   setValue("sens", config.sens);
@@ -10071,6 +10185,11 @@ function collectConfig() {
       nv12_uv_swapped: getCheckbox("capture_nv12_uv_swapped"),
       nv12_bt709: getCheckbox("capture_nv12_bt709"),
       nv12_full_range: getCheckbox("capture_nv12_full_range"),
+    },
+    // P-ZC-1：采集层硬件裁剪 + 零拷贝开关（与上面的 capture.* 不是一回事）
+    video: {
+      crop_size: getNumberInRange("video_crop_size", 0),
+      zero_copy_input: getCheckbox("video_zero_copy_input"),
     },
     latency: {
       mode: previousLatency.mode || "ultra",

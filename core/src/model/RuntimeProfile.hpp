@@ -88,6 +88,33 @@ struct PreviewProfile {
 };
 
 // ---------------------------------------------------------------------------
+// Video：采集层（V4L2 硬件裁剪）与 NPU 输入通路（P-ZC-1）
+//
+//   与 CaptureProfile 不是一回事，勿混：
+//     · capture.*  = AI 推理 ROI：帧已经采到了，再在 CPU/RGA 上裁一块送推理（软件裁剪）。
+//     · video.crop_* = 让 V4L2 **采集时就只出这一块**（VIDIOC_S_SELECTION，硬件裁剪），
+//       它直接决定 RGA 要不要缩放 —— crop 与模型输入同尺寸时 RGA 只剩格式转换。
+//
+//   crop_* = 0 ⇒ 沿用全局配置（config/default.json 的 crop_width/crop_height）。
+//   之所以留这个"未设置"态：运行配置是客户层单文件、OTA 不覆盖（见 P-ZC-1），
+//   若这里给死值，老机器升级后反而会被我们悄悄改掉采集尺寸。0 = 不动它。
+//
+//   zero_copy_input：对应全局键 rknn_external_dma_input。默认 true —— 本项的
+//   存在意义就是让已装机设备（全局配置里写着 false）能在面板上打开零拷贝。
+// ---------------------------------------------------------------------------
+struct VideoProfile {
+    uint32_t crop_width = 0;       // 0 = 沿用全局配置
+    uint32_t crop_height = 0;      // 0 = 沿用全局配置
+    bool zero_copy_input = true;   // RGA 输出的 DMA-BUF 直入 NPU 输入
+    // 三态：false = profile 里没有这个键（老配置），此时**沿用全局配置**，
+    //       不拿上面的默认值去覆盖用户机器上的显式 false。
+    //       只有用户在面板上真的拨过这个开关，才置 true 并以其值为准。
+    bool zero_copy_input_set = false;
+
+    bool using_global_crop() const { return crop_width == 0 || crop_height == 0; }
+};
+
+// ---------------------------------------------------------------------------
 // RuntimeProfile：完整用户配置（模型无关）
 // ---------------------------------------------------------------------------
 struct RuntimeProfile {
@@ -96,6 +123,7 @@ struct RuntimeProfile {
     InferenceProfile inference;
     FovProfile fov;
     PreviewProfile preview;     // Web 实时画面尺寸
+    VideoProfile video;         // P-ZC-1：采集层裁剪 + 零拷贝开关
     aim::MouseProfile mouse;    // A10：鼠标 AI 注入配置（与模型彻底分离）
     DetectionGeometryFilterConfig geometry_filter;
 

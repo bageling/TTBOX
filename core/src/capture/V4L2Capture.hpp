@@ -74,6 +74,9 @@ public:
         uint32_t crop_y = 0;
         uint32_t crop_width = 0;
         uint32_t crop_height = 0;
+        // true = 忽略 crop_x/crop_y，按实际帧尺寸把裁剪窗居中（自瞄画面的语义就是中心）。
+        // 居中要在 open() 里拿到 G_FMT 之后才算得出，所以放在这里而不是让调用方填。
+        bool crop_center = true;
     };
 
     // 实际协商格式（open 后有效，不强制改分辨率）

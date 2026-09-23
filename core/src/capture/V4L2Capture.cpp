@@ -246,6 +246,15 @@ bool V4L2Capture::open(std::string* error) {
             sel.r.top = static_cast<__s32>(params_.crop_y);
             sel.r.width = params_.crop_width;
             sel.r.height = params_.crop_height;
+            // 居中：帧尺寸只有到这一步（G_FMT 之后）才知道，所以不能让调用方填。
+            if (params_.crop_center) {
+                const uint32_t fw = fmt.fmt.pix_mp.width;
+                const uint32_t fh = fmt.fmt.pix_mp.height;
+                sel.r.left = fw > params_.crop_width
+                                 ? static_cast<__s32>((fw - params_.crop_width) / 2) : 0;
+                sel.r.top = fh > params_.crop_height
+                                 ? static_cast<__s32>((fh - params_.crop_height) / 2) : 0;
+            }
             if (ioctl_call(fd_, VIDIOC_S_SELECTION, &sel) == 0) {
                 format_.selection_supported = true;
                 format_.selection_applied = true;

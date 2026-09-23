@@ -261,6 +261,31 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         static_cast<uint32_t>(config_.get_int("capture_buffers", 8));
     out_params.capture.poll_timeout_ms =
         config_.get_int("capture_poll_timeout_ms", 1000);
+    // P-ZC-1 采集层硬件裁剪（VIDIOC_S_SELECTION）。
+    // ★ 这里补的是一条真漏掉的接线：此前 config 的 crop_width/crop_height 只喂给了
+    //   预览（out_params.preview.crop_*），V4L2Capture::Params::crop_* 从来没被赋值，
+    //   于是 open() 里那段 Selection 代码整段被跳过 —— 采集一直是全帧（2560×1440）。
+    //   后果有两个：① RGA 每帧要把 3.7M 像素缩到模型输入（面积约 56×），这是
+    //   resize_ms 的大头；② 16:9 硬压成 1:1，画面变形，检测框坐标跟着歪。
+    //   接上后按配置只采集中心这一块，两个问题一起消失。
+    //   取值优先级：runtime_profile.video（面板设过） > 全局 config > 0（不裁剪）。
+    {
+        uint32_t crop_w = static_cast<uint32_t>(config_.get_int("crop_width", 0));
+        uint32_t crop_h = static_cast<uint32_t>(config_.get_int("crop_height", 0));
+        if (auto snap = runtime_config_.snapshot(); snap && !snap->video.using_global_crop()) {
+            crop_w = snap->video.crop_width;
+            crop_h = snap->video.crop_height;
+        }
+        out_params.capture.crop_width = crop_w;
+        out_params.capture.crop_height = crop_h;
+        out_params.capture.crop_center = true;  // 自瞄画面语义就是中心，居中在 open() 内按帧尺寸算
+        if (crop_w > 0 && crop_h > 0) {
+            TTBOX_LOG_INFO("采集层硬件裁剪已启用: " + std::to_string(crop_w) + "x" +
+                           std::to_string(crop_h) + "（居中）");
+        } else {
+            TTBOX_LOG_INFO("采集层硬件裁剪未启用（crop=0）⇒ 采集全帧，RGA 负责缩放");
+        }
+    }
 
     out_params.workers.model_path = config_.get_string("model_path", "");
     // ★ M2.03 特性感知：仅当 gates.inference 才解析/校验模型；关闭时跳过（"仅采集"可起）。
@@ -327,8 +352,15 @@ bool Application::build_runtime_params(CoreRuntime::Params& out_params,
         config_.get_bool("rknn_disable_cache_flush", false);
     // 实验开关：RGA 输出 DMA-BUF 直绑 RKNN 输入，省掉每帧 CPU memcpy。
     // 默认关闭；开启后 WorkerPool 会在 fd 变化时重新绑定，失败自动回退 CPU 拷贝。
+    // P-ZC-1：面板可在「性能」里改（runtime_profile.video.zero_copy_input）。
+    //   之所以要这个覆盖层：运行配置是客户层单文件、OTA 不覆盖（见 P-ZC-1），
+    //   老机器升级到 1.5.33 后这里的全局值仍是 false，零拷贝永远打不开。
+    //   只有 profile 里**真的写过**这个键才覆盖（zero_copy_input_set）。
     out_params.workers.external_dma_input =
         config_.get_bool("rknn_external_dma_input", false);
+    if (auto snap = runtime_config_.snapshot(); snap && snap->video.zero_copy_input_set) {
+        out_params.workers.external_dma_input = snap->video.zero_copy_input;
+    }
     if (out_params.workers.out_w == 0) {
         out_params.workers.out_w =
             static_cast<uint32_t>(config_.get_int("model_input_width", 640));

@@ -204,6 +204,16 @@ bool RuntimeProfile::validate(std::string* error) const {
             return false;
         }
     }
+    // P-ZC-1 采集层裁剪：0 = 沿用全局配置（合法）；非零走与 capture 同一道
+    // 退化值防线，拦住 1×1 这种会把采集流做成 1 像素的配置。
+    for (const uint32_t v : {video.crop_width, video.crop_height}) {
+        if (v != 0 && (v < kMinCaptureRoiPx || v > kMaxCaptureRoiPx)) {
+            if (error) *error = "video 采集截取尺寸非法: " + std::to_string(v) +
+                                "（0=沿用全局配置，或需在 " + std::to_string(kMinCaptureRoiPx) +
+                                "~" + std::to_string(kMaxCaptureRoiPx) + " 之间）";
+            return false;
+        }
+    }
     if (preview.width == 0 || preview.height == 0 ||
         preview.width > 3840 || preview.height > 2160 ||
         preview.roi_w == 0 || preview.roi_h == 0) {
@@ -232,6 +242,13 @@ JsonValue RuntimeProfile::to_json() const {
     inf.set("class_filter", std::move(cf));
     inf.set("max_detections", JsonValue::number(static_cast<double>(inference.max_detections)));
     root.set("inference", std::move(inf));
+
+    // P-ZC-1：采集层裁剪 + 零拷贝开关（缺段/缺键 = 沿用全局配置，老机器升级行为不变）
+    JsonValue vid = JsonValue::object();
+    vid.set("crop_width", JsonValue::number(static_cast<double>(video.crop_width)));
+    vid.set("crop_height", JsonValue::number(static_cast<double>(video.crop_height)));
+    vid.set("zero_copy_input", JsonValue::boolean(video.zero_copy_input));
+    root.set("video", std::move(vid));
 
     JsonValue gf = JsonValue::object();
     gf.set("enabled", JsonValue::boolean(geometry_filter.enabled));
@@ -612,6 +629,20 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.preview.roi_h = static_cast<uint32_t>(std::max<int64_t>(obj_int(*pv, "roi_h", 640), 1));
         p.preview.center_crop = obj_bool(*pv, "center_crop", true);
         p.preview.fps = static_cast<uint32_t>(std::max<int64_t>(obj_int(*pv, "fps", 0), 0));
+    }
+    // P-ZC-1：缺 video 段时保持默认值（crop=0 沿用全局、zero_copy_input=true）。
+    // 注意 zero_copy_input 的默认是 true：这一项本就是为了让已装机设备
+    // （全局配置里 rknn_external_dma_input:false 且 OTA 覆盖不到）能在面板打开零拷贝。
+    // 但"拿来即用"的前提是 profile 里**真的有**这个键 —— 老配置没有 video 段时，
+    // 仍以全局配置为准，见 Application::apply_video_profile 的三态处理。
+    p.video.zero_copy_input_set = false;
+    if (const JsonValue* vd = v.find("video"); vd && vd->is_object()) {
+        p.video.crop_width = static_cast<uint32_t>(std::max<int64_t>(obj_int(*vd, "crop_width", 0), 0));
+        p.video.crop_height = static_cast<uint32_t>(std::max<int64_t>(obj_int(*vd, "crop_height", 0), 0));
+        if (vd->find("zero_copy_input")) {
+            p.video.zero_copy_input = obj_bool(*vd, "zero_copy_input", true);
+            p.video.zero_copy_input_set = true;
+        }
     }
     return p;
 }
