@@ -9,6 +9,7 @@ namespace ttbox::core {
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <future>
 #include <thread>
 
 #include "common/Logger.hpp"
@@ -152,13 +153,47 @@ bool InferenceWorker::start(const Params& params, std::string* error) {
         if (auto profile = params.runtime_config->snapshot()) geometry_filter_.set_config(profile->geometry_filter);
     }
 
+    // ---- 预热：在起轮询线程之前把 NPU 上下文初始化掉 ----
+    // 放在这里而不是等第一帧：首帧推理要现初始化 NPU 上下文，慢一个量级，
+    // 用户感知就是「点开始后要等一会儿才出结果」。预热后统计会被清空。
+    if (params.warmup_rounds > 0) {
+        std::string werr2;
+        if (!engine_->warmup(params.warmup_rounds, &werr2)) {
+            // 预热失败不算致命：NPU 上下文会在首帧自然初始化，只是首帧仍慢。
+            TTBOX_LOG_WARN("worker[" + std::to_string(id_) + "] 预热失败（不致命）: " + werr2);
+        }
+    }
+
     TTBOX_LOG_INFO("worker[" + std::to_string(id_) + "] 就绪: core_mask=" +
                    std::to_string(params.core_mask) + " 模型加载 " +
                    std::to_string(engine_->load_ms()) + "ms");
 
+    // 预加载（deferred_start）时只加载+预热，不拉起轮询线程；
+    // 等真实采集尺寸确定后由 start_loop() 补齐。
+    if (!params.deferred_start) {
+        running_.store(true);
+        thread_ = std::thread(&InferenceWorker::loop, this);
+    }
+    return true;
+}
+
+bool InferenceWorker::start_loop(std::string* error) {
+    if (running_.load()) {
+        return true;
+    }
+    if (!engine_) {
+        if (error) *error = "引擎未初始化（未预加载？）";
+        return false;
+    }
     running_.store(true);
     thread_ = std::thread(&InferenceWorker::loop, this);
     return true;
+}
+
+void InferenceWorker::set_frame_size(uint32_t w, uint32_t h) {
+    params_.frame_w = w;
+    params_.frame_h = h;
+    if (decoder_) decoder_->set_frame(w, h);
 }
 
 void InferenceWorker::stop() {
@@ -431,16 +466,18 @@ void InferenceWorker::loop() {
 // WorkerPool
 // ---------------------------------------------------------------------------
 
-bool WorkerPool::start(const Params& params, std::string* error) {
-    if (!workers_.empty()) {
-        if (error) *error = "WorkerPool 已在运行";
-        return false;
-    }
-    if (params.worker_cores.empty()) {
-        if (error) *error = "worker_cores 为空（worker 数量必须 ≥1）";
-        return false;
-    }
+namespace {
+
+// 并行创建并（按需）启动 N 个 worker。
+// 并行理由：每个 worker 都要 rknn_init 一遍模型（N 个 = N 次加载），串行时
+// 「点开始」后的等待 = N × 单次加载耗时；init/预热互不依赖，可以并发。
+// deferred=true 时只做加载+预热，不拉起轮询线程（预加载）。
+bool create_workers(const WorkerPool::Params& params, bool deferred,
+                    std::vector<std::unique_ptr<InferenceWorker>>& created,
+                    std::string* error) {
     const size_t n = params.worker_cores.size();
+    std::vector<std::future<std::pair<bool, std::string>>> futs;
+    futs.reserve(n);
     for (size_t i = 0; i < n; ++i) {
         auto worker = std::make_unique<InferenceWorker>();
         InferenceWorker::Params wp;
@@ -450,6 +487,8 @@ bool WorkerPool::start(const Params& params, std::string* error) {
         wp.pass_through = params.pass_through;
         wp.external_dma_input = params.external_dma_input;
         wp.disable_cache_flush = params.disable_cache_flush;
+        wp.warmup_rounds = params.warmup_rounds;
+        wp.deferred_start = deferred;
         wp.out_w = params.out_w;
         wp.out_h = params.out_h;
         wp.latest = params.latest;
@@ -462,15 +501,70 @@ bool WorkerPool::start(const Params& params, std::string* error) {
         wp.adapter = params.adapter;
         wp.runtime_config = params.runtime_config;
         wp.aim_mailbox = params.aim_mailbox;
-        std::string werr;
-        if (!worker->start(wp, &werr)) {
-            stop();
-            if (error) *error = "worker[" + std::to_string(i) + "] 启动失败: " + werr;
+        InferenceWorker* raw = worker.get();
+        created.push_back(std::move(worker));
+        futs.push_back(std::async(std::launch::async, [raw, wp]() -> std::pair<bool, std::string> {
+            std::string werr;
+            const bool ok = raw->start(wp, &werr);
+            return {ok, werr};
+        }));
+    }
+    for (size_t i = 0; i < n; ++i) {
+        auto r = futs[i].get();
+        if (!r.first) {
+            for (auto& w : created) {
+                if (w) w->stop();
+            }
+            created.clear();
+            if (error) *error = "worker[" + std::to_string(i) + "] 启动失败: " + r.second;
             return false;
         }
-        workers_.push_back(std::move(worker));
     }
     return true;
+}
+
+}  // namespace
+
+bool WorkerPool::start(const Params& params, std::string* error) {
+    if (!workers_.empty()) {
+        if (error) *error = "WorkerPool 已在运行";
+        return false;
+    }
+    if (params.worker_cores.empty()) {
+        if (error) *error = "worker_cores 为空（worker 数量必须 ≥1）";
+        return false;
+    }
+    return create_workers(params, false, workers_, error);
+}
+
+bool WorkerPool::preload(const Params& params, std::string* error) {
+    if (!workers_.empty()) {
+        if (error) *error = "WorkerPool 已在运行";
+        return false;
+    }
+    if (params.worker_cores.empty()) {
+        if (error) *error = "worker_cores 为空（worker 数量必须 ≥1）";
+        return false;
+    }
+    return create_workers(params, true, workers_, error);
+}
+
+bool WorkerPool::start_loops(std::string* error) {
+    for (auto& w : workers_) {
+        std::string e;
+        if (!w || !w->start_loop(&e)) {
+            stop();
+            if (error) *error = "worker 轮询线程启动失败: " + e;
+            return false;
+        }
+    }
+    return true;
+}
+
+void WorkerPool::set_frame_size(uint32_t w, uint32_t h) {
+    for (auto& x : workers_) {
+        if (x) x->set_frame_size(w, h);
+    }
 }
 
 void WorkerPool::stop() {

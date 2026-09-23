@@ -68,6 +68,9 @@ public:
     bool start(std::string* error=nullptr); void stop(); bool running() const { return running_.load(); }
     // Hot model switch: only rebuild RKNN worker pool while capture/preview/aim stay alive.
     bool reload_workers(const WorkerPool::Params& params, std::string* error=nullptr);
+    // 预加载：并行完成模型加载 + 预热，但不拉起轮询线程（等 start() 时补上）。
+    // 目的：消除「点开始后要等一会儿才出结果」里的模型加载部分。失败不致命。
+    bool preload_workers(std::string* error=nullptr);
     // ★ M2.03：会话边界刷新特性 gate + 预览降级参数（授权变化后下次 start() 生效）。
     //   · gates        = Application 依 LicenseGate 快照推导（唯一真相源；本层只执行不推导）。
     //   · brand_upper  = 卡内 ui_brand 的大写形（应用层从 Gate 快照取；用于水印文本）。
@@ -103,6 +106,7 @@ private:
     std::unique_ptr<WorkerPool> workers_;
     RuntimeConfig* runtime_config_ = nullptr;
     WorkerPool::Params worker_params_{};
+    bool workers_preloaded_ = false;  // 模型已加载+预热，start() 时只需拉起轮询线程
     PreviewModule::Params preview_params_{};
     bool pipeline_debug_enabled_ = false;      // 第13阶段：链路诊断
     uint32_t pipeline_debug_interval_ = 60;

@@ -870,6 +870,17 @@ int Application::initialize(int argc, char** argv) {
     }
     TTBOX_LOG_INFO("CoreRuntime 初始化完成 (workers=" +
                    std::to_string(rt_params.workers.worker_cores.size()) + ")");
+
+    // ---- 推理预加载（可选）：把「模型加载 + 预热」提前到开机 ----
+    // 默认关闭：预加载会让 NPU 和内存常驻占用，且采集未起时 worker 空转。
+    // 打开后「点开始」只需拉起轮询线程（见 CoreRuntime::preload_workers）。
+    // 失败只告警：不影响后续正常 start()。
+    if (config_.get_bool("inference_preload", false)) {
+        std::string plerr;
+        if (!core_runtime_->preload_workers(&plerr)) {
+            TTBOX_LOG_WARN("推理预加载失败（不影响后续启动）: " + plerr);
+        }
+    }
     return 0;
 }
 

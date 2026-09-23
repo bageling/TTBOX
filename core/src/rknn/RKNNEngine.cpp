@@ -424,6 +424,42 @@ void RKNNEngine::reset_stats() {
     stats_.total.clear();
 }
 
+// ---- 预热：加载后先空跑几帧，把 NPU 上下文/权重常驻这一步提前做掉 ----
+// 为什么必要：首帧推理要初始化 NPU 上下文，实测比稳态慢一个量级，用户感知就是
+// 「点开始后要等一会儿才出结果」。预热用全零输入跑 rounds 次，然后 reset_stats()
+// 把这些样本清掉，避免污染后续的 infer_ms / e2e_ms 统计（存在性 ≠ 生效：只跑不算，
+// 得确认统计里看不到预热的影响）。
+bool RKNNEngine::warmup(int rounds, std::string* error) {
+    if (!inited_) {
+        if (error) *error = "引擎未初始化";
+        return false;
+    }
+    if (rounds <= 0) {
+        return true;
+    }
+    const size_t bytes = info_.input_size > 0 ? static_cast<size_t>(info_.input_size)
+                                              : input_memory_size();
+    if (bytes == 0) {
+        if (error) *error = "预热失败：无法确定输入字节数";
+        return false;
+    }
+    std::vector<uint8_t> zeros(bytes, 0);
+    const auto t0 = clock::now();
+    for (int i = 0; i < rounds; ++i) {
+        std::vector<std::vector<float>> outs;
+        std::string e;
+        if (!infer(zeros.data(), bytes, outs, &e)) {
+            if (error) *error = "预热第 " + std::to_string(i + 1) + " 次失败: " + e;
+            return false;
+        }
+    }
+    reset_stats();
+    const double ms = std::chrono::duration<double, std::milli>(clock::now() - t0).count();
+    TTBOX_LOG_INFO("RKNNEngine 预热完成: " + std::to_string(rounds) + " 次 / " +
+                   std::to_string(static_cast<int>(ms)) + " ms（已清空统计，不计入 infer_ms）");
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // 推理
 // ---------------------------------------------------------------------------

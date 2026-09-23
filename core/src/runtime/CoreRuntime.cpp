@@ -46,6 +46,27 @@ bool CoreRuntime::initialize(const Params& p, std::string* error) {
     return true;
 }
 
+bool CoreRuntime::preload_workers(std::string* error) {
+    if (!workers_) {
+        if (error) *error = "WorkerPool 未初始化";
+        return false;
+    }
+    if (workers_preloaded_) return true;
+    if (worker_params_.worker_cores.empty()) {
+        if (error) *error = "worker_cores 为空（worker 数量必须 ≥1）";
+        return false;
+    }
+    worker_params_.latest = capture_ ? capture_->latest_frame_ref() : nullptr;
+    worker_params_.aim_mailbox = mailbox_.get();
+    worker_params_.runtime_config = runtime_config_;
+    if (!workers_->preload(worker_params_, error)) {
+        return false;
+    }
+    workers_preloaded_ = true;
+    TTBOX_LOG_INFO("推理预加载完成：模型已加载并预热，等待采集启动后拉起轮询线程");
+    return true;
+}
+
 bool CoreRuntime::start(std::string* error) {
     if (!capture_ || !workers_ || !mailbox_) {
         if (error) *error = "内部对象未初始化";
@@ -109,7 +130,15 @@ bool CoreRuntime::start(std::string* error) {
         const auto& fmt = capture_->format();
         worker_params_.frame_w = fmt.width;
         worker_params_.frame_h = fmt.height;
-        if (!workers_->start(worker_params_, error)) {
+        bool workers_ok = false;
+        if (workers_preloaded_) {
+            // 预加载发生在采集之前，那时还不知道真实帧尺寸；这里补刷新再拉起线程。
+            workers_->set_frame_size(fmt.width, fmt.height);
+            workers_ok = workers_->start_loops(error);
+        } else {
+            workers_ok = workers_->start(worker_params_, error);
+        }
+        if (!workers_ok) {
             rollback(error);
             return false;
         }
@@ -272,6 +301,7 @@ void CoreRuntime::stop() {
     aim_thread_.stop();
     mouse_reader_.stop();
     if (workers_) workers_->stop();
+    workers_preloaded_ = false;
     if (capture_) {
         capture_->stop();
         capture_->close();

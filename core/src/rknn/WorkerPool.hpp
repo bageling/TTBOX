@@ -79,6 +79,8 @@ public:
         bool pass_through = false;  // 生产由 config 开启；true=零拷贝+pass_through，
                                     // INT8/NHWC 时 WorkerPool 必须做 uint8→int8 XOR 转换
         bool disable_cache_flush = false;  // 跳过 CPU↔NPU 缓存同步，降低推理延迟
+        int warmup_rounds = 3;   // 加载后空跑次数（0=不预热）；消除「点开始后首帧慢」
+        bool deferred_start = false;  // true=只加载/预热，不拉起轮询线程（预加载用）
         bool external_dma_input = false; // 实验开关：RGA DMA-BUF 直绑 RKNN，默认关闭
         uint32_t out_w = 0;         // 模型输入尺寸（config）
         uint32_t out_h = 0;
@@ -101,6 +103,9 @@ public:
     bool start(const Params& params, std::string* error = nullptr);
     void stop();
     bool running() const { return running_.load(); }
+    // 预加载（deferred_start=true）后只差这一步：拉起轮询线程。
+    bool start_loop(std::string* error = nullptr);
+    void set_frame_size(uint32_t w, uint32_t h);
     const WorkerStats& stats() const { return stats_; }
     int id() const { return id_; }
 
@@ -139,6 +144,7 @@ public:
                                         // INT8/NHWC 时 WorkerPool 负责 uint8→int8 XOR
         bool external_dma_input = false; // 实验开关：RGA DMA-BUF 直绑 RKNN，默认关闭
         bool disable_cache_flush = false;  // 跳过 CPU↔NPU 缓存同步，降低推理延迟
+        int warmup_rounds = 3;       // 透传给每个 worker 的预热次数（0=不预热）
         uint32_t out_w = 0;
         uint32_t out_h = 0;
         LatestFrame* latest = nullptr;
@@ -158,6 +164,11 @@ public:
 
     // 创建并启动 N 个 worker（worker_cores.size() 决定数量）
     bool start(const Params& params, std::string* error = nullptr);
+    // 预加载：并行完成「模型加载 + 预热」，但不拉起轮询线程。
+    // 之后用 start_loops() 补上线程；用 set_frame_size() 刷新真实采集尺寸。
+    bool preload(const Params& params, std::string* error = nullptr);
+    bool start_loops(std::string* error = nullptr);
+    void set_frame_size(uint32_t w, uint32_t h);
     void stop();
 
     size_t worker_count() const { return workers_.size(); }

@@ -106,6 +106,9 @@ public:
     const RknnModelInfo& info() const { return info_; }
     const RknnStageStats& stats() const { return stats_; }
     void reset_stats();  // 清空分阶段统计（预热后调用）
+    // 预热：加载后空跑 rounds 次（全零输入），把 NPU 上下文初始化提前做掉；
+    // 完成后自动 reset_stats()，预热样本不计入 infer_ms/e2e_ms。rounds<=0 = 不预热。
+    bool warmup(int rounds = 3, std::string* error = nullptr);
     double load_ms() const { return load_ms_; }          // 模型加载 + init 耗时（ms）
 
     // 输入搬运模式。写入点共三处，全部列举（禁再声称"唯一写入点"）：

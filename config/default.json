@@ -12,7 +12,7 @@
   "process_width": 0,
   "process_height": 0,
   "resize_method": "auto",
-  "rknn_external_dma_input": false,
+  "rknn_external_dma_input": true,
   "capture_cpu_affinity": "",
   "capture_buffers": 8,
   "aim_axis_x_scale": 1.0,
