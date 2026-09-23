@@ -239,7 +239,10 @@ do_verify "$PFX_F" 1.0.0 > "$WORK/a26.log" 2>&1; rc=$?
 
 # ---- A27（E3）对**真实交叉产物**跑 verify 的 RUNPATH 逐段检查 ----
 # 设计约束：产物不存在时**不得静默跳过**——打印醒目 SKIP 行并把跳过计入总结（静默跳过=病）。
-REAL_CORE_MAIN="${TTBOX_REAL_CORE_MAIN:-$REPO/build-aarch64-t114/ttbox_core_main}"
+# 默认取"最新的 build-aarch64* 产物"（不再硬编码某个轮次编号的构建目录：那类目录每轮出货
+# 都会被 rm -rf 重建、事后又被清理 ⇒ 写死会直接退化成 SKIP，而 SKIP 是"没验证"不是"通过"）
+_real_auto="$(ls -1dt "$REPO"/build-aarch64*/ttbox_core_main 2>/dev/null | head -1 || true)"
+REAL_CORE_MAIN="${TTBOX_REAL_CORE_MAIN:-${_real_auto:-$REPO/build-aarch64/ttbox_core_main}}"
 if [ -x "$REAL_CORE_MAIN" ]; then
   PFX_R=$(mkprefix); PAY_R="$WORK/payload-real"; make_payload "$PAY_R" "$GOODRP" "$REAL_CORE_MAIN"
   echo "---- E3 真产物 readelf -d 原始输出（$REAL_CORE_MAIN）----"

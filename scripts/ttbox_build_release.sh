@@ -39,7 +39,9 @@
 #         lib/ 只 `librknnrt.so`，且与**链接期**那份逐字节同源（2.3.2 / d31fc19c…）
 #         `readelf` 静态自检：RUNPATH 逐段 `$ORIGIN`（含空段拒绝）+ NEEDED 覆盖
 #         （★ 交叉产物 host 不能 `ldd` ⇒ host 侧只用 `readelf`；运行期 `ldd` 归板端 T1.13）
-#   6)  留档 `${BUILD_DIR}/RELEASE_BUILD.md`（T1.15 待补 ②；字段见 §10）+ §5 单行记录
+#   6)  留档 `docs/build/release-records/RELEASE_BUILD-<UTC>-<commit7>.md`（字段见 §10）+ §5 单行记录
+#       （T1.49：留档已由 ${BUILD_DIR}/ 迁出 ⇒ 不再需要"赶在 §3 clean 之前抢救留档"的时序，
+#         且仓库根不会再因为留档白名单而冒出未被忽略的 build-* 路径）
 #   7)  可复现性二次 clean build 对照（**可选**，`TTBOX_RELEASE_VERIFY_REPRO=1` 启用）
 #
 # 可选开关（默认全关；开启后的结论**一律写入留档**，不允许静默）：
@@ -130,8 +132,17 @@ AUTH_FLAG=OFF
 GEN="Ninja"   # §2「固定配置」：生成器钉死 Ninja（缺 -G 时 cmake 会退回 Unix Makefiles，
               #   随后因 CMAKE_MAKE_PROGRAM 未设而报一句**与真因无关**的错 ⇒ 诊断陷阱）
 
-# 读取**上一次留档**（必须在 clean 之前——留档就在 BUILD_DIR 内，clean 会把它删掉）
-PREV_REC="$(sed -n 's/^<!-- RELEASE_BUILD_RECORD: \(.*\) -->$/\1/p' "${BUILD_DIR}/RELEASE_BUILD.md" 2>/dev/null | tail -1 || true)"
+# 读取**上一次留档**（T1.49 起留档落 docs/build/release-records/，与构建目录解耦）
+# 旧做法把留档写在 ${BUILD_DIR}/RELEASE_BUILD.md 内，而 §3 clean 会 rm -rf 该目录
+#   ⇒ 只能靠"赶在 clean 之前读一次"的时序保命；更要命的是每轮构建都会在仓库根
+#   新长出一个带 RELEASE_BUILD.md 的 build-* 目录，而 .gitignore 的白名单又把这类
+#   文件**放行**（未被忽略≠已入库）⇒ 一次 `git add -A` 就把一堆构建路径带进版本库。
+# 现按**文件名内的 UTC 时间戳**排序取最新一份（不用 `ls -t`/mtime：留档一旦被编辑器重新格式化
+#   或复制，mtime 就不再等于构建时间 —— 实测 t142 的 mtime 是 22:49 而内部时间是 09:00:46）。
+# 目录为空时 PREV_REC 为空，走"首次留档"分支。
+RECORDS_DIR="${REPO}/docs/build/release-records"
+PREV_MD="$(ls -1 "${RECORDS_DIR}"/RELEASE_BUILD-*.md 2>/dev/null | sort | tail -1 || true)"
+PREV_REC="$(sed -n 's/^<!-- RELEASE_BUILD_RECORD: \(.*\) -->$/\1/p' "${PREV_MD}" 2>/dev/null | tail -1 || true)"
 
 # ---- §3 clean（可复现前提：删净旧构建目录）----
 # 为何强制：陈旧 CMakeCache/build.ninja 会让"我以为传了的向量"静默失效（正是本脚本
@@ -520,7 +531,7 @@ if [ "${TTBOX_RELEASE_VERIFY_REPRO:-0}" = "1" ]; then
   fi
 fi
 
-# ---- 7) 留档 ${BUILD_DIR}/RELEASE_BUILD.md（T1.15 待补 ②；字段见 §10）+ §5 单行 ----
+# ---- 7) 留档 docs/build/release-records/（T1.49 由 BUILD_DIR 迁出；字段见 §10）+ §5 单行 ----
 BUILD_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 GIT_COMMIT="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo unknown)"
 # ★ F11②（2026-09-17）：可复现锚完整性护栏。`commit` 记录的是**构建时 HEAD**，其语义前提是
@@ -584,7 +595,13 @@ if [ -n "${PREV_REC}" ]; then
   fi
 fi
 
-MD_FILE="${BUILD_DIR}/RELEASE_BUILD.md"
+# 留档落 docs/build/release-records/（T1.49 口径：与构建目录解耦，理由见脚本头 §6 与 .gitignore 注释）
+# 文件名带 UTC 时间戳 + commit 短号 ⇒ 历史留档可累积（几 KB/份），且不覆盖上一轮。
+# ★ 不能直接用 ${BUILD_UTC}（形如 2026-09-23T02:23:25Z）做文件名：`:` 在 Windows 上是非法字符，
+#   而本仓构建根在 /mnt/c（NTFS）下 ⇒ 必须先把 `:` 与 `-` 去掉。
+mkdir -p "$RECORDS_DIR"
+STAMP="$(printf '%s' "${BUILD_UTC}" | tr -d ':-')"
+MD_FILE="${RECORDS_DIR}/RELEASE_BUILD-${STAMP}-${GIT_COMMIT:0:7}.md"
 cat > "$MD_FILE" <<EOF
 # RELEASE_BUILD.md — 出货构建留档（T1.15）
 

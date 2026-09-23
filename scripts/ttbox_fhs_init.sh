@@ -216,11 +216,13 @@ read_runpath() {
 # 一段），而非"目录名先到先得"——两个 build 目录都可能链到同一个 2.3.2、门禁照样全绿，但只有形 A
 # 的产物能就近加载 payload 内 librknnrt.so：形 C（/opt/ttbox/lib）会去共享目录找、**静默绕过 T1.16**；
 # 形 B（$ORIGIN/../lib:/opt/ttbox/lib）是"尾段跨版本共享目录"的假回滚。详见 T1.16 与
-# ttbox_release_verify.sh 的逐段判据。候选顺序：显式 TTBOX_BUILD_DIR 优先；其余按"实测已知正确"
-# 的顺序（build-aarch64-t114 为形 A 构建）。**stdout 只回显选中路径**；人类日志一律走 stderr。
+# ttbox_release_verify.sh 的逐段判据。候选顺序：显式 TTBOX_BUILD_DIR 优先；其次是固定名
+# build-aarch64 / build-aarch64-t114；再兜住任意 build-aarch64-t*（按 mtime 新→旧，避免把
+# 某个轮次编号写死——旧写法只认 t114，而该目录每轮构建都会被 rm -rf 重建、事后又被清理
+# ⇒ 探针会静默退回 build/ 或直接找不到产物）。**stdout 只回显选中路径**；人类日志走 stderr。
 detect_build_dir() {
     local d bin actual summary=""
-    for d in "${TTBOX_BUILD_DIR:-}" build-aarch64-t114 build-aarch64 build; do
+    for d in "${TTBOX_BUILD_DIR:-}" build-aarch64 build-aarch64-t114 $(ls -1dt "${REPO_ROOT}"/build-aarch64-t* 2>/dev/null) build; do
         [ -n "$d" ] || continue
         case "$d" in
             /*) ;;

@@ -6,22 +6,25 @@
 # ---------- 构建产物 ----------
 # aarch64（RK3588）交叉编译输出：完全本地生成、体积巨大，绝对不能 git add
 # 尾斜杠 `*/` 仅匹配目录（同名的普通文件不受影响，如 build-aarch64-notes.md 仍可入库）。
-# `*` 覆盖全部变体：build-aarch64 / build-aarch64-t114 / 任意 build-aarch64-*（T1.14 交叉构建目录等）。
+# `*` 覆盖全部变体：build-aarch64 / build-aarch64-t114 / 任意 build-aarch64-t*（T1.14 交叉构建目录等）。
 #
-# ★ T1.15（2026-09-17）：留档 `build-aarch64-t114/RELEASE_BUILD.md` **必须进库**
-#   （tasks.md T1.15「修改」列）。但 git 规则「**父目录被排除时无法再包含其内文件**」
-#   ⇒ 不能只写 `build-aarch64*/` + 一条 `!…/RELEASE_BUILD.md`（那条白名单**永远不生效**）。
-#   故改为「排除目录**内容** + 白名单文件」：
-#     · 先 `!build-aarch64*/` 让目录本身不被排除（否则 git 不下探 ⇒ 白名单形同虚设）；
-#     · 再排除目录**直接子项**（构建产物/子目录全中，git 不再下探其内）；
-#     · 最后白名单 RELEASE_BUILD.md（**必须写在末尾**，last-match-wins）。
-#   自检命令：`git check-ignore -v build-aarch64-t114/RELEASE_BUILD.md`（期望**无输出**）
-#             `git check-ignore -v build-aarch64-t114/ttbox_core_main`（期望命中）
+# ★ T1.49（2026-09-23）口径变更：**取消 RELEASE_BUILD.md 白名单，构建目录整体忽略**。
+#   旧做法（T1.15）把出货留档写进 ${BUILD_DIR}/RELEASE_BUILD.md 再白名单放行，动机是"留档要进库"，
+#   代价有两层：
+#     ① 白名单只保证"不被忽略"，**不等于已入库** ⇒ 每轮构建新建的 build-aarch64-t* 里那份留档
+#        都停在"未跟踪且未被忽略"状态（`git status -uall` 可见），一次 `git add -A` 就会把
+#        一堆构建路径带进版本库 —— 这正是"源码树里冒出 build 字符"的真实渠道；
+#     ② 留档落在 §3 clean 会 `rm -rf` 的构建目录内，脚本只能靠"赶在 clean 之前读一次"的时序保命。
+#   现改为：留档落 `docs/build/release-records/`（下方 `!docs/build/` 已白名单），构建目录整体忽略。
+#   自检：`git check-ignore -v build-aarch64-t114/RELEASE_BUILD.md`（期望**命中**）
+#         `git check-ignore -v docs/build/release-records/x.md`（期望**无输出**）
 /build-aarch64*/
-!build-aarch64*/
-build-aarch64*/*
-!build-aarch64*/RELEASE_BUILD.md
-build-aarch64*/.selfcheck/
+# 出货打包产物（`scripts/ttbox_pack_ota.sh` 默认输出 dist/，另一条 deploy 流程落 ota-out/）
+# ★ T1.49 补：此前未忽略 ⇒ 每轮出包的 tgz 都堆在 `git status` 里，靠提交前手工 `git reset` 兜。
+/deploy/ota-out/
+# 注：仓库根的探针与日志**不在此处重复登记**，既有规则已覆盖 ——
+#   `__probe*.txt` / `_*.txt` ⇒ 下方「M2.07 会话脚手架」段的 `/_*.txt`
+#   `*.log`（含根 `pack_ota_build.log`）⇒ 上方缓存段的 `*.log`
 # 任意层级的构建输出目录（顶层 /build/ 亦见下方条目）
 build/
 # ★ T1.15（2026-09-17）：`build/` **无前导斜杠** ⇒ 匹配**任意层级**的同名目录，会连带吞掉
@@ -239,3 +242,14 @@ tools/license/.testkeys/
 # 出包产物属构建产物、不入库（与 build-aarch64*/ 同口径）；真值以服务器上发布的包为准。
 # 自检：`git check-ignore -v dist/ttbox-1.4.9.ota.tgz`（期望命中本行）
 /dist/
+
+# ---------- 代码梳理（2026-09-23）：本机产物归档区（第三批，不入库）----------
+# 沿 2026-09-17 / 2026-09-18 两批同款做法：把本机产物 **mv 入**本目录而非 rm，
+# 供业主复核后再决定是否真删（前两批复核后已真删，故本目录不存在残留）。
+# 本批内容：
+#   · 14 个 `build-aarch64-*` 交叉构建目录（留档已另行迁入 docs/build/release-records/，此处只剩产物）
+#   · `core/build-host/`、`core/build-j/`（陈旧本机构建目录；`core/build-ascii/` 是 ctest 基线，**保留**）
+#   · 根 `__probe.txt` / `__probe2.txt` / `__list.txt` 与 3 个 `*.log`
+# 目录名以点号开头 + 固定日期，与任何现有规则无交集；写在文件**末尾**（last-match-wins）。
+# 自检：`git check-ignore -v .archive-2026-09-23/README.md`（期望命中本行）
+/.archive-2026-09-23/
