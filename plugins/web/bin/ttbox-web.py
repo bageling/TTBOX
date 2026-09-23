@@ -81,6 +81,30 @@ PRESETS_DIR = ttbox_paths.presets_dir()
 MOTION_PROFILES_DIR = Path(ttbox_paths.motion_profiles_dir())
 MOTION_STORE = MotionProfileStore(MOTION_PROFILES_DIR)
 
+# ── 预设名枚举的**唯一真源**（2026-09-23）────────────────────────────────
+# 坑：预设目录里除了用户预设，还会落**自动生成的非预设文件** —— 例如
+#   scripts/ttbox_dtb_fix.sh 写的 DTB 诊断报告 `/opt/ttbox/presets/_dtbfix.json`
+#   （故意放在这里，好让面板 `/api/presets/_dtbfix/export` 能读回）。
+# 该文件由 root 生成、644、目录归 ttbox ⇒ **可读不可写**。
+# 但此前三处枚举都是裸 `glob('*.json')`，把它当成了一个预设列进列表；
+# 目录里又只有它一个 json ⇒ 前端把它当"当前预设"，切换模型后的自动保存就去写它
+# ⇒ PermissionError ⇒ HTTP 500 ⇒ 面板显示"预设保存失败"。
+# 约定：**以 `_` 开头的名字是保留名**（自动产物），不进预设列表、不允许写入/改名/删除，
+# 只读（export）仍然可用。
+_RESERVED_PRESET_PREFIX = '_'
+
+
+def _is_preset_name(name: str) -> bool:
+    """是否为**可写**的用户预设名（保留名 `_xxx` 一律否）。"""
+    return bool(name) and not str(name).startswith(_RESERVED_PRESET_PREFIX)
+
+
+def _preset_names() -> list:
+    """列出用户预设名（保留名除外）。目录不存在时顺手建出来。"""
+    d = Path(PRESETS_DIR)
+    d.mkdir(parents=True, exist_ok=True)
+    return sorted(p.stem for p in d.glob('*.json') if _is_preset_name(p.stem))
+
 # TTBOX 自己的 EDID 工具（完全独立于板端其它 EDID 工具）
 TTBOX_HDMIRX_EDID = ttbox_paths.hdmirx_edid_tool()
 
@@ -1296,8 +1320,8 @@ def collect_web_state() -> dict:
             },
             'models': models,  # Web 同构：数组
             'selected_model_id': active_model,
-            'presets': sorted(Path(PRESETS_DIR).glob('*.json')) and
-                       [p.stem for p in sorted(Path(PRESETS_DIR).glob('*.json'))] or [],
+            # ★ 2026-09-23：走 _preset_names()，排除 `_` 保留名（DTB 诊断报告等非预设文件）
+            'presets': _preset_names(),
             'state': {
                 'aim': {
                     'active': m.get('aim_active', False),
@@ -3035,7 +3059,8 @@ def select_model():
     models_view = _models_view(data)
     active_id = data.get('selected_model_id', model_id) or model_id
     selected_model = next((m for m in models_view if m.get('id') == active_id), None)
-    presets = [p.stem for p in sorted(Path(PRESETS_DIR).glob('*.json'))]
+    # ★ 同上：排除 `_` 保留名，否则切换模型后前端会把诊断报告当"当前预设"去自动保存 ⇒ 500
+    presets = _preset_names()
     try:
         config_web = profile_to_web(_get_runtime_profile())
     except Exception:
@@ -3154,10 +3179,8 @@ def update_model_class_names():
 # -- 预设 --
 @app.get('/api/presets')
 def list_presets():
-    d = Path(PRESETS_DIR)
-    d.mkdir(parents=True, exist_ok=True)
-    names = sorted(p.stem for p in d.glob('*.json'))
-    return jsonify({'ok': True, 'data': {'presets': names}})
+    # ★ 排除 `_` 保留名（见 _preset_names 注释）
+    return jsonify({'ok': True, 'data': {'presets': _preset_names()}})
 
 
 @app.post('/api/presets')
@@ -3170,6 +3193,11 @@ def save_or_delete_preset():
     d = Path(PRESETS_DIR)
     d.mkdir(parents=True, exist_ok=True)
     safe = re.sub('[^\\w\\-]', '_', name)[:64]
+    # ★ 2026-09-23：保留名（_ 开头）是自动产物，只读不可写。
+    #   以前这里会直接去写 `/opt/ttbox/presets/_dtbfix.json`（root 拥有、面板 ttbox 无写权限）
+    #   ⇒ PermissionError ⇒ 未捕获 ⇒ HTTP 500 ⇒ 前端只看到"预设保存失败"。
+    if not _is_preset_name(safe):
+        return jsonify({'ok': False, 'error': f'预设名不能以 {_RESERVED_PRESET_PREFIX} 开头（保留给自动生成的诊断文件，只读）'})
     pf = d / (safe + '.json')
     if action == 'delete':
         pf.unlink(missing_ok=True)
@@ -3177,6 +3205,8 @@ def save_or_delete_preset():
     if action == 'rename':
         new_name = str(body.get('new_name', '')).strip()
         safe2 = re.sub('[^\\w\\-]', '_', new_name)[:64]
+        if not _is_preset_name(safe2):
+            return jsonify({'ok': False, 'error': f'新预设名不能以 {_RESERVED_PRESET_PREFIX} 开头（保留名，只读）'})
         pf2 = d / (safe2 + '.json')
         pf2.write_text(pf.read_text() if pf.exists() else '{}')
         pf.unlink(missing_ok=True)
@@ -3190,7 +3220,11 @@ def save_or_delete_preset():
             config = profile_to_web(_get_runtime_profile())
         except Exception:
             config = {}
-    pf.write_text(json.dumps(config, ensure_ascii=False, indent=2))
+    # ★ 写失败要给**能看懂的错误**，不能让异常冒泡成 500（前端只会笼统显示"预设保存失败"）。
+    try:
+        pf.write_text(json.dumps(config, ensure_ascii=False, indent=2))
+    except OSError as exc:
+        return jsonify({'ok': False, 'error': f'预设写入失败（{pf}: {exc}）'})
     return jsonify({'ok': True, 'data': {'name': name}})
 
 
