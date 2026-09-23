@@ -477,7 +477,20 @@ void IpcServer::accept_loop() {
     }
 }
 
+// 服务端接收超时（毫秒）。用途只有一个：防「连上却不发数据」的半开连接占住连接槽。
+// 正常请求毫秒级到达，5s 对合法客户端足够宽松。
+// 超时后 recv 返回 <= 0 ⇒ read_line 置 ok=false ⇒ 连接线程走「无响应」分支收尾、
+// 关 fd 并释放槽位（槽位归还见 accept_loop 里线程收尾段）。
+// ★ 客户端侧的超时在 ipc_request 里设；两侧共用 set_recv_timeout_ms（平台语义差异见其注释）。
+constexpr int kServerRecvTimeoutMs = 5000;
+
 void IpcServer::handle_connection(int fd) {
+    // ★ 2026-09-23 复核发现：accept 出来的 fd 此前没有任何超时，对端连上不发数据就会永久
+    //   卡在 read_line 的 recv 上、槽位不释放 —— 累计 kMaxConnections(32) 个半开连接后，
+    //   所有新连接被立刻关闭，表现为客户端「连接成功却读不到响应」，IPC 等同不可用。
+    if (!set_recv_timeout_ms(fd, kServerRecvTimeoutMs)) {
+        IPCDBG("[IPC-SRV] fd=%d 设置接收超时失败 sockerr=%d\n", fd, sock_last_error());
+    }
     bool ok = false;
     std::string request_text = read_line(fd, &ok);
     std::string response_text;

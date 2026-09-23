@@ -503,6 +503,7 @@ if(TTBOX_CORE_BUILD_TESTS)
     tests/test_main.cpp
     tests/test_logger.cpp
     tests/test_config.cpp
+    tests/test_json.cpp         # 嵌套深度护栏（2026-09-23 审查复核 #20）
     tests/test_ipc.cpp
     tests/test_ipc_control.cpp  # Phase 1：SET_CONFIG / RUNTIME_CONTROL 验收
     tests/test_ipc_model.cpp    # v0.3：模型管理 IPC 验收

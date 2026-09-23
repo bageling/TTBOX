@@ -248,6 +248,22 @@ public:
     }
 
 private:
+    // 递归深度护栏（2026-09-23 复核发现）：parse_value ↔ parse_object/parse_array 是纯递归
+    // 下降，此前没有任何深度计数 ⇒ 连续嵌套的 '[' 会按输入长度线性吃栈。IPC 单行实际可到
+    // 约 69.6KB（read_line 的上限判断排在 find('\n') 之后）⇒ 约 6.9 万层，远超默认线程栈，
+    // 本机同组进程发一次请求即可打崩 Core。256 层对真实请求（配置 / 状态 / 模型参数）足够宽裕。
+    // 注：dump_value 侧同样无上限，但它的输入只能来自已解析的结构（这里已挡）；若将来出现
+    // "把对端 JSON 原样回吐"的路径，需给 dump 侧一并补护栏。
+    static constexpr int kMaxDepth = 256;
+    int depth_ = 0;
+
+    // RAII：进容器自增、离开自减 —— 覆盖所有 return / fail 路径，不靠人工配对。
+    struct DepthScope {
+        Parser* self;
+        explicit DepthScope(Parser* p) : self(p) { ++self->depth_; }
+        ~DepthScope() { --self->depth_; }
+    };
+
     const std::string& text_;
     size_t pos_ = 0;
     std::string err_;
@@ -282,6 +298,10 @@ private:
     }
 
     bool parse_object(JsonValue& out) {
+        if (depth_ >= kMaxDepth) {
+            return fail("JSON 嵌套过深（超过 " + std::to_string(kMaxDepth) + " 层）");
+        }
+        DepthScope scope(this);
         ++pos_;  // {
         out = JsonValue::object();
         skip_ws();
@@ -322,6 +342,10 @@ private:
     }
 
     bool parse_array(JsonValue& out) {
+        if (depth_ >= kMaxDepth) {
+            return fail("JSON 嵌套过深（超过 " + std::to_string(kMaxDepth) + " 层）");
+        }
+        DepthScope scope(this);
         ++pos_;  // [
         out = JsonValue::array();
         skip_ws();
