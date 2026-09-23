@@ -18,6 +18,7 @@ namespace ttbox::core {
 
 #include "common/Logger.hpp"
 #include "common/CpuAffinity.hpp"
+#include "common/FrameRateMeter.hpp"
 
 namespace ttbox::core {
 
@@ -411,8 +412,15 @@ void PreviewModule::loop() {
         }
     }
     const auto start_time = clock::now();
-    const auto interval = std::chrono::milliseconds(1000 / params_.fps);
+    // ★ 1000/fps 的整数毫秒取整会偏快（15 fps → 66 ms ⇒ 实际 15.15 fps，方向是超标）。
+    //   改用微秒周期；并对 fps <= 0 兜底，避免除零或 0 周期忙等。（2026-09-23 审查复核 #35）
+    const int preview_fps = params_.fps > 0 ? params_.fps : 15;
+    const auto interval = std::chrono::microseconds(1000000 / preview_fps);
     auto next_tick = start_time;
+    // ★ 瞬时帧率计（2026-09-23 审查复核 #12）：原来用「帧数 ÷ 启动至今秒数」——那是累计平均
+    //   （与 FrameRateMeter 头注释里点名的反面教材同款），预览帧率会从低往高一直爬、断线也不回落。
+    //   改成滚动窗口，与采集/推理侧口径一致。本对象只在预览线程内使用，无需再加锁。
+    FrameRateMeter fps_meter;
 
     // ★ 连续异常计数 + 静默开关（2026-09-23）
     //   encode_frame() 内部会构造 cv::Mat、做 cv::resize、扩容 crop_buffer_/jpeg_out，
@@ -483,10 +491,15 @@ void PreviewModule::loop() {
         metrics_.frames.fetch_add(1);
         metrics_.encode_ms.store(std::chrono::duration<double, std::milli>(
             clock::now() - encode_start).count());
-        const double elapsed = std::chrono::duration<double>(clock::now() - start_time).count();
-        if (elapsed > 0.0) {
-            metrics_.fps.store(static_cast<double>(metrics_.frames.load()) / elapsed);
+        fps_meter.tick();
+        double fps_now = fps_meter.fps();
+        if (fps_now <= 0.0) {
+            // 窗口不足 2 帧（刚启动）才回退累计平均，避免面板显示 0；稳态走滚动窗口值。
+            const double elapsed =
+                std::chrono::duration<double>(clock::now() - start_time).count();
+            if (elapsed > 0.0) fps_now = static_cast<double>(metrics_.frames.load()) / elapsed;
         }
+        metrics_.fps.store(fps_now);
     }
 }
 

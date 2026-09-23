@@ -346,7 +346,12 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         double decode_avg_us = 0.0, e2e_avg_us = 0.0;
         double rga_avg_us = 0.0, qwait_avg_us = 0.0;
         const size_t worker_count = workers_->worker_count();
-        StatsCollector e2e_all, infer_all, decode_all;
+        // ★ 合并容器按 worker 数放大窗口（2026-09-23 全仓审查复核 #11）：默认 4096 窗口下，
+        //   3 路各 4096 样本吸进来时后吸的会把先吸的整段挤掉 ⇒ p95/p99「名义全局、实际单路」。
+        //   显式给到 kMaxSamples × worker_count，各路样本全部保留。
+        StatsCollector e2e_all(StatsCollector::kMaxSamples * worker_count);
+        StatsCollector infer_all(StatsCollector::kMaxSamples * worker_count);
+        StatsCollector decode_all(StatsCollector::kMaxSamples * worker_count);
         for (const auto& worker : workers_->workers()) {
             if (!worker) continue;
             const auto& stats = worker->stats();

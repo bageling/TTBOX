@@ -23,6 +23,16 @@ public:
     // 内存上界 = kMaxSamples × 8 B ≈ 32 kB/实例。
     static constexpr size_t kMaxSamples = 4096;
 
+    StatsCollector() = default;
+
+    // ★ 合并专用构造（2026-09-23 全仓审查复核 #11）：多路样本合并时，窗口必须装得下**所有源**，
+    //   否则后吸的会把先吸的整段挤掉 —— 3 路各 4096 吸进默认 4096 窗口后，窗口里只剩最后一路
+    //   worker 的样本，于是 e2e_p95/p99「名义全局、实际单路」。调用方按 kMaxSamples × worker_count
+    //   构造即可。默认构造仍是单源滚动窗口，内存上界不变（S6 的修复意图保持）。
+    explicit StatsCollector(size_t capacity) : capacity_(capacity < 1 ? kMaxSamples : capacity) {
+        samples_.reserve(capacity_);
+    }
+
     void add(uint64_t us) {
         std::lock_guard<std::mutex> lock(mutex_);
         append_locked(us);
@@ -38,7 +48,7 @@ public:
         if (this == &other) return;
         std::lock_guard<std::mutex> lock(mutex_);
         std::lock_guard<std::mutex> other_lock(other.mutex_);
-        if (head_ == 0 && samples_.size() + other.samples_.size() <= kMaxSamples) {
+        if (head_ == 0 && samples_.size() + other.samples_.size() <= capacity_) {
             // 快路径：本端仍是顺序未满窗口，直接追加不越界。
             samples_.insert(samples_.end(), other.samples_.begin(), other.samples_.end());
             return;
@@ -85,14 +95,18 @@ public:
 
 private:
     // 调用方必须已持有 mutex_。未满顺序追加；满后环形覆盖最旧样本。
+    // 上界用 capacity_（默认 kMaxSamples；合并容器按构造参数放大）。
     void append_locked(uint64_t us) {
-        if (samples_.size() < kMaxSamples) {
+        if (samples_.size() < capacity_) {
             samples_.push_back(us);
             return;
         }
         samples_[head_] = us;
-        head_ = (head_ + 1) % kMaxSamples;
+        head_ = (head_ + 1) % capacity_;
     }
+
+    // 本实例的窗口容量：单源默认 4096；合并容器由调用方按 kMaxSamples × 源数指定。
+    const size_t capacity_ = kMaxSamples;
 
     mutable std::mutex mutex_;
     std::vector<uint64_t> samples_;
