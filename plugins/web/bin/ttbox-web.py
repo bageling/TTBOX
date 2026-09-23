@@ -1030,27 +1030,6 @@ def web_body_to_profile(body: dict) -> dict:
     if cap.get('crop_offset_y') is not None:
         capture['offset_y'] = cap['crop_offset_y']
 
-    # 7.5) video：采集层硬件裁剪 + 零拷贝开关（P-ZC-1）
-    #   capture.* 是"帧采到之后再裁一块送推理"；video.crop_* 是让 V4L2 采集时
-    #   就只出这一块 —— 后者才决定 RGA 要不要缩放。两者别混。
-    video: dict = {}
-    vid = body.get('video') or {}
-    if vid.get('crop_size') is not None:
-        try:
-            cs = int(vid['crop_size'])
-        except (TypeError, ValueError):
-            cs = 0
-        if cs == 0:
-            video['crop_width'] = 0
-            video['crop_height'] = 0
-        else:
-            # Core 侧合法域 [64, 3840]；0 = 不裁剪（沿用全局配置）
-            cs = max(64, min(3840, cs))
-            video['crop_width'] = cs
-            video['crop_height'] = cs
-    if vid.get('zero_copy_input') is not None:
-        video['zero_copy_input'] = bool(vid['zero_copy_input'])
-
     # 8) FOV（range_factor <1 = 启用圆形选择区）
     fov: dict = {}
     try:
@@ -1082,8 +1061,6 @@ def web_body_to_profile(body: dict) -> dict:
         'capture': capture,
         'fov': fov,
     }
-    if video:
-        prof['video'] = video
     if preview:
         prof['preview'] = preview
     if body.get('model_id') is not None:
@@ -1109,7 +1086,6 @@ def profile_to_web(prof: dict) -> dict:
     prev_p = prof.get('preview') or {}
     inf = prof.get('inference') or {}
     cap = prof.get('capture') or {}
-    vid_p = prof.get('video') or {}
 
     personal_motion = mouse.get('personal_motion') or {}
     personal_traj = mouse.get('personal_trajectory') or {}
@@ -1184,11 +1160,6 @@ def profile_to_web(prof: dict) -> dict:
             'crop_size': cap.get('width'),
             'crop_offset_x': cap.get('offset_x'),
             'crop_offset_y': cap.get('offset_y'),
-        },
-        # P-ZC-1：采集层硬件裁剪 + 零拷贝开关。crop_size=0 表示"不裁剪，采集全帧"。
-        'video': {
-            'crop_size': vid_p.get('crop_width', 0) or 0,
-            'zero_copy_input': bool(vid_p.get('zero_copy_input', True)),
         },
         'range_factor': fov_p.get('radius', 1.0) if fov_p.get('enabled') else 1.0,
         'sens': mouse.get('sensitivity', 1.0),
