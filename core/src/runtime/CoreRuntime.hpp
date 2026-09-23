@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include "aim/AimThread.hpp"
+#include "common/FrameRateMeter.hpp"
 #include "common/Metrics.hpp"
 #include "output/IHidOutput.hpp"
 #include "output/OutputBackend.hpp"
@@ -124,6 +125,9 @@ private:
     std::shared_ptr<output::IHidOutput> output_;
     std::atomic<bool> running_{false};
     std::atomic<int64_t> start_steady_ms_{0};
+    // 推理瞬时帧率计（滚动窗口）。worker 每发布一帧 tick，metrics 采样时读。
+    // 取代旧的「published ÷ 启动至今秒数」累计平均口径（会缓慢爬升，见 FrameRateMeter.hpp）。
+    FrameRateMeter fps_meter_;
     std::unique_ptr<PreviewModule> preview_;  // G1：start() 时刻（steady 时钟，算推理 FPS 分母）
 };
 }

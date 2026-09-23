@@ -1,5 +1,6 @@
 // CoreRuntime.cpp — Capture/Worker/AimThread 统一生命周期。
 #include "runtime/CoreRuntime.hpp"
+#include "common/FrameRateMeter.hpp"
 #include "common/Logger.hpp"
 
 #include <algorithm>
@@ -57,6 +58,7 @@ bool CoreRuntime::preload_workers(std::string* error) {
         return false;
     }
     worker_params_.latest = capture_ ? capture_->latest_frame_ref() : nullptr;
+    worker_params_.fps_meter = &fps_meter_;
     worker_params_.aim_mailbox = mailbox_.get();
     worker_params_.runtime_config = runtime_config_;
     if (!workers_->preload(worker_params_, error)) {
@@ -82,6 +84,7 @@ bool CoreRuntime::start(std::string* error) {
     // （重启后 1~3 分钟检测框不更新，直到帧号重新涨回旧值）。
     mailbox_->clear();
     start_steady_ms_.store(steady_now_ms());
+    fps_meter_.reset();  // 新会话：清掉上一轮的帧时间戳，避免首帧算出虚高/虚低
 
     // ★ M2.03：失败回滚必须**条件化** —— 只回滚本路径真正启动过的模块，
     //   否则 gates 关闭的模块被"回滚"会误伤（如 workers_ 从未 start 却调用 stop）。
@@ -348,11 +351,20 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
             decode_all.absorb(stats.decode_stages.total);
         }
         out->infer_total = published;
-        out->fps = published;
-        const int64_t started = start_steady_ms_.load();
-        if (started > 0) {
-            const double elapsed_s = static_cast<double>(steady_now_ms() - started) / 1000.0;
-            if (elapsed_s > 0.0) out->fps = static_cast<double>(published) / elapsed_s;
+        // ★ fps 一律取**滚动窗口瞬时值**（FrameRateMeter），不再用
+        //   published ÷ 启动至今秒数 —— 后者是累计平均，分母里永久含着启动期
+        //   一次性开销（3 worker 加载 + 起流 + 预热），表现为"帧率从 140 出头
+        //   慢慢爬升"（2026-09-23 板端现象）。瞬时窗口在第 2 帧即可给出真实值。
+        //   窗口样本不足 2 帧时（刚启动）才回退累计平均，避免显示 0。
+        out->fps = fps_meter_.fps();
+        if (out->fps <= 0.0) {
+            out->fps = published;
+            const int64_t started = start_steady_ms_.load();
+            if (started > 0) {
+                const double elapsed_s =
+                    static_cast<double>(steady_now_ms() - started) / 1000.0;
+                if (elapsed_s > 0.0) out->fps = static_cast<double>(published) / elapsed_s;
+            }
         }
         out->infer_ms = infer_avg_us / static_cast<double>(worker_count) / 1000.0;
         out->infer_set_input_ms = si_avg_us / static_cast<double>(worker_count) / 1000.0;

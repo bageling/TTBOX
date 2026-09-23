@@ -11,7 +11,7 @@
 cmake_minimum_required(VERSION 3.16)
 # ★ 版本真源 = core/include/ttbox/core/version.hpp::kCoreVersion（B-CONST-3）；
 #   此处仅为 CMake 记录的同一事实镜像，二者由 scripts/ttbox_conventions_gate.sh 断言同值。
-project(ttbox_core VERSION 1.5.36 LANGUAGES CXX)
+project(ttbox_core VERSION 1.5.37 LANGUAGES CXX)
 
 option(TTBOX_CORE_BUILD_TESTS "构建 C++ Core 单元测试" ON)
 option(TTBOX_CORE_BUILD_TOOLS "构建 IPC 命令行工具" ON)
@@ -603,6 +603,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   add_executable(test_aim_target_mailbox tests/test_aim_target_mailbox.cpp)
   target_link_libraries(test_aim_target_mailbox PRIVATE ttbox_core)
   add_test(NAME test_aim_target_mailbox COMMAND test_aim_target_mailbox)
+
+  # 瞬时帧率计（滚动窗口）回归：面板"检测帧率缓慢爬升"是累计平均口径错，非性能问题
+  add_executable(test_frame_rate_meter tests/test_frame_rate_meter.cpp)
+  target_link_libraries(test_frame_rate_meter PRIVATE ttbox_core)
+  add_test(NAME test_frame_rate_meter COMMAND test_frame_rate_meter)
 
   # S6：StatsCollector 滑动窗口回归（内存泄漏修复，不需要硬件）
   add_executable(test_stats_window tests/test_stats_window.cpp)

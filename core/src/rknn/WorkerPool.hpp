@@ -22,6 +22,7 @@
 #include <thread>
 #include <vector>
 
+#include "common/FrameRateMeter.hpp"
 #include "common/Stats.hpp"
 #include "capture/V4L2Capture.hpp"
 #include "model/Decoder.hpp"
@@ -85,6 +86,9 @@ public:
         uint32_t out_w = 0;         // 模型输入尺寸（config）
         uint32_t out_h = 0;
         LatestFrame* latest = nullptr;   // 共享最新帧（capture 提供，非拥有）
+        // 共享瞬时帧率计（CoreRuntime 提供，非拥有）：每发布一帧 tick 一次。
+        // 为空则不做采样（单测/工具可不传），CoreRuntime 回退到累计平均。
+        FrameRateMeter* fps_meter = nullptr;
         int total_workers = 1;
         // A-6 Decode/NMS 参数（阈值来自 config；frame 尺寸用于坐标映射）
         float conf_thres = 0.25f;
@@ -148,6 +152,7 @@ public:
         uint32_t out_w = 0;
         uint32_t out_h = 0;
         LatestFrame* latest = nullptr;
+        FrameRateMeter* fps_meter = nullptr;  // 共享瞬时帧率计（CoreRuntime 提供，非拥有）
         // A-6 Decode/NMS（透传给每个 worker；阈值来自 config）
         float conf_thres = 0.25f;
         float iou_thres = 0.45f;

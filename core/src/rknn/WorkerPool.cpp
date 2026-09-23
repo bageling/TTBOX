@@ -429,6 +429,10 @@ void InferenceWorker::loop() {
             }
             params_.aim_mailbox->offer(static_cast<std::size_t>(id_), std::move(task));
             stats_.published.fetch_add(1);
+            // 瞬时帧率采样（滚动窗口）：3 个 worker 合计即为真实推理帧率。
+            // 不能只靠 published÷运行时长 —— 那是累计平均，会把启动开销永久摊进
+            // 分母，表现为"帧率缓慢爬升"（2026-09-23 板端现象）。
+            if (params_.fps_meter) params_.fps_meter->tick();
         }
         // 吸收本帧 RKNNEngine 阶段统计（absorb 后 reset，避免重复累计）
         {
@@ -491,6 +495,7 @@ bool create_workers(const WorkerPool::Params& params, bool deferred,
         wp.out_w = params.out_w;
         wp.out_h = params.out_h;
         wp.latest = params.latest;
+        wp.fps_meter = params.fps_meter;
         wp.total_workers = static_cast<int>(n);
         wp.conf_thres = params.conf_thres;
         wp.iou_thres = params.iou_thres;
