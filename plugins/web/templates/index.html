@@ -7735,24 +7735,36 @@ function formatStatus(status, running) {
   return STATUS_LABELS[status] || "已停止";
 }
 
-// 预处理路径：backend 由后端产出（core 侧按 RgaMetrics 判定），此前后端从未供给
-// raw_preprocess_backend ⇒ 这里恒返回 "-"，面板看着像"没有预处理数据"。
-function formatPreprocessBackend(latencyState) {
+// 预处理路径 = **两段**，别混成一个数：
+//   第 1 段 缩放/裁剪（2560×1440 → 模型输入）：RGA 硬件，耗时 = rga_ms（core 的 resize_ms）
+//   第 2 段 RGA 输出 → NPU 输入：INT8/xor_shift128 不能零拷贝直绑 ⇒ 每帧一次 CPU XOR 拷贝，
+//          耗时 = rknn_set_input_ms；只有 external_dma_bound 为真时才是 DMA 直绑（不算 CPU）
+// 只显示第 1 段会让人以为整条预处理都是硬件干的，业主就是据此说"应该是 cpu 直拷"。
+function formatPreprocessBackend(latencyState, detection) {
   const backend = latencyState && latencyState.raw_preprocess_backend;
+  if (!backend) return "-";
+
+  // 第 2 段：直绑生效 = DMA，否则必然是 CPU 直拷。布尔值由 core 判定，这里只选文案。
+  const modelInput = detection && detection.model_input;
+  const feed = modelInput && modelInput.external_dma_bound
+    ? "DMA直绑"
+    : `CPU直拷 ${formatNumber(latencyState.rknn_set_input_ms)} ms`;
+
   if (backend === "rga") {
-    return `RGA ${formatNumber(latencyState.rga_ms)} ms`;
+    return `RGA ${formatNumber(latencyState.rga_ms)} · ${feed}`;
   }
   if (backend === "cpu_direct") {
-    return `CPU直拷 ${formatNumber(latencyState.rga_ms)} ms`;
+    return `CPU直拷 ${formatNumber(latencyState.rga_ms)} · ${feed}`;
   }
   if (backend === "cpu_fallback") {
     // 不拼耗时：CPU 回退时 rga_ms 不累加（core 只在 using_rga() 为真时统计），
     // 拼上去会显示 0，看着像"预处理没花时间"。
-    return "CPU回退（RGA 不可用）";
+    return `CPU回退（RGA 不可用） · ${feed}`;
   }
   if (backend === "failed") {
     const reason = latencyState && latencyState.raw_preprocess_error;
-    return reason ? `硬件预处理失败：${reason}` : "硬件预处理失败";
+    const head = reason ? `硬件预处理失败：${reason}` : "硬件预处理失败";
+    return `${head} · ${feed}`;
   }
   return "-";
 }
@@ -10329,7 +10341,7 @@ function renderRuntime(payload) {
   const runtimeSummary = $("runtimeSummary");
   if (runtimeSummary) {
     const modelLabel = selectedModelDisplayName(payload, runtime, detection);
-    const preprocessBackend = formatPreprocessBackend(latencyState);
+    const preprocessBackend = formatPreprocessBackend(latencyState, detection);
     runtimeSummary.innerHTML = `
       <div class="runtime-stat">
         <span>当前模型</span>
