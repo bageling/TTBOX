@@ -458,7 +458,7 @@ void PreviewModule::loop() {
                                 " 次抛异常（最后一条: " + e.what() +
                                 "）⇒ 预览转入静默，AI 链路不受影响");
             } else if (consecutive_faults <= 3) {
-                TTBOX_LOG_WARN("Preview 编码抛异常（已忽略，不中断预览线程）: " + e.what());
+                TTBOX_LOG_WARN(std::string("Preview 编码抛异常（已忽略，不中断预览线程）: ") + e.what());
             }
             continue;
         } catch (...) {
