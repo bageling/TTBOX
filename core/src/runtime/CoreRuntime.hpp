@@ -127,6 +127,13 @@ private:
     std::atomic<int64_t> start_steady_ms_{0};
     // 推理瞬时帧率计（滚动窗口）。worker 每发布一帧 tick，metrics 采样时读。
     // 取代旧的「published ÷ 启动至今秒数」累计平均口径（会缓慢爬升，见 FrameRateMeter.hpp）。
+    // ★ worker 参数的**唯一绑定点**：所有会把 WorkerPool::Params 交给 WorkerPool 的路径
+    //   （initialize / start / reload_workers / reload 回滚）都必须先过这里。
+    //   为什么必须收敛成一处：fps_meter 是指向本对象的裸指针，**不在**外部构造的 Params 里。
+    //   曾经漏在 reload_workers 一条路径上（next = params 整体覆盖 ⇒ fps_meter 变 nullptr）
+    //   ⇒ worker 从不 tick ⇒ fps() 恒 0 ⇒ 静默回退成"published ÷ 启动至今秒数"的累计平均
+    //   ⇒ 面板帧率又变成"一点一点往上爬"（1.5.37 修了口径，却被这条路径绕过）。
+    void bind_worker_params(WorkerPool::Params& p);
     FrameRateMeter fps_meter_;
     std::unique_ptr<PreviewModule> preview_;  // G1：start() 时刻（steady 时钟，算推理 FPS 分母）
 };

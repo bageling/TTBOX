@@ -7769,13 +7769,6 @@ function formatPreprocessBackend(latencyState, detection) {
   return "-";
 }
 
-// 推理并发：路数 + 理论聚合吞吐（能力上限，不是实际帧率——实际被采集帧率封顶）。
-function formatConcurrency(detection) {
-  const total = Number(detection && detection.workers_total) || 0;
-  if (!total) return "-";
-  const capacity = Number(detection && detection.capacity_fps) || 0;
-  return capacity > 0 ? `${total} 路 · 聚合 ${formatNumber(capacity)} fps` : `${total} 路`;
-}
 
 function modelProfileLabel(value) {
   if (!value || value === "generic") {
@@ -10358,10 +10351,6 @@ function renderRuntime(payload) {
       <div class="runtime-stat">
         <span>预处理路径</span>
         <strong>${escapeHtml(preprocessBackend)}</strong>
-      </div>
-      <div class="runtime-stat">
-        <span>推理并发</span>
-        <strong>${escapeHtml(formatConcurrency(detection))}</strong>
       </div>
       <div class="runtime-stat">
         <span>最后错误</span>

@@ -47,6 +47,16 @@ bool CoreRuntime::initialize(const Params& p, std::string* error) {
     return true;
 }
 
+// worker 参数的唯一绑定点（声明处有完整背景）。
+// 凡是"要交给 WorkerPool 的 Params"都必须先经过这里，否则裸指针字段会被外部
+// 构造的 Params 静默覆盖成 nullptr —— 1.5.37 的瞬时帧率就是这么被 reload 路径绕过的。
+void CoreRuntime::bind_worker_params(WorkerPool::Params& p) {
+    p.latest = capture_ ? capture_->latest_frame_ref() : nullptr;
+    p.aim_mailbox = mailbox_.get();
+    p.runtime_config = runtime_config_;
+    p.fps_meter = &fps_meter_;
+}
+
 bool CoreRuntime::preload_workers(std::string* error) {
     if (!workers_) {
         if (error) *error = "WorkerPool 未初始化";
@@ -58,9 +68,10 @@ bool CoreRuntime::preload_workers(std::string* error) {
         return false;
     }
     worker_params_.latest = capture_ ? capture_->latest_frame_ref() : nullptr;
-    worker_params_.fps_meter = &fps_meter_;
     worker_params_.aim_mailbox = mailbox_.get();
+    worker_params_.fps_meter = &fps_meter_;
     worker_params_.runtime_config = runtime_config_;
+    bind_worker_params(worker_params_);
     if (!workers_->preload(worker_params_, error)) {
         return false;
     }
@@ -127,12 +138,10 @@ bool CoreRuntime::start(std::string* error) {
 
     // ② WorkerPool（仅 gates.inference）。
     if (want_inference) {
-        worker_params_.latest = capture_->latest_frame_ref();
-        worker_params_.aim_mailbox = mailbox_.get();
-        worker_params_.runtime_config = runtime_config_;
         const auto& fmt = capture_->format();
         worker_params_.frame_w = fmt.width;
         worker_params_.frame_h = fmt.height;
+        bind_worker_params(worker_params_);
         bool workers_ok = false;
         if (workers_preloaded_) {
             // 预加载发生在采集之前，那时还不知道真实帧尺寸；这里补刷新再拉起线程。
@@ -225,12 +234,7 @@ bool CoreRuntime::reload_workers(const WorkerPool::Params& params, std::string* 
     const auto fmt = capture_->format();
     const WorkerPool::Params previous = worker_params_;
     WorkerPool::Params next = params;
-    next.latest = capture_->latest_frame_ref();
-    next.aim_mailbox = mailbox_.get();
-    next.runtime_config = runtime_config_;
-    next.frame_w = fmt.width;
-    next.frame_h = fmt.height;
-
+    bind_worker_params(next);
     workers_->stop();
     mailbox_->clear();
     worker_params_ = next;
@@ -239,11 +243,7 @@ bool CoreRuntime::reload_workers(const WorkerPool::Params& params, std::string* 
     }
 
     WorkerPool::Params restore = previous;
-    restore.latest = capture_->latest_frame_ref();
-    restore.aim_mailbox = mailbox_.get();
-    restore.runtime_config = runtime_config_;
-    restore.frame_w = fmt.width;
-    restore.frame_h = fmt.height;
+    bind_worker_params(restore);
     worker_params_ = restore;
     mailbox_->clear();
     std::string restore_error;
@@ -364,6 +364,14 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
                 const double elapsed_s =
                     static_cast<double>(steady_now_ms() - started) / 1000.0;
                 if (elapsed_s > 0.0) out->fps = static_cast<double>(published) / elapsed_s;
+                // ★ 自曝式诊断：跑了 2 秒以上还没有瞬时样本，说明 worker 根本没 tick
+                //   ⇒ fps_meter 指针没绑上（reload 路径曾整份覆盖 Params 把它清成 nullptr）。
+                //   累计平均只是"看起来在爬坡"的兜底，不该长期生效——必须留下痕迹。
+                if (elapsed_s > 2.0) {
+                    TTBOX_LOG_WARN("fps 瞬时窗口无样本（" +
+                                   std::to_string(fps_meter_.sample_count()) +
+                                   " 帧），已回退累计平均；检查 worker 参数是否漏绑 fps_meter");
+                }
             }
         }
         out->infer_ms = infer_avg_us / static_cast<double>(worker_count) / 1000.0;
