@@ -1402,8 +1402,9 @@ def collect_web_state() -> dict:
                     'workers_total': int(m.get('model_workers_total') or 0),
                     'workers_zero_copy': int(m.get('model_workers_zero_copy') or 0),
                     'workers_fast_path': int(m.get('model_workers_fast_path') or 0),
-                    # 聚合吞吐（能力上限，非实际帧率）：路数 ÷ 单帧 e2e
-                    'capacity_fps': m.get('inference_capacity_fps', 0.0),
+                    # 注：聚合吞吐 inference_capacity_fps 只留在 core 指标与 IPC 里，
+                    # 不进面板 model_input 契约（1.5.41 撤掉「推理并发」格子后无人消费，
+                    # 留着会让 test_web_model_input 的键集契约变红）
                     'note': m.get('model_input_note', '') or '',
                 },
                 'motion_training': {
