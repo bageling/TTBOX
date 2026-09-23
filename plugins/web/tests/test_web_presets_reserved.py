@@ -144,6 +144,24 @@ def test_reserved_name_still_exportable(web_mod, monkeypatch):
 
 # ── ④ 正常预设不受影响 ──────────────────────────────────────────────────
 
+def test_unwritable_preset_file_reports_error_instead_of_500(web_mod, monkeypatch):
+    """复刻线上情形的另一半：名字合法，但文件不可写（root 拥有、面板 ttbox 无写权限）。
+
+    以前 write_text 抛 PermissionError 冒泡成 500，前端只有一句"预设保存失败"。
+    """
+    p = _write_preset(web_mod, 'locked', {'name': 'locked'})
+    os.chmod(str(p), 0o444)
+    c = _client(web_mod, monkeypatch)
+    try:
+        resp = c.post('/api/presets', json={'name': 'locked', 'config': {'a': 1}})
+    finally:
+        os.chmod(str(p), 0o644)
+    assert resp.status_code == 200          # 不是 500
+    body = json.loads(resp.data.decode('utf-8'))
+    assert body['ok'] is False
+    assert 'locked' in (body.get('error') or '')
+
+
 def test_normal_preset_roundtrip_still_works(web_mod, monkeypatch):
     c = _client(web_mod, monkeypatch)
     resp = c.post('/api/presets', json={'name': 'cfg1', 'config': {'x': 1}})
