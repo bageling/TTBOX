@@ -5,6 +5,7 @@
 //   - 未来 JournaldSink / FileSink 通过 add_sink() 接入
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -41,7 +42,10 @@ public:
     Logger& operator=(const Logger&) = delete;
 
     void set_level(LogLevel level);
-    LogLevel level() const { return level_; }
+    // ★ 无锁读（2026-09-23 审查复核 #36）：原为「持锁写 / 无锁读」的不对称访问。当前唯一写
+    //   调用点是启动期命令行解析（`--log-level`），发生在 IPC 注册与线程拉起之前 ⇒ 眼下无
+    //   实际竞争；但接口是开放的，一旦有人接上 IPC/setter 路径就是 data race。改原子消除。
+    LogLevel level() const { return level_.load(std::memory_order_relaxed); }
 
     void add_sink(std::shared_ptr<LogSink> sink);
     void clear_sinks();  // 重置 sink 列表（测试/重配置用）
@@ -53,7 +57,8 @@ private:
     Logger() = default;
 
     mutable std::mutex mutex_;
-    LogLevel level_ = LogLevel::kInfo;
+    // 原子：与 set_level / level() / log() 的读写路径匹配，不再靠 mutex_ 兜。
+    std::atomic<LogLevel> level_{LogLevel::kInfo};
     std::vector<std::shared_ptr<LogSink>> sinks_;
 };
 

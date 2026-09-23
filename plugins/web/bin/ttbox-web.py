@@ -2051,38 +2051,14 @@ def update_system_hostname():
 def update_system_web_port():
     # Web 控制台端口已在源码中固定（见文件头 LISTEN_PORT），不再支持运行时修改。
     # 保留这个接口是为了让界面上的"修改端口"拿到一句明确的人话，而不是改完没反应。
+    #
+    # ★ 2026-09-23（全仓审查复核 #38）：这里原先在这行 return **之后**还留着 30 行
+    #   「写 systemd drop-in + daemon-reload + 延时重启」的实现 —— 永不可达。
+    #   危害不是"多跑了一段"（它压根不跑），而是**看着像活的实现**：后来人会照着它
+    #   推理"端口本来是可改的"，或者以为删掉下面这行 return 就能启用。已整块删除。
+    #   真要恢复运行时改端口，得把 LISTEN_PORT 的固定一并重新设计，不是撤掉这行 return 的事。
     return jsonify({'ok': False,
                     'error': 'Web 控制台端口已固定为 8000，不支持在线修改'}), 400
-    body = request.get_json(silent=True) or {}
-    port = body.get('port', body.get('web_port'))
-    try:
-        port = int(port)
-    except (TypeError, ValueError):
-        return jsonify({'ok': False, 'error': '访问端口必须是 1024-65535 的数字'})
-    # 保持 Web 契约：端口校验 1024-65535
-    if port < 1024 or port > 65535:
-        return jsonify({'ok': False, 'error': '访问端口必须在 1024-65535 之间'})
-    # 真实修改：systemd drop-in override（保持 Web 契约 _write_web_port_override 机制）
-    try:
-        dropin_dir = '/etc/systemd/system/ttbox-web.service.d'
-        os.makedirs(dropin_dir, exist_ok=True)
-        with open(os.path.join(dropin_dir, 'port.conf'), 'w', encoding='utf-8') as f:
-            f.write(f'[Service]\nEnvironment=TTBOX_WEB_PORT={port}\n')
-    except Exception as exc:
-        return jsonify({'ok': False, 'error': f'写入端口配置失败: {exc}'}), 500
-    try:
-        subprocess.run(['systemctl', 'daemon-reload'], timeout=10, capture_output=True)
-    except Exception:
-        pass
-    # 延时重启 web 服务使端口生效（保持 Web 契约 _restart_web_service_delayed）
-    cmd = ('sleep 1; systemctl daemon-reload >/dev/null 2>&1 || true; '
-           'systemctl restart ttbox-web >/dev/null 2>&1 || true')
-    subprocess.Popen(['sh', '-c', cmd], stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
-    summary = collect_network_summary()
-    summary['web_port'] = port
-    summary['restart_scheduled'] = True
-    return jsonify({'ok': True, 'data': summary})
 
 
 # 局域网黑名单 4 个端点（GET/POST /api/system/lan-blocklist、/scan、DELETE）已随

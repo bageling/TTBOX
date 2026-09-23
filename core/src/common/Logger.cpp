@@ -74,8 +74,9 @@ Logger& Logger::instance() {
 }
 
 void Logger::set_level(LogLevel level) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    level_ = level;
+    // ★ 不再持 mutex_：级别改原子后这条路径与 level()/log() 的无锁读自洽（2026-09-23 #36）。
+    //   mutex_ 仍保留给 sinks_ 用，不能删。
+    level_.store(level, std::memory_order_relaxed);
 }
 
 void Logger::add_sink(std::shared_ptr<LogSink> sink) {
@@ -90,7 +91,10 @@ void Logger::clear_sinks() {
 }
 
 void Logger::log(LogLevel level, const std::string& msg, const char* file, int line) {
-    if (static_cast<int>(level) < static_cast<int>(level_)) return;
+    if (static_cast<int>(level) <
+        static_cast<int>(level_.load(std::memory_order_relaxed))) {
+        return;
+    }
 
     // 提取文件名（去掉路径）
     const char* base = file;

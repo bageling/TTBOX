@@ -10,7 +10,15 @@ bool MouseRouter::parse(const uint8_t* data, size_t size, uint64_t timestamp_us,
     if (layout.report_id != 0) {
         if (size < 1 || data[0] != layout.report_id) return false;
     }
-    const size_t axis_need = static_cast<size_t>(layout.axis_offset) + layout.axis_size;
+    // ★ 轴要读 2 个分量（X、Y），每个 axis_size 字节 ⇒ 实际需 2*axis_size 字节。
+    //   原判据只算了 1 个分量（2026-09-23 审查复核 #19）⇒ 长度落在
+    //   [axis_offset+axis_size, axis_offset+2*axis_size) 时越界读 1~2 字节：
+    //   默认 INT16 布局（axis_size=2, axis_offset=3）短 2 字节、INT8 布局短 1 字节。
+    //   注：MouseRouter/MouseLayout 目前**全仓无生产调用方**（只有测试），属"接口已开放
+    //   没人用"的那类，但越界读是 UB，先收紧；将来接调用方时不必再回来补。
+    if (layout.axis_size != 1 && layout.axis_size != 2) return false;  // 只支持 int8 / int16 LE
+    const size_t axis_need =
+        static_cast<size_t>(layout.axis_offset) + 2u * static_cast<size_t>(layout.axis_size);
     if (size < axis_need) return false;
     if (size < static_cast<size_t>(layout.buttons_offset) + layout.buttons_size) return false;
 

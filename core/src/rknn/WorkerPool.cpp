@@ -597,21 +597,33 @@ void WorkerPool::stop() {
     workers_.clear();
 }
 
+// ★ 下面 5 个只读统计函数原先不判空，与同文件的 set_frame_size(:589)/stop(:595) 不一致。
+//   当前 workers_ 的元素只由 make_unique 结果 push_back（从不放 nullptr）⇒ 不可达，
+//   属一致性债务；但停止/重载路径一旦引入空槽就是解引用空指针。（2026-09-23 审查复核 #33）
 uint64_t WorkerPool::total_processed() const {
     uint64_t s = 0;
-    for (const auto& w : workers_) s += w->stats().processed;
+    for (const auto& w : workers_) {
+        if (!w) continue;
+        s += w->stats().processed;
+    }
     return s;
 }
 
 uint64_t WorkerPool::total_errors() const {
     uint64_t s = 0;
-    for (const auto& w : workers_) s += w->stats().errors;
+    for (const auto& w : workers_) {
+        if (!w) continue;
+        s += w->stats().errors;
+    }
     return s;
 }
 
 uint64_t WorkerPool::total_skipped() const {
     uint64_t s = 0;
-    for (const auto& w : workers_) s += w->stats().skipped;
+    for (const auto& w : workers_) {
+        if (!w) continue;
+        s += w->stats().skipped;
+    }
     return s;
 }
 
@@ -643,6 +655,7 @@ InferenceWorker::PreprocessBackendKind WorkerPool::preprocess_backend() const {
     using Kind = InferenceWorker::PreprocessBackendKind;
     Kind worst = Kind::kNone;
     for (const auto& w : workers_) {
+        if (!w) continue;
         const Kind k = w->preprocess_backend();
         // 数字越大越差：kNone(0) < kRga(1) < kCpuFallback(2) < kFailed(3)
         if (static_cast<int>(k) > static_cast<int>(worst)) worst = k;
@@ -652,6 +665,7 @@ InferenceWorker::PreprocessBackendKind WorkerPool::preprocess_backend() const {
 
 std::string WorkerPool::last_preprocess_error() const {
     for (const auto& w : workers_) {
+        if (!w) continue;
         const std::string e = w->last_preprocess_error();
         if (!e.empty()) return e;
     }

@@ -502,6 +502,35 @@ TEST(mouse_router_parse_logitech_layout) {
     CHECK(!router.parse(rep, sizeof(rep), 123, lay, &m));
     // 长度不足 → false
     CHECK(!router.parse(rep, 5, 123, lay, &m));
+    // ★ 长度边界（2026-09-23 审查复核 #19）：轴要读 X/Y **两个**分量 ⇒ 真实需求是
+    //   axis_offset + 2*axis_size = 3+4 = 7 字节，而原判据只算了一个分量（5 字节）。
+    //   于是 size=6 落在「旧判据放行、真实需求不足」的窗口里，旧代码会返回 true 并越界读
+    //   data[5..6]。这条就是为了钉死那个窗口——只跑现有用例测不出来（原 size=5 的用例是被
+    //   ReportID 提前返回挡住的，根本没走到长度判据）。
+    rep[0] = 0x02;  // 恢复 ReportID，确保拦住它的是「长度」而不是 ReportID
+    CHECK(!router.parse(rep, 6, 123, lay, &m));
+    // 恰好够 7 字节 → 正常解析（X=10 / Y=-2）；wheel 在 index 7，size=7 ⇒ 不读、保持默认 0
+    CHECK(router.parse(rep, 7, 123, lay, &m));
+    CHECK_EQ(m.dx, 10);
+    CHECK_EQ(m.dy, -2);
+    CHECK_EQ(m.wheel, 0);
+    // INT8 轴布局（axis_size=1）同样要 2 个分量：offset(1)+2 = 3 字节；size=2 必须拒绝
+    aim::MouseLayout lay8;
+    lay8.report_id = 0x00;
+    lay8.buttons_offset = 0;
+    lay8.buttons_size = 1;
+    lay8.axis_offset = 1;
+    lay8.axis_size = 1;
+    lay8.wheel_offset = 255;  // 无 wheel
+    uint8_t rep8[3] = {0x00, 0xF6, 0x0A};  // dx=-10, dy=10
+    CHECK(!router.parse(rep8, 2, 123, lay8, &m));
+    CHECK(router.parse(rep8, 3, 123, lay8, &m));
+    CHECK_EQ(m.dx, -10);
+    CHECK_EQ(m.dy, 10);
+    // 非法 axis_size（既非 1 也非 2）→ 拒绝，避免走 else 分支按 int16 读
+    aim::MouseLayout bad;
+    bad.axis_size = 3;
+    CHECK(!router.parse(rep, sizeof(rep), 123, bad, &m));
 }
 
 // ---------------------------------------------------------------------------
