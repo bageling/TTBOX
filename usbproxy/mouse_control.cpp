@@ -586,6 +586,69 @@ struct LayoutDiag {
 
 static LayoutDiag g_layout_diag;
 
+// ── 报告长度自适应（2026-09-23）─────────────────────────────────
+//
+// 为何必须做：`report_len` 是**写死的 Logitech c53f 常量 9**（hpp 注释吹成"从描述符解析"
+// 是假的），而现场插的鼠标报的是 **7 字节**（rid + buttons + X + Y，没有滚轮）。
+// 结果是 merge 与 notify **两条路都被长度校验整包拒绝** —— 实测
+//   `[LAYOUT] 5s 汇总：merge_ok=0 len_mismatch=49559`（rid_mismatch=0）
+// 也就是：① 物理按键事件上不来 ⇒ 热键永远判不到 ⇒ `injection_allowed` 恒 false；
+//        ② AI 位移搭不上车 ⇒ 就算有目标、有 PID 输出，鼠标也一动不动。
+// 表现就是业主说的「能识别到，但自瞄没有效果」。
+//
+// 改法（保守自适应，不猜布局）：
+//   · 长度**不再要求等于**期望值，只要求「放得下 X/Y」（len >= max(xo,yo)+2）且不超上限；
+//   · report_id 仍然必须相等（这条是真正的安全边界，防把键盘/厂商报告当鼠标改写）；
+//   · 连续观测到同一个"非期望但合法"的长度 N 次 ⇒ 把期望长度收敛过去，
+//     诊断噪声随之消失（不再是每 5s 一条 mismatch）。
+//   本次实测 7 字节：X@3 Y@5 与期望布局完全一致，只是少了滚轮那 2 字节 ⇒ 自适应后即可正常合并。
+constexpr int kAdaptStreak = 16;      // 连续观测多少次才收敛期望长度
+constexpr uint32_t kMaxReportLen = 64;  //  sanity 上限
+
+static std::atomic<int> g_adapt_len{0};
+static std::atomic<int> g_adapt_streak{0};
+
+// 前向声明（真正的定义在下面）
+static void diag_layout_mismatch(const char* who, uint32_t len, const uint8_t* data,
+                                 LayoutMismatch kind);
+
+static void maybe_adapt_report_len(uint32_t len) {
+    const int want = static_cast<int>(len);
+    if (g_adapt_len.load() != want) {
+        g_adapt_len.store(want);
+        g_adapt_streak.store(1);
+        return;
+    }
+    const int s = g_adapt_streak.fetch_add(1) + 1;
+    if (s >= kAdaptStreak && g_state.report_len.load() != want) {
+        const int old = g_state.report_len.exchange(want);
+        fprintf(stderr,
+                "[mouse_control][LAYOUT] 报告长度自适应：期望 %d → %d"
+                "（连续 %d 次观测到稳定长度；rid=0x%02x X@%d Y@%d 仍成立）\n",
+                old, want, s, g_state.report_id.load(),
+                g_state.x_offset.load(), g_state.y_offset.load());
+    }
+}
+
+// 长度/rid 准入：替代原先"必须 == report_len"的硬拒。
+static bool report_layout_acceptable(const char* who, uint32_t len, const uint8_t* data) {
+    const int xo = g_state.x_offset.load();
+    const int yo = g_state.y_offset.load();
+    const int need = (xo > yo ? xo : yo) + 2;
+    if (len == 0 || len > kMaxReportLen || static_cast<int>(len) < need) {
+        diag_layout_mismatch(who, len, data, kMismatchOffset);
+        return false;
+    }
+    if (data[0] != g_state.report_id.load()) {
+        diag_layout_mismatch(who, len, data, kMismatchRid);
+        return false;
+    }
+    if (static_cast<int>(len) != g_state.report_len.load()) {
+        maybe_adapt_report_len(len);
+    }
+    return true;
+}
+
 static void diag_layout_mismatch(const char* who, uint32_t len, const uint8_t* data,
                                  LayoutMismatch kind) {
     uint64_t n = 0;
@@ -628,23 +691,12 @@ bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
     if (!g_state.mouse_control_enabled.load()) return false;
     // 只合并真正的鼠标报告（report_id + report_len 精确匹配），
     // 防止键盘/消费类/厂商报告被当成鼠标 X/Y 改写。
-    const uint8_t report_rid = g_state.report_id.load();
-    const int rlen = g_state.report_len.load();
-    if (len != static_cast<uint32_t>(rlen)) {
-        diag_layout_mismatch("merge", len, data, kMismatchLen);
-        return false;
-    }
-    if (data[0] != report_rid) {
-        diag_layout_mismatch("merge", len, data, kMismatchRid);
-        return false;
-    }
+    // ★ 2026-09-23：长度改自适应（不再要求 == report_len），rid 仍是硬边界。
+    //   详见 report_layout_acceptable 上方注释：写死的 9 字节期望导致 7 字节报告 100% 被拒，
+    //   merge 与 notify 双双失效 ⇒ 自瞄有识别但不动。
+    if (!report_layout_acceptable("merge", len, data)) return false;
     int xo = g_state.x_offset.load();
     int yo = g_state.y_offset.load();
-    if (xo < 1 || yo < 1 || xo + 2 > static_cast<int>(len) ||
-        yo + 2 > static_cast<int>(len)) {
-        diag_layout_mismatch("merge", len, data, kMismatchOffset);
-        return false;
-    }
     int32_t dx = g_state.pending_dx.exchange(0);
     int32_t dy = g_state.pending_dy.exchange(0);
     if (dx == 0 && dy == 0) {
@@ -676,16 +728,8 @@ bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
 void mouse_control_notify_physical_report(const uint8_t* data, uint32_t len) {
     if (!g_state.mouse_control_enabled.load()) return;
     // 只解析真正的鼠标报告；键盘/厂商/消费类报告的 data[1..2] 不是按钮掩码。
-    const uint8_t report_rid = g_state.report_id.load();
-    const int rlen = g_state.report_len.load();
-    if (len != static_cast<uint32_t>(rlen)) {
-        diag_layout_mismatch("notify", len, data, kMismatchLen);
-        return;
-    }
-    if (data[0] != report_rid) {
-        diag_layout_mismatch("notify", len, data, kMismatchRid);
-        return;
-    }
+    // ★ 同上：notify 原来也被长度硬拒 ⇒ 物理按键事件发不出去 ⇒ 热键永远判不到。
+    if (!report_layout_acceptable("notify", len, data)) return;
     static std::atomic<int> report_samples{0};
     if (report_samples.fetch_add(1) < 5) {
         fprintf(stderr, "[mouse_control] phys_report len=%u first12:", len);
