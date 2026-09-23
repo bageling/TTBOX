@@ -120,6 +120,19 @@
 | `TTBOX_CURRENT` | 路径 | `/opt/ttbox/current` | `scripts/ttbox.sh` | 覆盖 current 软链根（运维入口/doctor 定位 scripts 与 web） | RUNTIME |
 | `TTBOX_STATE` | 路径 | `/opt/ttbox/state` | `scripts/ttbox.sh` + `core/src/common/Paths.hpp::kStateDirDefault` | 覆盖状态目录（version 留档、OTA 状态、`runtime_intent.json` 用户启停意愿等） | RUNTIME |
 
+> **2026-09-23 补登记（T1.49）**：下方 4 个是**出厂镜像烘焙链**（`image/**`）的注入参数。
+> 该目录此前整目录在门禁 `SKIP_TOP` 豁免里（0 跟踪），补入库后首次纳管才暴露 ——
+> 属**补登记**，不是新引入。其中两个为凭据类，纪律与 §2.5 的 TEST 域一致：明文只留
+> 项目外目录，不入镜像、不入文档；`TTBOX_ROOT_PASS` 自 V5 起**禁止回落固定弱口令**
+> （未提供即构建中止），判据见 `image/steps/04_board_config.sh` 开头注释。
+
+| 变量名 | 类型 | 默认 | 真源 | 作用 | 作用域 |
+|---|---|---|---|---|---|
+| `TTBOX_STAGE_DIR` | 路径 | 无（必填） | `image/prepare_stage.sh`、`run_in_img.sh`、`90_finalize_host.sh` | 覆盖烘焙 stage 暂存目录（灌装树落点） | RUNTIME |
+| `TTBOX_VER` | 版本号 | 无（必填） | `image/prepare_stage.sh` | 覆盖烘焙出的镜像版本号 | RUNTIME |
+| `TTBOX_HOSTKEY_DIR` | 路径 | 无（必填） | `image/v5_bake.sh`、`steps/04_board_config.sh`、`90_finalize_host.sh` | 注入镜像内 ssh host key 的来源目录（**凭据类**） | RUNTIME |
+| `TTBOX_ROOT_PASS` | 口令 | 无（必填，**禁回落到固定弱口令**） | `image/steps/04_board_config.sh` | 烘焙时设置镜像 root 口令（**凭据类**） | RUNTIME |
+
 ### 2.5 显式登记为 TEST 域（不进 RUNTIME allowlist）
 
 | 变量/常量 | 位置 | 域 | 说明 |

@@ -87,11 +87,13 @@ INCLUDE_EXT = {".cpp", ".hpp", ".h", ".py", ".sh", ".js", ".service", ".json"}
 # SKIP_TOP：不属「仓库版本化源码」的顶层目录，扫描它们只会产出与交付无关的噪声。
 #   · docs/third_party/... = 非出货源码（历史既定）；
 #   · .workbuddy = 本机 agent 状态（.gitignore:204，0 跟踪）；
-#   · image / game-assist-lab = 本机未跟踪的镜像工具链与他项目残留（0 跟踪、无基线）；
+#   · game-assist-lab = 他项目残留（游戏辅助的 3D 数学 + Windows 跨进程内存读写，与 TTBOX 无关）
+#     ★ T1.49（2026-09-23）已 mv 入 .archive-2026-09-23/ ⇒ 不再登记（目录若再出现，本门禁应扫它）；
+#   · image = ★ T1.49 起**已入库**（出厂镜像烘焙链，54 文件）⇒ 从豁免**移出**、纳入本门禁；
 #   · dist = 本地打包产物（.gitignore，与 build-* 同为构建输出）。
 SKIP_TOP = {"docs", "third_party", ".git", "__pycache__",
-            ".archive-2026-09-17", ".archive-2026-09-18", "node_modules", ".mypy_cache",
-            ".workbuddy", "image", "game-assist-lab", "dist"}
+            ".archive-2026-09-17", ".archive-2026-09-18", ".archive-2026-09-23",
+            "node_modules", ".mypy_cache", ".workbuddy", "dist"}
 # 门禁脚本自身含字面量样例，必须排除，否则自检自恰失败。
 SKIP_FILES = {"scripts/ttbox_conventions_gate.sh"}
 
@@ -145,6 +147,10 @@ LIT_ALLOW = {
         "usbproxy/usb-proxy.cpp",
         "deploy/config/10-device.json",
         "deploy/config/default.json.prod",
+        # 2026-09-23 补：image/factory/10-device.json 是**出厂镜像烘焙时真正灌进板子**的设备层
+        # 配置（配置真源第四处，见 image/README.md），与 deploy/config 两份同类 —— 它此前
+        # 一直在门禁 SKIP_TOP 豁免里，入库后首次纳管才暴露，属补登记而非新引入。
+        "image/factory/10-device.json",
     },
     "/run/ttbox-mouse-passthrough/event.sock": {
         "core/src/common/Paths.hpp",
@@ -152,6 +158,7 @@ LIT_ALLOW = {
         "usbproxy/usb-proxy.cpp",
         "deploy/config/10-device.json",
         "deploy/config/default.json.prod",
+        "image/factory/10-device.json",
     },
     "/etc/ttbox/license.key": {
         "core/src/common/Paths.hpp",
@@ -221,6 +228,11 @@ ENV_ALLOW = {
     "TTBOX_CURRENT", "TTBOX_STATE", "TTBOX_OTA_PRIV_PASSWORD",
     "TTBOX_RELEASE_SELFTEST", "TTBOX_RESTART_UNITS", "TTBOX_HEALTH_TIMEOUT",
     "TTBOX_REAL_CORE_MAIN",
+    # 2026-09-23 登记：出厂镜像烘焙链（image/**）此前整目录在 SKIP_TOP 豁免里，
+    # 入库后首次纳管才暴露（不是新引入，是补登记）。4 个都是烘焙期由构建方注入的参数；
+    # 其中凭据类两个（ROOT_PASS / HOSTKEY_DIR）明文只留项目外目录、不入镜像与文档，
+    # 且 V5 起禁止回落固定弱口令 —— 见 image/steps/04_board_config.sh 开头注释。
+    "TTBOX_STAGE_DIR", "TTBOX_VER", "TTBOX_HOSTKEY_DIR", "TTBOX_ROOT_PASS",
     # 2026-09-22 回流板端 dtb 修复脚本时登记（TEST 钩子：覆盖 DTB 期望哈希与报告路径）
     "TTBOX_DTB_SRC", "TTBOX_DTB_FIX_TEST", "TTBOX_DTB_REPORT",
     "TTBOX_DTB_GOOD_SHA", "TTBOX_DTB_BAD_SHA",
