@@ -209,3 +209,40 @@ TEST(ipc_client_connection_refused) {
                                        R"({"type":"PING"})", response, 500, &error);
     CHECK(!ok);  // 连接被拒 → 明确失败
 }
+
+// SO_RCVTIMEO 单位回归（2026-09-23 定位）：
+// 客户端给 2000ms 超时，服务端故意慢 300ms —— 必须拿到响应。
+// Windows 上 SO_RCVTIMEO 取 DWORD 毫秒；旧实现传 struct timeval，内核只读走前 4 字节
+// （= tv_sec），2000ms 被当成 2ms ⇒ 本用例在修好前稳定失败。
+// 这条断言把「超时参数必须是毫秒、且真的生效」钉死，防止再退回按秒解释。
+TEST(ipc_recv_timeout_honors_milliseconds) {
+    ttbox::core::IpcServer server;
+    server.set_status_provider([]() -> ttbox::core::SystemStatus {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        return test_status();
+    });
+    std::string error;
+    CHECK(start_with_retry(server, &error));
+
+    std::string response;
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ok = ttbox::core::ipc_request(server.socket_path(), R"({"type":"GET_STATUS"})",
+                                             response, 2000, &error);
+    const auto cost_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - t0).count();
+    if (!ok) {
+        std::printf("  [info] 慢响应请求失败: %s (cost=%lldms)\n", error.c_str(),
+                    static_cast<long long>(cost_ms));
+    }
+    CHECK(ok);
+    if (ok) {
+        auto parsed = ttbox::core::json_parse(response);
+        CHECK(parsed.ok);
+        if (parsed.ok) {
+            const auto* status_v = parsed.value.find("status");
+            CHECK(status_v != nullptr && status_v->as_int() == 0);
+        }
+    }
+    // 超时设置真的按毫秒生效：300ms 的响应不该被 2ms（旧 bug 的等效值）判死。
+    CHECK(cost_ms >= 250);
+}

@@ -155,16 +155,36 @@ struct ModelFixture {
         req += "}";
         std::string response;
         std::string err;
+        const auto t0 = std::chrono::steady_clock::now();
+        attempt_trace_.clear();
         // Windows 下连接刚 listen 的 socket 偶发 WSAECONNREFUSED：客户端重试 3 次
         for (int attempt = 0; attempt < 3; ++attempt) {
+            const auto a0 = std::chrono::steady_clock::now();
+            err.clear();
             if (ipc_request(server.socket_path(), req, response, 3000, &err)) {
+                last_elapsed_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::steady_clock::now() - t0).count();
                 auto parsed = json_parse(response);
                 return parsed.ok ? parsed.value : JsonValue::null();
             }
+            const auto cost = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now() - a0).count();
+            attempt_trace_ += "  [IPC-ATTEMPT] type=" + type + " n=" + std::to_string(attempt + 1) +
+                              " cost=" + std::to_string(cost) + "ms err=" + err + "\n";
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+        last_elapsed_ms_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - t0).count();
+        last_error_ = err;
+        if (!attempt_trace_.empty()) std::fputs(attempt_trace_.c_str(), stderr);
         return ipc_error_response(err);
     }
+
+    // 偶发失败诊断用：最近一次 ipc() 的耗时与传输错误（成功时 err 为空）。
+    // 3×3s 超时合计 ≈9600ms，与「立刻被服务端关连接」（≈300ms）可据此区分。
+    long long last_elapsed_ms_ = 0;
+    std::string last_error_;
+    std::string attempt_trace_;
 
 };
 
@@ -176,6 +196,18 @@ struct ModelFixture {
 static int resp_status(const JsonValue& r) {
     const auto* v = r.find("status");
     return v ? static_cast<int>(v->as_int()) : -1;
+}
+
+// 偶发失败诊断（2026-09-22）：本用例曾在全量 ctest -j8 下 1/10 概率红，
+// 但原断言只报 "-1 vs 0"，无法区分「传输超时/被拒」与「服务端 validate 真失败」。
+// 失败时把 error 串与响应原文打到 stderr，便于定位（不改变判定）。
+static void dump_ipc_detail(const char* tag, const JsonValue& r,
+                            long long elapsed_ms, const std::string& transport_err) {
+    const auto* e = r.find("error");
+    std::fprintf(stderr, "  [IPC-DETAIL] %s status=%d elapsed=%lldms error=%s transport=%s\n", tag,
+                 resp_status(r), elapsed_ms,
+                 (e && e->is_string()) ? e->as_string().c_str() : "<none>",
+                 transport_err.empty() ? "<none>" : transport_err.c_str());
 }
 
 TEST(model_ipc_full_lifecycle) {
@@ -195,6 +227,8 @@ TEST(model_ipc_full_lifecycle) {
     const std::string src = fx.make_incoming("yolo_face.rknn");
     r = fx.ipc("MODEL_IMPORT",
                R"({"src_path":")" + json_escape(src) + R"(","model_id":"yolo-face-v1","label":"人脸检测"})");
+    if (resp_status(r) != 0)
+        dump_ipc_detail("MODEL_IMPORT", r, fx.last_elapsed_ms_, fx.last_error_);
     CHECK_EQ(resp_status(r), 0);
 
     // 3) import 二次同 id → 拒绝（staging 冲突不报错但 install 前提是 validate；重导 staging 会覆盖，
@@ -206,12 +240,16 @@ TEST(model_ipc_full_lifecycle) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         r = fx.ipc("MODEL_VALIDATE", R"({"model_id":"yolo-face-v1"})");
     }
+    if (resp_status(r) != 0)
+        dump_ipc_detail("MODEL_VALIDATE", r, fx.last_elapsed_ms_, fx.last_error_);
     CHECK_EQ(resp_status(r), 0);
     r = fx.ipc("MODEL_INSTALL", R"({"model_id":"yolo-face-v1"})");
     for (int attempt = 0; attempt < 3 && resp_status(r) != 0; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         r = fx.ipc("MODEL_INSTALL", R"({"model_id":"yolo-face-v1"})");
     }
+    if (resp_status(r) != 0)
+        dump_ipc_detail("MODEL_INSTALL", r, fx.last_elapsed_ms_, fx.last_error_);
     CHECK_EQ(resp_status(r), 0);
     r = fx.ipc("MODEL_LIST");
     CHECK_EQ(resp_status(r), 0);

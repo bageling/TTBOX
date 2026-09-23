@@ -3,7 +3,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -30,6 +33,55 @@
 namespace ttbox::core {
 
 namespace {
+
+// IPC 链路诊断开关（默认关闭）。设 TTBOX_IPC_DEBUG=1 后，服务端把「监听/接受/拒绝/
+// 读到多少字节/是否回了包」逐条打到 stderr。用于定位「客户端连接成功却读不到响应」
+// 这类跨进程偶发问题（ctest 并发下曾复现）。生产默认关闭，零开销。
+bool ipc_debug_enabled() {
+    static const bool on = []() {
+        const char* v = std::getenv("TTBOX_IPC_DEBUG");
+        return v != nullptr && *v != '\0' && std::strcmp(v, "0") != 0;
+    }();
+    return on;
+}
+
+#define IPCDBG(...)                              \
+    do {                                         \
+        if (ipc_debug_enabled()) {               \
+            std::fprintf(stderr, __VA_ARGS__);   \
+            std::fflush(stderr);                 \
+        }                                        \
+    } while (0)
+
+// 最近一次 socket 调用的错误码：Windows = WSAGetLastError()，Unix = errno。
+int sock_last_error() {
+#if defined(_WIN32)
+    return ::WSAGetLastError();
+#else
+    return errno;
+#endif
+}
+
+// 设置接收超时（毫秒）。**平台语义不同，这里踩过坑（2026-09-23 实测确认）**：
+//   - Windows/Winsock：SO_RCVTIMEO 取 `DWORD`（毫秒）。若按 Unix 那样传 `struct timeval`，
+//     内核会把前 4 字节当 DWORD 读 —— 而 timeval 的前 4 字节正是 `tv_sec`，
+//     于是 timeout_ms=3000 实际只生效 3ms（实测：请求 2000ms 时 13ms 即报超时）。
+//     附带效应：不足 1s 的超时 tv_sec=0，而 Winsock 里 0 表示无限等待。
+//     症状是客户端「连接成功、请求发出、却在几毫秒内报读取响应失败」。
+//   - Unix：SO_RCVTIMEO 取 `struct timeval`。
+// 返回 false 表示设置失败（旧代码丢弃返回值，导致上面这个错静默存在）。
+bool set_recv_timeout_ms(int fd, int timeout_ms) {
+#if defined(_WIN32)
+    DWORD ms = static_cast<DWORD>(timeout_ms);
+    return ::setsockopt(static_cast<SOCKET>(fd), SOL_SOCKET, SO_RCVTIMEO,
+                        reinterpret_cast<const char*>(&ms), sizeof(ms)) == 0;
+#else
+    struct timeval tv {};
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    return ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) == 0;
+#endif
+}
 
 #if defined(_WIN32)
 // MSVC 无 ssize_t：Windows 分支统一用 long long 语义的别名。
@@ -215,6 +267,8 @@ std::string read_line(int fd, bool* ok) {
     while (true) {
         ssize_t n = sock_recv(fd, tmp, sizeof(tmp));
         if (n <= 0) {
+            IPCDBG("[IPC-LINK] fd=%d recv n=%lld sockerr=%d (已读 %zu 字节)\n", fd,
+                   static_cast<long long>(n), sock_last_error(), buf.size());
             *ok = false;
             break;
         }
@@ -282,6 +336,7 @@ bool IpcServer::start(const std::string& socket_path, std::string* error) {
     socket_path_ = effective_path;
     listen_fd_ = fd;
     running_.store(true);
+    IPCDBG("[IPC-SRV] LISTEN path=%s fd=%d\n", socket_path_.c_str(), listen_fd_);
     accept_thread_ = std::thread(&IpcServer::accept_loop, this);
 
     // 自举握手：Windows 下连接刚 listen 的 socket 偶发 WSAECONNREFUSED（accept 尚未就绪），
@@ -368,6 +423,8 @@ void IpcServer::accept_loop() {
             reject_fd = ::accept(listen_fd_, nullptr, nullptr);
 #endif
             if (reject_fd >= 0) sock_close(reject_fd);
+            IPCDBG("[IPC-SRV] REJECT 连接数已满 active=%d\n",
+                   active_connections_.load(std::memory_order_acquire));
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
@@ -381,9 +438,12 @@ void IpcServer::accept_loop() {
         if (client_fd < 0) {
             if (running_.load()) {
                 TTBOX_LOG_WARN("accept() 失败（服务停止中则忽略）");
+                IPCDBG("[IPC-SRV] ACCEPT-FAIL listen_fd=%d\n", listen_fd_);
             }
             continue;
         }
+        IPCDBG("[IPC-SRV] ACCEPT fd=%d active=%d listen=%d\n", client_fd,
+               active_connections_.load(std::memory_order_acquire) + 1, listen_fd_);
         active_connections_.fetch_add(1, std::memory_order_acq_rel);
         {
             // 登记在途 fd：stop() 靠它 shutdown 唤醒卡住的连接线程（见 stop 注释）
@@ -391,11 +451,22 @@ void IpcServer::accept_loop() {
             conn_fds_.push_back(client_fd);
         }
         std::thread([this, client_fd] {
-            handle_connection(client_fd);
+            // 线程函数必须吞掉异常：handler 抛出的异常若逃出线程体，会直接
+            // std::terminate 整个 Core；而且下面「注销 fd + 递减计数」也不会执行，
+            // 该连接槽位永久泄漏（累计到 kMaxConnections 后所有新连接被立即关闭，
+            // 表现为客户端「连接成功却读不到响应」）。
+            try {
+                handle_connection(client_fd);
+            } catch (const std::exception& e) {
+                TTBOX_LOG_ERROR(std::string("IPC 连接处理抛异常: ") + e.what());
+            } catch (...) {
+                TTBOX_LOG_ERROR("IPC 连接处理抛未知异常");
+            }
             {
                 // 锁内完成所有对 IpcServer 成员的最后访问，再把 fd 从列表移除。
                 // stop() 以“列表为空”为线程已不再访问 this 的完成条件。
                 std::lock_guard<std::mutex> lk(conn_fds_mutex_);
+                IPCDBG("[IPC-SRV] fd=%d 关闭(收尾)\n", client_fd);
                 sock_close(client_fd);
                 active_connections_.fetch_sub(1, std::memory_order_acq_rel);
                 conn_fds_.erase(std::remove(conn_fds_.begin(), conn_fds_.end(), client_fd),
@@ -410,6 +481,8 @@ void IpcServer::handle_connection(int fd) {
     bool ok = false;
     std::string request_text = read_line(fd, &ok);
     std::string response_text;
+    IPCDBG("[IPC-SRV] fd=%d read ok=%d bytes=%zu text=%.80s\n", fd, ok ? 1 : 0,
+           request_text.size(), request_text.c_str());
     if (ok && !request_text.empty()) {
         JsonParseResult parsed = json_parse(request_text);
         IpcResponse resp;
@@ -425,7 +498,10 @@ void IpcServer::handle_connection(int fd) {
         }
         response_text = resp.to_json();
     } else {
-        // 空/异常连接：无需响应
+        // 空/异常连接：无需响应。这条是「客户端连接成功却读不到响应」的关键分支：
+        // ok=0 表示对端在读请求前就关了连接（或 recv 出错），empty=1 表示只收到空行。
+        IPCDBG("[IPC-SRV] fd=%d NO-RESPONSE ok=%d empty=%d\n", fd, ok ? 1 : 0,
+               request_text.empty() ? 1 : 0);
     }
     if (!response_text.empty()) {
         // send() 允许短写，尤其是 Preview 的大 base64 JSON。必须循环到完整发送
@@ -437,6 +513,7 @@ void IpcServer::handle_connection(int fd) {
             if (n <= 0) break;
             sent += static_cast<size_t>(n);
         }
+        IPCDBG("[IPC-SRV] fd=%d sent %zu/%zu bytes\n", fd, sent, response_text.size());
     }
     // fd 由 accept_loop 的连接线程 lambda 在锁内统一注销并关闭（防止 stop()
     // 排空阶段 shutdown 到已关闭的 fd 号）——这里不再 close。
@@ -827,24 +904,21 @@ bool ipc_request(const std::string& socket_path, const std::string& request_json
     fd = connect_unix(socket_path, error);
 #endif
     if (fd < 0) return false;
+    IPCDBG("[IPC-CLI] 已连接 fd=%d path=%s\n", fd, socket_path.c_str());
 
-#if defined(_WIN32)
-    struct timeval tv {};
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
-    ::setsockopt(static_cast<SOCKET>(fd), SOL_SOCKET, SO_RCVTIMEO,
-                 reinterpret_cast<const char*>(&tv), sizeof(tv));
-#else
-    struct timeval tv {};
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
-    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-#endif
+    if (!set_recv_timeout_ms(fd, timeout_ms)) {
+        // 显式失败：旧实现无条件丢弃 setsockopt 返回值，把「超时设错」变成静默行为。
+        if (error) *error = "设置接收超时失败 (sockerr=" + std::to_string(sock_last_error()) + ")";
+        sock_close(fd);
+        return false;
+    }
 
     std::string payload = request_json;
     if (payload.empty() || payload.back() != '\n') payload.push_back('\n');
 
     ssize_t sent = sock_send(fd, payload.data(), payload.size());
+    IPCDBG("[IPC-CLI] fd=%d send n=%lld/%zu sockerr=%d\n", fd, static_cast<long long>(sent),
+           payload.size(), sock_last_error());
     if (sent <= 0) {
         if (error) *error = "发送请求失败";
         sock_close(fd);
@@ -853,6 +927,7 @@ bool ipc_request(const std::string& socket_path, const std::string& request_json
 
     bool ok = false;
     response = read_line(fd, &ok);
+    IPCDBG("[IPC-CLI] fd=%d read ok=%d bytes=%zu\n", fd, ok ? 1 : 0, response.size());
     sock_close(fd);
     if (!ok) {
         if (error) *error = "读取响应失败（超时或连接关闭）";
