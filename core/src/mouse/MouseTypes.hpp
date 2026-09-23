@@ -288,6 +288,16 @@ struct MouseProfile {
     HotkeyGuardConfig hotkey_guard;         // 热键保护（按 toggle_hotkey 切换「热键挂起」）
     AimPointProfile aim_point;
     float lost_grace_ms = 78.0f;                // 目标丢失宽限期
+    // ---- 切靶防抖（对齐 BB：target_switch_hysteresis / switch_cooldown）----
+    // 只在「刚失去锁定、正要另选新目标」时生效；目标仍被锁定时不触发
+    //（第 1 层 track_lock 本来就保持锁定，不会走到这里）。
+    //  hysteresis：新目标必须比刚失去的锁定目标**明显更近**才允许切
+    //              —— 判定 `new_dist_sq × (1+h)² < old_dist_sq`（用平方比，省 sqrt）。
+    //              BB 取 50%，即新目标要近 1/1.5 以上才切。
+    //  cooldown ：一次切换发生后，这段时间内不再切换，防来回拉锯。
+    //  两者都为 0/0 时行为与加入前逐字节一致（旧用例兼容）。
+    float switch_hysteresis = 0.5f;             // 切换滞后比例（0.5 = 需近 50%）
+    float switch_cooldown_ms = 600.0f;          // 切换冷却（ms）
     LockConfirmConfig lock_confirm;                 // 目标锁定确认（ENTER/HOLD + instant-enter，第2项）
     // A11 标定闭环：calibrating 强制 AIMING；calibration_bias_* 把准星带到偏置位再拉回
     bool calibrating = false;                   // 标定模式（自瞄全程输出，用偏置测闭环响应）

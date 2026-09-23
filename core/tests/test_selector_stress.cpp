@@ -205,6 +205,54 @@ TEST(selector_switch_releases_old_active_tracks) {
         CHECK(sel.tracks().size() <= static_cast<size_t>(cfg.max_tracks));
     }
 }
+
+// ---- 切靶防抖（对齐 BB switch_cooldown）----
+// 多候选场景：切换发生后冷却期内不再另选目标；冷却过后恢复正常。
+// 单候选不受影响（目标瞬移/高速移动走那条路，见上一个用例）。
+TEST(selector_switch_cooldown_blocks_multi_candidate) {
+    TargetSelector sel;
+    auto cfg = make_cfg();
+    cfg.switch_cooldown_ms = 600.0f;
+    cfg.switch_hysteresis = 0.0f;  // 只验冷却
+    cfg.lost_grace_ms = 0.0f;      // 排除宽限干扰：一丢就允许重选
+    auto r0 = sel.select({box(320, 240, 60, 120), box(460, 300, 60, 120)}, cfg, 0);
+    CHECK(r0.valid);
+    // 冷却内：原目标瞬移到远处（第 1/2 层都匹配不上），另一个候选仍在 ⇒ 不切
+    auto r1 = sel.select({box(150, 180, 60, 120), box(460, 300, 60, 120)}, cfg, 100);
+    CHECK(!r1.valid);
+    // 冷却过：恢复正常选择
+    auto r2 = sel.select({box(150, 180, 60, 120), box(460, 300, 60, 120)}, cfg, 700);
+    CHECK(r2.valid);
+}
+
+// ---- 切靶滞后（对齐 BB target_switch_hysteresis）----
+// 新目标必须比刚失去的锁定目标明显更近才允许切；滞后置 0 时行为与加入前一致。
+TEST(selector_switch_hysteresis_blocks_far_candidate) {
+    // ★ 两个候选都必须落在 FOV 半径内（中心 320,240，半径 240），否则会被
+    //   collect_candidates 过滤掉 ⇒ 只剩单候选，守卫按设计不拦（那不是"切换"）。
+    const std::vector<DetectionBox> first = {box(340, 240, 60, 120), box(520, 240, 60, 120)};
+    // A(340,240) 距中心 20px；随后 A 瞬移到 (150,180)，剩下的候选都比它远
+    const std::vector<DetectionBox> second = {box(150, 180, 60, 120), box(520, 240, 60, 120)};
+    {
+        TargetSelector sel;
+        auto cfg = make_cfg();
+        cfg.switch_cooldown_ms = 0.0f;
+        cfg.switch_hysteresis = 0.5f;
+        cfg.lost_grace_ms = 0.0f;
+        CHECK(sel.select(first, cfg, 0).valid);
+        // B 的 dist_sq=10000，锁定基准 400：10000×1.5² = 22500 不小于 400 ⇒ 挡
+        CHECK(!sel.select(second, cfg, 1000).valid);
+    }
+    {
+        TargetSelector sel;  // 对照：滞后关掉，同样输入必须能选上
+        auto cfg = make_cfg();
+        cfg.switch_cooldown_ms = 0.0f;
+        cfg.switch_hysteresis = 0.0f;
+        cfg.lost_grace_ms = 0.0f;
+        CHECK(sel.select(first, cfg, 0).valid);
+        CHECK(sel.select(second, cfg, 1000).valid);
+    }
+}
 #include <cstdio>
 
 int main() {

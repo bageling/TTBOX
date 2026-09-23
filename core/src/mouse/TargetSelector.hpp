@@ -43,6 +43,11 @@ struct TargetSelectorConfig {
     float center_x = 0.5f;           // 选择中心（crop 系归一化）
     float center_y = 0.5f;
     float lost_grace_ms = 30.0f;     // 目标丢失宽限（对齐参考 selector_lost_grace_ms=30）
+    // ---- 切靶防抖（对齐 BB target_switch_hysteresis=50 / switch_cooldown=600ms）----
+    // 只在「失去锁定、正要另选目标」时生效（第 1 层 track_lock 仍保持锁定，不经过这里）。
+    // 两者为 0 时行为与加入前一致（旧用例兼容）。
+    float switch_hysteresis = 0.5f;   // 新目标需近 (1+h) 倍才允许切（平方比较，省 sqrt）
+    float switch_cooldown_ms = 600.0f; // 切换后冷却，期间不再切
     float aim_ratio_x = 0.5f;
     float aim_ratio_y = 0.2f;
     float switch_match_ratio = 0.4f; // rect_lock 匹配距离 = 目标对角 × 此比例
@@ -127,6 +132,9 @@ public:
         active_track_ = -1;
         last_reason_ = TargetSelection::kNone;
         next_id_ = 1;
+        has_switch_ = false;
+        last_switch_ms_ = 0;
+        last_locked_dist_sq_ = -1.0f;
     }
 
     const std::vector<TrackEntry>& tracks() const { return tracks_; }
@@ -162,6 +170,12 @@ private:
                     int active_track_ = -1;          // 当前激活锁定 track id
                     TargetSelection::Reason last_reason_ = TargetSelection::kNone;
                     uint32_t next_id_ = 1;
+                    // ---- 切靶防抖状态 ----
+                    // has_switch_ 独立于 last_switch_ms_：后者为 0 是合法时刻（now_ms 可能就是 0），
+                    // 用 ">0" 判断"是否发生过切换"会漏掉这一种情况。
+                    bool has_switch_ = false;
+                    uint32_t last_switch_ms_ = 0;       // 上次切换（选中新目标）的时刻
+                    float last_locked_dist_sq_ = -1.0f; // 刚失去的锁定目标的距离平方（<0 表示无）
         };
 
 }  // namespace ttbox::core::aim

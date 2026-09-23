@@ -216,6 +216,7 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                 out.lock_radius = std::max(1.0f, 0.06f * (best->box.x2 - best->box.x1));
                 out.reason = TargetSelection::kTrackLock;
                 last_reason_ = out.reason;
+                last_locked_dist_sq_ = best->dist_sq;  // 供丢失后切靶滞后比较用
                 return out;
             }
             // 激活 track 未匹配：丢失宽限
@@ -242,6 +243,29 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             active_track_ = -1;  // 激活 track 不存在（被清理）
         }
     }
+
+    // ---- 切靶防抖守卫（对齐 BB：target_switch_hysteresis + switch_cooldown）----
+    // 只作用在「锁定已丢失、正要另选目标」的第 2/3 层；
+    // 第 1 层 track_lock 是保持锁定，不经过这里（所以不影响正常跟枪）。
+    // 两个阈值任一为 0 ⇒ 对应机制关闭，行为与加入前一致。
+    auto switch_blocked = [&](float new_dist_sq) -> bool {
+        // ★ 只有一个候选 ⇒ 不存在"在多个目标间切换"（目标高速移动/瞬移同样走这条路径），
+        //   此时若还拦，会把正常跟踪一起挡死 —— 一律放行。
+        if (cands.size() < 2) return false;
+        if (cfg.switch_cooldown_ms > 0.0f && has_switch_) {
+            const long long since =
+                static_cast<long long>(now_ms) - static_cast<long long>(last_switch_ms_);
+            // since < 0 = 时钟回退（发生即视为冷却未过，保守不切）
+            if (since < 0 || since < static_cast<long long>(cfg.switch_cooldown_ms)) return true;
+        }
+        if (cfg.switch_hysteresis > 0.0f && last_locked_dist_sq_ > 0.0f) {
+            const float k = 1.0f + cfg.switch_hysteresis;
+            // 新目标必须**明显更近**才允许切：new_dist_sq × (1+h)² < old_dist_sq
+            // （用距离平方比较，与候选排序一致，省一次 sqrt）
+            if (!(new_dist_sq * k * k < last_locked_dist_sq_)) return true;
+        }
+        return false;
+    };
 
     // ---- 第 2 层：rect_lock / continuity（候选与任一 track 位置匹配）----
     // 遍历非激活 track（含宽限内旧目标），按位置匹配
@@ -272,12 +296,16 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                     best_t->active = true;
                     kalman_update(*best_t, best_c->box, cfg, now_ms);
                     active_track_ = best_t->id;
-            out.valid = true;
-            out.box = best_c->box;
-            out.target_id = best_t->id;
-            out.distance = std::sqrt(best_c->dist_sq);
-            out.lock_radius = std::max(1.0f, 0.06f * (best_c->box.x2 - best_c->box.x1));
-            out.reason = TargetSelection::kRectLock;
+                    // ★ 第 2 层是「位置匹配 ⇒ 大概率同一目标」，不算切换、不启用冷却，
+                    //   否则会误伤"短暂丢失后重新获取"（那是 lost_grace_ms 的职责）。
+                    //   只刷新滞后比较基准；真正的新目标切换由第 3 层守卫把关。
+                    last_locked_dist_sq_ = best_c->dist_sq;
+                    out.valid = true;
+                    out.box = best_c->box;
+                    out.target_id = best_t->id;
+                    out.distance = std::sqrt(best_c->dist_sq);
+                    out.lock_radius = std::max(1.0f, 0.06f * (best_c->box.x2 - best_c->box.x1));
+                    out.reason = TargetSelection::kRectLock;
             last_reason_ = out.reason;
             return out;
         }
@@ -285,6 +313,13 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
 
     // ---- 第 3 层：score（无锁定，新建 track 或复用最近 track）----
         {
+            const Candidate& c = cands.front();  // 已按距离排序，取最近
+            // 切靶防抖：冷却未过 / 新目标不够近 ⇒ 本帧不选新目标（返回无效）。
+            // 宁可短暂无目标，也不在两个目标之间来回拉锯（对齐 BB 的 cooldown + hysteresis）。
+            if (switch_blocked(c.dist_sq)) {
+                last_reason_ = TargetSelection::kNone;
+                return out;
+            }
             // 与第 2 层一致：切换激活轨迹前先释放旧锁，防止 active 轨迹无限累积。
             if (active_track_ >= 0) {
                 for (auto& t : tracks_) {
@@ -294,7 +329,6 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                     }
                 }
             }
-            const Candidate& c = cands.front();  // 已按距离排序，取最近
             // 复用已存在但未激活且距离近的 track（防同目标重复建 track）
             TrackEntry* reuse = nullptr;
             for (auto& t : tracks_) {
@@ -336,6 +370,9 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             out.valid = true;
             out.distance = std::sqrt(c.dist_sq);
             out.lock_radius = std::max(1.0f, 0.06f * (c.box.x2 - c.box.x1));
+            last_switch_ms_ = now_ms;
+            has_switch_ = true;
+            last_locked_dist_sq_ = c.dist_sq;
             out.reason = TargetSelection::kScore;
             last_reason_ = out.reason;
             return out;

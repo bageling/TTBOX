@@ -174,6 +174,14 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse.lost_grace_ms 不能为负";
         return false;
     }
+    if (mouse.switch_hysteresis < 0.0f) {
+        if (error) *error = "mouse.switch_hysteresis 不能为负";
+        return false;
+    }
+    if (mouse.switch_cooldown_ms < 0.0f) {
+        if (error) *error = "mouse.switch_cooldown_ms 不能为负";
+        return false;
+    }
     if (mouse.personal_motion.curve_blend < 0.0f || mouse.personal_motion.curve_blend > 1.0f ||
         mouse.personal_motion.speed_blend < 0.0f || mouse.personal_motion.speed_blend > 1.0f ||
         mouse.personal_motion.reaction_blend < 0.0f || mouse.personal_motion.reaction_blend > 1.0f ||
@@ -395,6 +403,8 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("offset_y", JsonValue::number(static_cast<double>(mouse.aim_point.offset_y)));
     m.set("switch_delay_ms", JsonValue::number(static_cast<double>(mouse.aim_point.switch_delay_ms)));
     m.set("lost_grace_ms", JsonValue::number(static_cast<double>(mouse.lost_grace_ms)));
+    m.set("switch_hysteresis", JsonValue::number(static_cast<double>(mouse.switch_hysteresis)));
+    m.set("switch_cooldown_ms", JsonValue::number(static_cast<double>(mouse.switch_cooldown_ms)));
     m.set("calibrating", JsonValue::boolean(mouse.calibrating));
     m.set("calibration_bias_x", JsonValue::number(static_cast<double>(mouse.calibration_bias_x)));
     m.set("calibration_bias_y", JsonValue::number(static_cast<double>(mouse.calibration_bias_y)));
@@ -605,6 +615,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.aim_point.offset_y = static_cast<float>(obj_num(*m, "offset_y", 0.5));
         p.mouse.aim_point.switch_delay_ms = static_cast<int>(obj_int(*m, "switch_delay_ms", 30));
         p.mouse.lost_grace_ms = static_cast<float>(obj_num(*m, "lost_grace_ms", 78.0));
+        p.mouse.switch_hysteresis = static_cast<float>(obj_num(*m, "switch_hysteresis", 0.5));
+        p.mouse.switch_cooldown_ms = static_cast<float>(obj_num(*m, "switch_cooldown_ms", 600.0));
         p.mouse.calibrating = obj_bool(*m, "calibrating", false);
         p.mouse.calibration_bias_x = static_cast<float>(obj_num(*m, "calibration_bias_x", 0.0));
         p.mouse.calibration_bias_y = static_cast<float>(obj_num(*m, "calibration_bias_y", 0.0));

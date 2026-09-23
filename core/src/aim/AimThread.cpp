@@ -99,6 +99,10 @@ void AimThread::loop() {
             if (frame_profile) {
                 scfg.fov_range = frame_profile->fov.enabled ? frame_profile->fov.radius * 2.0f : 1.0f;
                 scfg.lost_grace_ms = frame_profile->mouse.lost_grace_ms;
+                // 切靶防抖（对齐 BB 的 hysteresis / cooldown）：配置缺省即取 MouseProfile 默认
+                // 0.5 / 600ms；两者置 0 可完全关闭，回到加此机制前的行为。
+                scfg.switch_hysteresis = frame_profile->mouse.switch_hysteresis;
+                scfg.switch_cooldown_ms = frame_profile->mouse.switch_cooldown_ms;
                 scfg.confidence = frame_profile->mouse.confidence > 0.0f
                                       ? frame_profile->mouse.confidence : 0.25f;
                 scfg.aim_ratio_x = frame_profile->mouse.aim_point.offset_x;
