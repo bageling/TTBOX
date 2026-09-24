@@ -35,6 +35,7 @@ SRCS := \
 	usb-proxy.cpp \
 	proxy.cpp \
 	mouse_control.cpp \
+	hid_report_layout.cpp \
 	synthetic.cpp \
 	device-libusb.cpp \
 	host-raw-gadget.cpp \

@@ -559,115 +559,53 @@ void mouse_control_stop() {
     g_state.mouse_control_enabled.store(false);
 }
 
-// ── 布局不匹配诊断（2026-09-22）─────────────────────────────────
+// ── 布局诊断（2026-09-24 重写：从"猜偏移"改为"解析描述符"）────────
 //
-// 为何存在：g_state 里的报告布局（report_id/x_offset/y_offset/report_len）是**写死的罗技
-// c53f 常量**，全仓没有任何代码从物理鼠标的 report descriptor 里解出来（hpp 那句注释是
-// 假的）。对不上时 merge/notify 直接 return false —— 表现为客户机上「AI 完全不修正、
-// 面板看不到物理按键」，而日志里一个字都没有，现场只能靠猜。
+// 旧版把报告布局写死成罗技 c53f（rid=2、buttons@1..2、X@3..4、Y@5..6、len=9）。
+// 1.5.44 只给**长度**加了自适应，偏移没动 ⇒ 现场那只鼠标
+//   `[0]=rid(0x02) [1..2]=X int16 [3..4]=Y int16 [5]=wheel [6]=pan`
+// 被整体错位写入：
+//   · AI 的 **Y 位移被写进 wheel 字节** ⇒ 主机每帧收到一次滚轮 ⇒ 游戏疯狂切枪；
+//   · 按键掩码读的是 `data[1] | data[2]<<8` = **X 位移的低 16 位** ⇒ 掩码恒被污染
+//     （现场实测 0xff = 五个键全亮）⇒ 自瞄热键闸门形同虚设、"不按它也在跑"。
 //
-// 所以这里先把「说不了话」补上：首次 5 次逐条打印实测值 vs 期望值，
-// 之后每 5s 一条汇总。真正的布局自动解析（阶段二）另做。
-// 频率控制：首 5 次 + 5s 一次汇总，1kHz 报告下也不会刷爆 journal。
-enum LayoutMismatch {
-    kMismatchLen = 0,
-    kMismatchRid = 1,
-    kMismatchOffset = 2,
+// 现在：每个接口的 HID 报告描述符解析出**真实字段位置**再读写；解析不出来就一个字
+// 都不碰（fail-closed）。下面的计数是"为什么没动"的唯一说法。
+enum LayoutReject {
+    kRejectNoLayout = 0,   // 该接口还没拿到可用布局（描述符没收到 / 畸形 / 无 X-Y 与 buttons）
+    kRejectNoXy = 1,       // 这份报告（report_id）里没有 X/Y —— 不是位移报告
+    kRejectLen = 2,        // 报告长度与布局对不上（放不下字段）
+    kRejectField = 3,      // 字段位宽/对齐不安全，或与 buttons/wheel 字节区间重叠
+    kRejectNoButtons = 4,  // 这份报告里没有 buttons 字段 —— 不是按键报告
 };
 
 struct LayoutDiag {
     std::atomic<uint64_t> merge_ok{0};
-    std::atomic<uint64_t> len_mismatch{0};
-    std::atomic<uint64_t> rid_mismatch{0};
-    std::atomic<uint64_t> offset_invalid{0};
+    std::atomic<uint64_t> reject_no_layout{0};
+    std::atomic<uint64_t> reject_no_xy{0};
+    std::atomic<uint64_t> reject_len{0};
+    std::atomic<uint64_t> reject_field{0};
+    std::atomic<uint64_t> reject_no_buttons{0};
     std::atomic<int> first_logs{0};
     std::atomic<int64_t> last_summary_us{0};
 };
 
 static LayoutDiag g_layout_diag;
 
-// ── 报告长度自适应（2026-09-23）─────────────────────────────────
-//
-// 为何必须做：`report_len` 是**写死的 Logitech c53f 常量 9**（hpp 注释吹成"从描述符解析"
-// 是假的），而现场插的鼠标报的是 **7 字节**（rid + buttons + X + Y，没有滚轮）。
-// 结果是 merge 与 notify **两条路都被长度校验整包拒绝** —— 实测
-//   `[LAYOUT] 5s 汇总：merge_ok=0 len_mismatch=49559`（rid_mismatch=0）
-// 也就是：① 物理按键事件上不来 ⇒ 热键永远判不到 ⇒ `injection_allowed` 恒 false；
-//        ② AI 位移搭不上车 ⇒ 就算有目标、有 PID 输出，鼠标也一动不动。
-// 表现就是业主说的「能识别到，但自瞄没有效果」。
-//
-// 改法（保守自适应，不猜布局）：
-//   · 长度**不再要求等于**期望值，只要求「放得下 X/Y」（len >= max(xo,yo)+2）且不超上限；
-//   · report_id 仍然必须相等（这条是真正的安全边界，防把键盘/厂商报告当鼠标改写）；
-//   · 连续观测到同一个"非期望但合法"的长度 N 次 ⇒ 把期望长度收敛过去，
-//     诊断噪声随之消失（不再是每 5s 一条 mismatch）。
-//   本次实测 7 字节：X@3 Y@5 与期望布局完全一致，只是少了滚轮那 2 字节 ⇒ 自适应后即可正常合并。
-constexpr int kAdaptStreak = 16;      // 连续观测多少次才收敛期望长度
-constexpr uint32_t kMaxReportLen = 64;  //  sanity 上限
-
-static std::atomic<int> g_adapt_len{0};
-static std::atomic<int> g_adapt_streak{0};
-
-// 前向声明（真正的定义在下面）
-static void diag_layout_mismatch(const char* who, uint32_t len, const uint8_t* data,
-                                 LayoutMismatch kind);
-
-static void maybe_adapt_report_len(uint32_t len) {
-    const int want = static_cast<int>(len);
-    if (g_adapt_len.load() != want) {
-        g_adapt_len.store(want);
-        g_adapt_streak.store(1);
-        return;
-    }
-    const int s = g_adapt_streak.fetch_add(1) + 1;
-    if (s >= kAdaptStreak && g_state.report_len.load() != want) {
-        const int old = g_state.report_len.exchange(want);
-        fprintf(stderr,
-                "[mouse_control][LAYOUT] 报告长度自适应：期望 %d → %d"
-                "（连续 %d 次观测到稳定长度；rid=0x%02x X@%d Y@%d 仍成立）\n",
-                old, want, s, g_state.report_id.load(),
-                g_state.x_offset.load(), g_state.y_offset.load());
-    }
-}
-
-// 长度/rid 准入：替代原先"必须 == report_len"的硬拒。
-static bool report_layout_acceptable(const char* who, uint32_t len, const uint8_t* data) {
-    const int xo = g_state.x_offset.load();
-    const int yo = g_state.y_offset.load();
-    const int need = (xo > yo ? xo : yo) + 2;
-    if (len == 0 || len > kMaxReportLen || static_cast<int>(len) < need) {
-        diag_layout_mismatch(who, len, data, kMismatchOffset);
-        return false;
-    }
-    if (data[0] != g_state.report_id.load()) {
-        diag_layout_mismatch(who, len, data, kMismatchRid);
-        return false;
-    }
-    if (static_cast<int>(len) != g_state.report_len.load()) {
-        maybe_adapt_report_len(len);
-    }
-    return true;
-}
-
-static void diag_layout_mismatch(const char* who, uint32_t len, const uint8_t* data,
-                                 LayoutMismatch kind) {
-    uint64_t n = 0;
+static void count_reject(LayoutReject kind) {
     switch (kind) {
-    case kMismatchLen:    n = g_layout_diag.len_mismatch.fetch_add(1) + 1; break;
-    case kMismatchRid:    n = g_layout_diag.rid_mismatch.fetch_add(1) + 1; break;
-    default:              n = g_layout_diag.offset_invalid.fetch_add(1) + 1; break;
+    case kRejectNoLayout:  g_layout_diag.reject_no_layout.fetch_add(1); break;
+    case kRejectNoXy:      g_layout_diag.reject_no_xy.fetch_add(1); break;
+    case kRejectLen:       g_layout_diag.reject_len.fetch_add(1); break;
+    case kRejectField:     g_layout_diag.reject_field.fetch_add(1); break;
+    default:               g_layout_diag.reject_no_buttons.fetch_add(1); break;
     }
-    const int expected_len = g_state.report_len.load();
-    const int expected_rid = g_state.report_id.load();
-    const int xo = g_state.x_offset.load();
-    const int yo = g_state.y_offset.load();
+    // 前 5 次逐条给 kind，之后每 5s 一条汇总（1kHz 报告下不能刷爆 journal）
     if (g_layout_diag.first_logs.fetch_add(1) < 5) {
         fprintf(stderr,
-                "[mouse_control][LAYOUT] %s 不匹配（第%llu 次，kind=%d）：实测 len=%u rid=0x%02x；"
-                "期望 len=%d rid=0x%02x X@%d Y@%d。本次 AI 位移不合并；"
-                "若持续出现 = 这只鼠标的报告布局与写死的常量不同。\n",
-                who, (unsigned long long)n, static_cast<int>(kind), len,
-                len ? data[0] : 0, expected_len, expected_rid, xo, yo);
+                "[mouse_control][LAYOUT] 放弃本次读写 kind=%d"
+                "（0=无布局 1=非位移报告 2=长度不符 3=字段不安全 4=非按键报告）\n",
+                static_cast<int>(kind));
         return;
     }
     const int64_t now = now_us();
@@ -675,84 +613,212 @@ static void diag_layout_mismatch(const char* who, uint32_t len, const uint8_t* d
     if (now - last >= 5000000 &&
         g_layout_diag.last_summary_us.compare_exchange_strong(last, now)) {
         fprintf(stderr,
-                "[mouse_control][LAYOUT] 5s 汇总：merge_ok=%llu len_mismatch=%llu "
-                "rid_mismatch=%llu offset_invalid=%llu（期望 len=%d rid=0x%02x X@%d Y@%d）\n",
+                "[mouse_control][LAYOUT] 5s 汇总：merge_ok=%llu 无布局=%llu 非位移报告=%llu "
+                "长度不符=%llu 字段不安全=%llu 非按键报告=%llu\n",
                 (unsigned long long)g_layout_diag.merge_ok.load(),
-                (unsigned long long)g_layout_diag.len_mismatch.load(),
-                (unsigned long long)g_layout_diag.rid_mismatch.load(),
-                (unsigned long long)g_layout_diag.offset_invalid.load(),
-                expected_len, expected_rid, xo, yo);
+                (unsigned long long)g_layout_diag.reject_no_layout.load(),
+                (unsigned long long)g_layout_diag.reject_no_xy.load(),
+                (unsigned long long)g_layout_diag.reject_len.load(),
+                (unsigned long long)g_layout_diag.reject_field.load(),
+                (unsigned long long)g_layout_diag.reject_no_buttons.load());
     }
 }
 
-// 物理 HID 报告到达时：将挂起 AI 位移合并进 X/Y（int16 LE）。
-// 布局: [0]=report_id, [1..2]=buttons u16 LE, [x_offset..+2]=X, [y_offset..+2]=Y
-bool mouse_control_merge_report(uint8_t* data, uint32_t len) {
+// 取"这份报告"对应的布局。
+//   · 描述符里出现过 Report ID ⇒ 报告首字节是 report_id，其后才是数据；
+//   · 否则整份报告都是数据（按 report_id = 0 找）。
+// 返回 nullptr = 该接口不可用 / 这个 report_id 没有布局 ⇒ 调用方必须放弃。
+static const HidReportLayout* layout_for_report(uint8_t interface_number,
+                                                const uint8_t* data, uint32_t len,
+                                                const uint8_t** body, size_t* body_len) {
+    if (data == nullptr || len == 0 || interface_number >= 8) return nullptr;
+    HidMouseDescriptor desc;
+    {
+        std::lock_guard<std::mutex> lk(g_state.layout_mutex);
+        const InterfaceLayout& il = g_state.iface_layouts[interface_number];
+        if (!il.ready || !il.usable) return nullptr;
+        desc = il.desc;
+    }
+
+    int rid = 0;
+    size_t off = 0;
+    if (desc.uses_report_ids) {
+        rid = data[0];
+        off = 1;
+    }
+    if (static_cast<size_t>(len) <= off) return nullptr;
+    const HidReportLayout* lay = desc.find(rid);
+    if (lay == nullptr) return nullptr;
+    if (body) *body = data + off;
+    if (body_len) *body_len = static_cast<size_t>(len) - off;
+    return lay;
+}
+
+// 收到物理设备某接口的 HID 报告描述符 → 解析并缓存（fail-closed 的前提）。
+void mouse_control_set_report_descriptor(uint8_t interface_number,
+                                        const uint8_t* desc, uint32_t len) {
+    if (interface_number >= 8 || desc == nullptr || len == 0) return;
+
+    HidMouseDescriptor parsed;
+    const bool ok = hid_parse_report_descriptor(desc, len, &parsed);
+
+    std::lock_guard<std::mutex> lk(g_state.layout_mutex);
+    InterfaceLayout& il = g_state.iface_layouts[interface_number];
+    if (il.ready && il.desc.parsed == parsed.parsed &&
+        il.desc.layout_count == parsed.layout_count && il.desc.uses_report_ids == parsed.uses_report_ids) {
+        return;  // 同一份描述符重复回调：不重复解析、不重复打日志
+    }
+    il.ready = true;
+    il.desc = parsed;
+    il.usable = ok && parsed.usable();
+
+    const HidReportLayout* xy = il.usable ? parsed.xy_layout() : nullptr;
+    const HidReportLayout* bt = il.usable ? parsed.button_layout() : nullptr;
+
+    fprintf(stderr,
+            "[mouse_control][LAYOUT] 接口 %u 描述符 %u 字节：解析%s，%d 份报告，report_id 前缀=%s\n",
+            interface_number, len, il.usable ? "成功" : "失败/无可用字段",
+            parsed.layout_count, parsed.uses_report_ids ? "有" : "无");
+    // 描述符原文（最多 64 字节）：现场一旦解析不对，这是唯一能把问题复现出来的证据。
+    // 之所以要它 —— 详情见文件头：上一轮就是因为"布局靠猜、日志无声"才烧了一整轮排查。
+    if (!il.usable) {
+        const char* kHex = "0123456789abcdef";
+        char hex[3 * 64 + 1];
+        int n = 0;
+        const uint32_t show = len < 64 ? len : 64;
+        for (uint32_t i = 0; i < show; ++i) {
+            hex[n++] = kHex[desc[i] >> 4];
+            hex[n++] = kHex[desc[i] & 0x0F];
+        }
+        hex[n] = '\0';
+        fprintf(stderr, "[mouse_control][LAYOUT]   描述符原文(%u/%u 字节)：%s\n", show, len, hex);
+    }
+    if (xy != nullptr) {
+        fprintf(stderr,
+                "[mouse_control][LAYOUT]   位移报告 rid=%d：X@bit%d/%dbit Y@bit%d/%dbit wheel=%s，"
+                "报告共 %d 字节\n",
+                xy->report_id, xy->x.bit_offset, xy->x.bit_size,
+                xy->y.bit_offset, xy->y.bit_size,
+                xy->wheel.present ? "有" : "无", xy->total_bytes());
+        fprintf(stderr,
+                "[mouse_control][LAYOUT]   安全校验：X/Y 与 buttons %s，与 wheel %s\n",
+                (hid_fields_overlap_bytes(xy->x, xy->buttons) ||
+                 hid_fields_overlap_bytes(xy->y, xy->buttons)) ? "重叠(将拒写)" : "不重叠",
+                (hid_fields_overlap_bytes(xy->x, xy->wheel) ||
+                 hid_fields_overlap_bytes(xy->y, xy->wheel)) ? "重叠(将拒写)" : "不重叠");
+    }
+    if (bt != nullptr) {
+        fprintf(stderr, "[mouse_control][LAYOUT]   按键报告 rid=%d：buttons@bit%d/%dbit\n",
+                bt->report_id, bt->buttons.bit_offset, bt->buttons.bit_size);
+    }
+}
+
+bool mouse_control_get_layout(uint8_t interface_number, HidMouseDescriptor* out) {
+    if (interface_number >= 8 || out == nullptr) return false;
+    std::lock_guard<std::mutex> lk(g_state.layout_mutex);
+    const InterfaceLayout& il = g_state.iface_layouts[interface_number];
+    if (!il.ready) return false;
+    *out = il.desc;
+    return true;
+}
+
+// 物理 HID 报告到达时：把挂起的 AI 位移合并进**这份报告真实的 X/Y 字段**。
+// 布局来自该接口的描述符解析；任何一处对不上就原样返回 ——
+// 绝不猜偏移、绝不碰 buttons/wheel 的字节（旧代码正是这么把滚轮写乱、害得游戏疯狂切枪的）。
+bool mouse_control_merge_report(uint8_t interface_number, uint8_t* data, uint32_t len) {
     if (!g_state.mouse_control_enabled.load()) return false;
-    // 只合并真正的鼠标报告（report_id + report_len 精确匹配），
-    // 防止键盘/消费类/厂商报告被当成鼠标 X/Y 改写。
-    // ★ 2026-09-23：长度改自适应（不再要求 == report_len），rid 仍是硬边界。
-    //   详见 report_layout_acceptable 上方注释：写死的 9 字节期望导致 7 字节报告 100% 被拒，
-    //   merge 与 notify 双双失效 ⇒ 自瞄有识别但不动。
-    if (!report_layout_acceptable("merge", len, data)) return false;
-    int xo = g_state.x_offset.load();
-    int yo = g_state.y_offset.load();
-    int32_t dx = g_state.pending_dx.exchange(0);
-    int32_t dy = g_state.pending_dy.exchange(0);
+    if (data == nullptr || len == 0) return false;
+
+    const uint8_t* body = nullptr;
+    size_t body_len = 0;
+    const HidReportLayout* lay = layout_for_report(interface_number, data, len, &body, &body_len);
+    if (lay == nullptr) {
+        count_reject(kRejectNoLayout);
+        return false;
+    }
+    if (!lay->has_xy()) {
+        count_reject(kRejectNoXy);
+        return false;
+    }
+    // 安全门①：X/Y 的位宽与对齐必须可安全读写
+    if (!hid_field_is_safe(lay->x) || !hid_field_is_safe(lay->y)) {
+        count_reject(kRejectField);
+        return false;
+    }
+    // 安全门②：X/Y 的字节区间不得与 buttons / wheel 重叠。
+    // 旧代码写死 X@3 Y@5，对现场鼠标正好压在 wheel 上 ⇒ 每帧一个滚轮事件 ⇒ 疯狂切枪。
+    // 这条断言就是那个 bug 的墓碑：只要重叠，宁可自瞄不生效也不写。
+    if (hid_fields_overlap_bytes(lay->x, lay->buttons) ||
+        hid_fields_overlap_bytes(lay->y, lay->buttons) ||
+        hid_fields_overlap_bytes(lay->x, lay->wheel) ||
+        hid_fields_overlap_bytes(lay->y, lay->wheel)) {
+        count_reject(kRejectField);
+        return false;
+    }
+    // 安全门③：报告必须放得下布局声明的字节数
+    if (body_len < static_cast<size_t>(lay->total_bytes())) {
+        count_reject(kRejectLen);
+        return false;
+    }
+
+    const int32_t dx = g_state.pending_dx.exchange(0);
+    const int32_t dy = g_state.pending_dy.exchange(0);
     if (dx == 0 && dy == 0) {
         g_layout_diag.merge_ok.fetch_add(1);
         return false;
     }
 
-    auto read_i16 = [&](int off) -> int32_t {
-        return static_cast<int16_t>(static_cast<uint16_t>(data[off]) |
-                                    (static_cast<uint16_t>(data[off + 1]) << 8));
-    };
-    auto write_i16 = [&](int off, int32_t v) {
-        if (v < -32768) v = -32768;
-        if (v > 32767) v = 32767;
-        uint16_t uv = static_cast<uint16_t>(static_cast<int16_t>(v));
-        data[off] = static_cast<uint8_t>(uv & 0xFF);
-        data[off + 1] = static_cast<uint8_t>(uv >> 8);
-    };
-    write_i16(xo, read_i16(xo) + dx);
-    write_i16(yo, read_i16(yo) + dy);
+    int32_t cur_x = 0;
+    int32_t cur_y = 0;
+    uint8_t* mutable_body = const_cast<uint8_t*>(body);
+    if (!hid_field_read_signed(body, body_len, lay->x, &cur_x) ||
+        !hid_field_read_signed(body, body_len, lay->y, &cur_y)) {
+        count_reject(kRejectLen);
+        return false;
+    }
+    if (!hid_field_write_signed(mutable_body, body_len, lay->x, cur_x + dx) ||
+        !hid_field_write_signed(mutable_body, body_len, lay->y, cur_y + dy)) {
+        count_reject(kRejectLen);
+        return false;
+    }
     g_state.merge_count.fetch_add(1);
     g_layout_diag.merge_ok.fetch_add(1);
     g_state.last_move_ts_us.store(now_us());
     return true;
 }
 
-// 物理报告解析：更新按钮掩码 + 通知订阅者（逐按钮事件）
+// 物理报告解析：按**真实的 buttons 字段**更新按键掩码 + 通知订阅者。
 // BUTTON_EVENT payload = <BBBQ button, pressed(1=down/0=up), mask, timestamp_ns
-void mouse_control_notify_physical_report(const uint8_t* data, uint32_t len) {
+//
+// ★ 按键报告与位移报告常常不是同一个 report_id。旧代码硬要 rid==2，又从 `data[1..2]`
+//   读 buttons —— 对现场鼠标那就是 X 位移，掩码永远是被污染的垃圾（实测 0xff）。
+void mouse_control_notify_physical_report(uint8_t interface_number,
+                                          const uint8_t* data, uint32_t len) {
     if (!g_state.mouse_control_enabled.load()) return;
-    // 只解析真正的鼠标报告；键盘/厂商/消费类报告的 data[1..2] 不是按钮掩码。
-    // ★ 同上：notify 原来也被长度硬拒 ⇒ 物理按键事件发不出去 ⇒ 热键永远判不到。
-    if (!report_layout_acceptable("notify", len, data)) return;
-    static std::atomic<int> report_samples{0};
-    if (report_samples.fetch_add(1) < 5) {
-        fprintf(stderr, "[mouse_control] phys_report len=%u first12:", len);
-        for (uint32_t i = 0; i < len && i < 12; ++i) fprintf(stderr, " %02x", data[i]);
-        fprintf(stderr, "\n");
-    }
-    // Logitech 布局: [1..2] buttons u16 LE；其他布局退化读取 [1]
-    uint8_t mask = 0;
-    if (len >= 3) {
-        mask = static_cast<uint8_t>(data[1] | (data[2] << 8));
-    } else if (len >= 2) {
-        mask = data[1];
-    }
-    uint8_t old = g_state.button_mask.exchange(mask);
-    uint8_t changed = static_cast<uint8_t>(old ^ mask);
-    if (!changed) return;
+    if (data == nullptr || len == 0) return;
 
-    int64_t ts_ns = now_ns();
-    uint32_t rid = 0;
+    const uint8_t* body = nullptr;
+    size_t body_len = 0;
+    const HidReportLayout* lay = layout_for_report(interface_number, data, len, &body, &body_len);
+    if (lay == nullptr) return;  // 静默：同一份报告 merge 那条路已在计数，不重复记
+    if (!lay->has_buttons()) return;
+
+    uint32_t raw_mask = 0;
+    if (!hid_field_read_mask(body, body_len, lay->buttons, &raw_mask)) {
+        count_reject(kRejectNoButtons);
+        return;
+    }
+    const uint8_t mask = static_cast<uint8_t>(raw_mask & 0xFF);
+    const uint8_t old = g_state.button_mask.exchange(mask);
+    const uint8_t changed = static_cast<uint8_t>(old ^ mask);
+    if (changed == 0) return;
+
+    const int64_t ts_ns = now_ns();
+    const uint32_t rid = 0;
     std::lock_guard<std::mutex> lk(g_state.subscribers_mutex);
     // 每个变化的按钮发一条 BUTTON_EVENT：button=1..5, pressed, mask, ts
     for (int b = 1; b <= 5; b++) {
-        uint8_t bit = static_cast<uint8_t>(1u << (b - 1));
+        const uint8_t bit = static_cast<uint8_t>(1u << (b - 1));
         if (!(changed & bit)) continue;
         uint8_t ev[11] = {0};
         ev[0] = static_cast<uint8_t>(b);

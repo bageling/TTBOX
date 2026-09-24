@@ -1099,9 +1099,14 @@ void *ep_loop_read(void *arg) {
 								injection(io, thread_info.device_bEndpointAddress, transfer_type);
 
 							// ── mouse_control：AI 位移"搭车"合并 + 物理按钮事件 ──
+							// 接口号必须传：报告布局是**按接口**解析的
+							// （同一 dongle 的键盘/鼠标/厂商接口描述符各不相同），
+							// 传 0 或写死接口号都会把键盘报告当成鼠标改。详见 mouse_control.hpp
 							ttbox_usbproxy::mouse_control_notify_physical_report(
+								thread_info.interface_number,
 								reinterpret_cast<const uint8_t*>(io.data), io.inner.length);
 							ttbox_usbproxy::mouse_control_merge_report(
+								thread_info.interface_number,
 								reinterpret_cast<uint8_t*>(io.data), io.inner.length);
 
 							data_mutex->lock();
@@ -1448,6 +1453,13 @@ void ep0_loop(int fd) {
 							printf("ep0: HID report descriptor iface %u transferred %d/%d bytes\n",
 								hid_report_interface, rv, event.ctrl.wLength);
 							mark_hid_report_descriptor_ready(hid_report_interface);
+							// 把该接口的报告描述符交给 mouse_control 解析出**真实布局**
+							//（buttons/X/Y/wheel 各在第几个字节）—— 这是"不再猜偏移"的唯一来源。
+							// io.data 就是刚转发给主机的描述符原文。
+							ttbox_usbproxy::mouse_control_set_report_descriptor(
+								hid_report_interface,
+								reinterpret_cast<const uint8_t*>(io.data),
+								static_cast<uint32_t>(rv > 0 ? rv : 0));
 						}
 					}
 			}

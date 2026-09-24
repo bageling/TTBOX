@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "hid_report_layout.hpp"
+
 namespace ttbox_usbproxy {
 
 // ── 协议常量（自研，0x4F50）──
@@ -74,6 +76,13 @@ struct GadgetConfig {
         "0930093109381581257f750895038106c0c0";
 };
 
+// 一个 USB 接口的物理鼠标布局（从该接口的 HID report descriptor 解析得到）
+struct InterfaceLayout {
+    bool ready = false;    // 是否收到过该接口的描述符
+    bool usable = false;   // 解析成功且找到了 X/Y 或 buttons
+    HidMouseDescriptor desc;
+};
+
 // ── 共享状态 ──
 struct MouseControlState {
     // AI 注入挂起位移（物理报告到达时"搭车"合并；synthetic 模式直接注入）
@@ -92,10 +101,22 @@ struct MouseControlState {
     std::atomic<bool> mouse_control_enabled{false};
     std::atomic<bool> synthetic_mode{false};
 
-    // HID 报告布局（从物理鼠标 report descriptor 解析得到）
+    // ── 物理报告布局（每接口一份，从描述符解析）──
+    //
+    // 为什么是"每接口"：一个 dongle 常带 键盘/鼠标/厂商 多个 HID 接口，各接口的报告
+    // 描述符不同；把键盘报告当鼠标改写会把按键字节写成位移。故只对"该接口自己的
+    // 描述符里解析出了 X/Y（位移报告）或 buttons（按键报告）"时才动手。
+    //
+    // ★ 解析不出来 ⇒ ready/usable 为 false ⇒ merge/notify 一个字都不碰（fail-closed）。
+    //   这就是 2026-09-24「自瞄一动就疯狂切枪」的修法：宁可不动，也不乱写。
+    std::mutex layout_mutex;
+    InterfaceLayout iface_layouts[8];   // 索引 = USB interface_number（HID 设备不会超 8 个）
+
+    // 旧的写死布局字段（罗技 c53f 假设）：**已不再用于物理报告准入/写入**。
+    // 保留仅为协议与面板字段兼容（GadgetConfig 的 hid_* 是合成 gadget 用的另一回事）。
     std::atomic<uint8_t> report_id{2};
-    std::atomic<int> x_offset{3};   // X int16 LE 偏移
-    std::atomic<int> y_offset{5};   // Y int16 LE 偏移
+    std::atomic<int> x_offset{3};
+    std::atomic<int> y_offset{5};
     std::atomic<int> report_len{9};
 
     // 统计
@@ -117,12 +138,22 @@ void mouse_control_stop();
 // 将当前 g_gadget_config 持久化到 gadget-config.json（重启后生效）
 int persist_gadget_config();
 
-// 物理报告到达时调用：将挂起 AI 位移合并进 HID 报告。
-// data/len 指向物理鼠标 HID 报告（可能原地修改）。返回是否发生合并。
-bool mouse_control_merge_report(uint8_t* data, uint32_t len);
+// 收到物理设备某接口的 HID report descriptor（ep0 转发路径上）时调用：
+// 解析并存进 iface_layouts[interface_number]。解析失败 ⇒ 该接口标记为不可用。
+// 幂等：同一接口拿到相同内容重复调用无副作用（只重解析一次）。
+void mouse_control_set_report_descriptor(uint8_t interface_number,
+                                        const uint8_t* desc, uint32_t len);
 
-// 物理报告解析：更新按钮掩码 + 通知订阅者。
-void mouse_control_notify_physical_report(const uint8_t* data, uint32_t len);
+// 查询某接口的解析结果（诊断用）。返回 false = 该接口还没有可用布局。
+bool mouse_control_get_layout(uint8_t interface_number, HidMouseDescriptor* out);
+
+// 物理报告到达时调用：将挂起 AI 位移合并进 HID 报告的 X/Y 字段。
+// data/len 指向物理鼠标 HID 报告（可能原地修改）。返回是否发生合并。
+bool mouse_control_merge_report(uint8_t interface_number, uint8_t* data, uint32_t len);
+
+// 物理报告解析：按该接口解析出的 buttons 字段更新按钮掩码 + 通知订阅者。
+void mouse_control_notify_physical_report(uint8_t interface_number,
+                                          const uint8_t* data, uint32_t len);
 
 // synthetic 模式：从挂起位移构造一个合成 HID 报告。
 // 返回报告长度（>0 表示有数据要发）。
