@@ -36,11 +36,28 @@ SRCS := \
 	proxy.cpp \
 	mouse_control.cpp \
 	hid_report_layout.cpp \
+	inject_clock.cpp \
 	synthetic.cpp \
 	device-libusb.cpp \
 	host-raw-gadget.cpp \
 	misc.cpp
 OBJS := $(SRCS:.cpp=.o)
+
+# ---- 单元测试（不依赖 libusb/lua/jsoncpp，可在任意 host 上跑）------------------
+#   make test
+# 覆盖：HID 描述符解析（按真实布局读写）+ 注入节拍（限幅/顺延/丢弃/报告构造）。
+TEST_SRCS := tests/test_hid_layout.cpp tests/test_inject_clock.cpp
+TEST_BINS := $(TEST_SRCS:.cpp=.exe)
+TEST_DEPS := hid_report_layout.cpp inject_clock.cpp
+
+.PHONY: test
+test: $(TEST_BINS)
+	@set -e; for t in $(TEST_BINS); do echo "== $$t"; ./$$t; done
+
+tests/%.exe: tests/%.cpp $(TEST_DEPS)
+	$(CXX) $(TEST_CXXFLAGS) -I. $< $(TEST_DEPS) -o $@
+
+TEST_CXXFLAGS ?= -O1 -g -std=c++17 -Wall -Wextra
 
 # ---- 头文件搜索路径（可覆盖）---------------------------------------------------
 # libusb / jsoncpp 的头按 <libusb-1.0/...> / <jsoncpp/json/...> 形式包含，
@@ -96,4 +113,4 @@ install: $(TARGET)
 	install -m 0755 $(TARGET) "$(DESTDIR)$(PREFIX)/usbproxy/$(TARGET)"
 
 clean:
-	rm -f $(OBJS) $(TARGET) $(TARGET).sha256
+	rm -f $(OBJS) $(TARGET) $(TARGET).sha256 $(TEST_BINS)

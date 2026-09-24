@@ -324,6 +324,28 @@ bool hid_field_read_mask(const uint8_t* report, size_t report_len,
     return true;
 }
 
+bool hid_field_write_mask(uint8_t* report, size_t report_len,
+                          const HidField& f, uint32_t mask) {
+    if (report == nullptr) return false;
+    if (!f.present || f.bit_offset < 0) return false;
+    if (f.bit_offset % 8 != 0) return false;
+    if (f.bit_size <= 0 || f.bit_size > 16) return false;
+    const size_t byte_off = static_cast<size_t>(f.bit_offset / 8);
+    const size_t nbytes = static_cast<size_t>((f.bit_size + 7) / 8);
+    if (byte_off + nbytes > report_len) return false;
+
+    const uint32_t bits = (f.bit_size >= 32) ? 0xFFFFFFFFu : ((1u << f.bit_size) - 1u);
+    const uint32_t value = mask & bits;
+    for (size_t k = 0; k < nbytes; ++k) {
+        // 与 hid_field_read_mask 完全对称：小端、按字节拼装，未覆盖的高位保持原值。
+        const uint32_t byte_mask_bits = bits >> (8 * k);
+        const uint32_t keep = ~(byte_mask_bits & 0xFFu);
+        const uint32_t want = (value >> (8 * k)) & 0xFFu;
+        report[byte_off + k] = static_cast<uint8_t>((report[byte_off + k] & keep) | want);
+    }
+    return true;
+}
+
 bool hid_fields_overlap_bytes(const HidField& a, const HidField& b) {
     if (!a.present || !b.present) return false;
     if (a.bit_offset < 0 || b.bit_offset < 0) return false;

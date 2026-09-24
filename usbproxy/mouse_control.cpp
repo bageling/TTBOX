@@ -233,6 +233,29 @@ static void add_pending(std::atomic<int32_t>& acc, int32_t delta) {
     }
 }
 
+// ── 注入节拍：从挂起量里取「这一拍该投递多少」────────────────────
+// 限幅 + 余量顺延 + 超量丢弃，全部由 inject_clock_plan() 决定（纯逻辑，可单测）。
+// 两个消费方共用它：① 1ms 节拍线程（自有时钟，主路径）；② 物理报告到达时的搭车合并
+// （用户正在动鼠标时顺带带走一份，减少延迟）。两者都靠 exchange/原子回填，不会重复投递。
+static constexpr int kInjectPeriodUs = 1000;   // 节拍周期（1ms）
+static InjectClockConfig g_inject_cfg;
+
+static InjectStep take_step() {
+    const InjectStep st = inject_clock_plan(g_inject_cfg,
+                                            g_state.pending_dx.exchange(0),
+                                            g_state.pending_dy.exchange(0),
+                                            g_state.pending_wheel.exchange(0));
+    if (st.rest_x != 0) add_pending(g_state.pending_dx, st.rest_x);
+    if (st.rest_y != 0) add_pending(g_state.pending_dy, st.rest_y);
+    if (st.rest_wheel != 0) add_pending(g_state.pending_wheel, st.rest_wheel);
+    const int64_t dropped = static_cast<int64_t>(st.dropped_x) + st.dropped_y + st.dropped_wheel;
+    if (dropped != 0) {
+        const uint64_t mag = static_cast<uint64_t>(dropped < 0 ? -dropped : dropped);
+        g_state.inject_drop.fetch_add(mag);
+    }
+    return st;
+}
+
 // ── 命令分发：处理单个 cmd.sock 连接 ────────────────────────────
 void handle_cmd_connection(int fd) {
     uint8_t buf[sizeof(PacketHeader) + kMaxPayload];
@@ -505,6 +528,10 @@ int create_listen_socket(const char* path) {
 }  // namespace
 
 // ── 公开接口：启动 / 停止 ────────────────────────────────────────
+// 注入节拍线程实现在文件后半段（要共用布局诊断计数），此处先声明。
+static int injector_start();
+static void injector_stop();
+
 int mouse_control_start(const std::string& cmd_socket,
                         const std::string& event_socket,
                         bool synthetic) {
@@ -537,13 +564,28 @@ int mouse_control_start(const std::string& cmd_socket,
         ::close(g_srv.event_listen_fd);
         return -1;
     }
-    printf("mouse_control: cmd=%s event=%s synthetic=%d\n",
-           cmd_socket.c_str(), event_socket.c_str(), synthetic ? 1 : 0);
+    // 注入自有时钟：起不来就整体失败（宁可不启动，也不要"看着启动了其实发不出去"）
+    if (injector_start() != 0) {
+        g_srv.running.store(false);
+        ::close(g_srv.cmd_listen_fd);
+        ::close(g_srv.event_listen_fd);
+        ::unlink(cmd_socket.c_str());
+        ::unlink(event_socket.c_str());
+        g_srv.cmd_listen_fd = -1;
+        g_srv.event_listen_fd = -1;
+        pthread_join(g_srv.cmd_thread, nullptr);
+        pthread_join(g_srv.event_thread, nullptr);
+        fprintf(stderr, "mouse_control: 注入节拍线程创建失败，mouse_control 未启动\n");
+        return -1;
+    }
+    printf("mouse_control: cmd=%s event=%s synthetic=%d 注入节拍=%dus\n",
+           cmd_socket.c_str(), event_socket.c_str(), synthetic ? 1 : 0, kInjectPeriodUs);
     return 0;
 }
 
 void mouse_control_stop() {
     if (!g_srv.running.load()) return;
+    injector_stop();
     g_srv.running.store(false);
     if (g_srv.cmd_listen_fd >= 0) ::close(g_srv.cmd_listen_fd);
     if (g_srv.event_listen_fd >= 0) ::close(g_srv.event_listen_fd);
@@ -592,6 +634,30 @@ struct LayoutDiag {
 
 static LayoutDiag g_layout_diag;
 
+// 5s 一条汇总（1kHz 报告下不能刷爆 journal）。
+// ★ 2026-09-24 补：也由注入节拍线程在"有注入活动"时调用 —— 否则物理鼠标静止
+//   （IN 端点 0 报告/s）时会一条日志都没有，看着像"代码没生效"。
+static void layout_summary_maybe() {
+    const int64_t now = now_us();
+    int64_t last = g_layout_diag.last_summary_us.load();
+    if (now - last < 5000000) return;
+    if (!g_layout_diag.last_summary_us.compare_exchange_strong(last, now)) return;
+    fprintf(stderr,
+            "[mouse_control][LAYOUT] 5s 汇总：merge_ok=%llu 无布局=%llu 非位移报告=%llu "
+            "长度不符=%llu 字段不安全=%llu 非按键报告=%llu ｜ 注入=%llu 注入退回=%llu "
+            "注入丢弃count=%llu 构造失败=%llu\n",
+            (unsigned long long)g_layout_diag.merge_ok.load(),
+            (unsigned long long)g_layout_diag.reject_no_layout.load(),
+            (unsigned long long)g_layout_diag.reject_no_xy.load(),
+            (unsigned long long)g_layout_diag.reject_len.load(),
+            (unsigned long long)g_layout_diag.reject_field.load(),
+            (unsigned long long)g_layout_diag.reject_no_buttons.load(),
+            (unsigned long long)g_state.inject_count.load(),
+            (unsigned long long)g_state.inject_retry.load(),
+            (unsigned long long)g_state.inject_drop.load(),
+            (unsigned long long)g_state.inject_build_fail.load());
+}
+
 static void count_reject(LayoutReject kind) {
     switch (kind) {
     case kRejectNoLayout:  g_layout_diag.reject_no_layout.fetch_add(1); break;
@@ -608,20 +674,7 @@ static void count_reject(LayoutReject kind) {
                 static_cast<int>(kind));
         return;
     }
-    const int64_t now = now_us();
-    int64_t last = g_layout_diag.last_summary_us.load();
-    if (now - last >= 5000000 &&
-        g_layout_diag.last_summary_us.compare_exchange_strong(last, now)) {
-        fprintf(stderr,
-                "[mouse_control][LAYOUT] 5s 汇总：merge_ok=%llu 无布局=%llu 非位移报告=%llu "
-                "长度不符=%llu 字段不安全=%llu 非按键报告=%llu\n",
-                (unsigned long long)g_layout_diag.merge_ok.load(),
-                (unsigned long long)g_layout_diag.reject_no_layout.load(),
-                (unsigned long long)g_layout_diag.reject_no_xy.load(),
-                (unsigned long long)g_layout_diag.reject_len.load(),
-                (unsigned long long)g_layout_diag.reject_field.load(),
-                (unsigned long long)g_layout_diag.reject_no_buttons.load());
-    }
+    layout_summary_maybe();
 }
 
 // 取"这份报告"对应的布局。
@@ -672,6 +725,20 @@ void mouse_control_set_report_descriptor(uint8_t interface_number,
     il.desc = parsed;
     il.usable = ok && parsed.usable();
 
+    // ★ 注入自有时钟的落点：拿到"含 X/Y"的可用布局的那个接口，就是节拍线程要投递的接口。
+    //   优先位移报告；退而求其次只要有 buttons 也先记下（至少能补一份状态报告）。
+    if (il.usable) {
+        const bool has_xy = parsed.xy_layout() != nullptr;
+        const int cur = g_state.inject_iface.load();
+        const bool cur_has_xy = cur >= 0 && g_state.iface_layouts[cur].usable &&
+                                g_state.iface_layouts[cur].desc.xy_layout() != nullptr;
+        if (cur < 0 || (has_xy && !cur_has_xy)) {
+            g_state.inject_iface.store(static_cast<int>(interface_number));
+            fprintf(stderr, "[mouse_control][INJECT] 注入节拍接口 = %u（%s报告）\n",
+                    interface_number, has_xy ? "位移" : "按键");
+        }
+    }
+
     const HidReportLayout* xy = il.usable ? parsed.xy_layout() : nullptr;
     const HidReportLayout* bt = il.usable ? parsed.button_layout() : nullptr;
 
@@ -711,6 +778,106 @@ void mouse_control_set_report_descriptor(uint8_t interface_number,
         fprintf(stderr, "[mouse_control][LAYOUT]   按键报告 rid=%d：buttons@bit%d/%dbit\n",
                 bt->report_id, bt->buttons.bit_offset, bt->buttons.bit_size);
     }
+}
+
+// ── 注入出口注册（proxy.cpp 在物理鼠标接口的 interrupt IN 线程里调用）──────
+void mouse_control_set_inject_sink(uint8_t interface_number, InjectSink fn, void* user) {
+    if (interface_number >= 8) return;
+    std::lock_guard<std::mutex> lk(g_state.inject_sink_mutex);
+    g_state.inject_sinks[interface_number] = fn;
+    g_state.inject_sink_users[interface_number] = user;
+}
+
+void mouse_control_clear_inject_sink(uint8_t interface_number) {
+    if (interface_number >= 8) return;
+    std::lock_guard<std::mutex> lk(g_state.inject_sink_mutex);
+    g_state.inject_sinks[interface_number] = nullptr;
+    g_state.inject_sink_users[interface_number] = nullptr;
+}
+
+// ── 注入节拍线程：AI 位移的自有时钟 ──────────────────────────────
+//
+// 每 1ms 一拍：把挂起位移按**真实布局**构造成一份独立 HID 报告，直接投进主机的 IN 队列。
+// 为什么必须自己有时钟（2026-09-24 板端实测）：现场 dongle 静止时 IN 端点报告率是 0/s，
+// 只靠"搭在物理报告上"的话手一停准星就完全不动、手一动又把积压一次性抖出来（瞬移）。
+//
+// 三道边界：
+//   · 单份报告限幅（inject_clock_plan）⇒ 永不出现"一份报告几百 count"的瞬移；
+//   · 余量顺延 + 余量上限 ⇒ 总位移不丢，但几十毫秒前的陈旧意图会被丢弃；
+//   · 队列满 / 构造失败 ⇒ 这一拍的位移**退回挂起量**，下一拍再投，不硬塞。
+struct InjectSrv {
+    pthread_t thread{};
+    std::atomic<bool> running{false};
+};
+static InjectSrv g_inject_srv;
+
+static void* inject_loop(void*) {
+    while (g_inject_srv.running.load()) {
+        ::usleep(kInjectPeriodUs);
+        // 绝大多数拍子里根本没有待投位移 ⇒ 用 3 次原子读提前退出。
+        // 否则每 1ms 都要拿 layout_mutex 拷一份 HidMouseDescriptor（而物理报告那条路
+        // 1kHz 也在抢这把锁）—— 省掉的是纯开销，不改变任何行为。
+        if (g_state.pending_dx.load() == 0 && g_state.pending_dy.load() == 0 &&
+            g_state.pending_wheel.load() == 0) {
+            continue;
+        }
+        if (!g_state.mouse_control_enabled.load()) continue;
+        // synthetic 模式由 usb-proxy 自己的合成注入器发报告，这里不重复投递
+        if (g_state.synthetic_mode.load()) continue;
+        const int iface = g_state.inject_iface.load();
+        if (iface < 0) continue;
+
+        InjectSink sink = nullptr;
+        void* user = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(g_state.inject_sink_mutex);
+            sink = g_state.inject_sinks[iface];
+            user = g_state.inject_sink_users[iface];
+        }
+        if (sink == nullptr) continue;   // 主机侧 IN 线程还没注册（未就绪）
+
+        HidMouseDescriptor desc;
+        if (!mouse_control_get_layout(static_cast<uint8_t>(iface), &desc)) continue;
+        if (!desc.usable()) continue;
+
+        const InjectStep st = take_step();
+        if (st.dx == 0 && st.dy == 0 && st.wheel == 0) continue;  // 无位移 ⇒ 不发空报告
+
+        uint8_t buf[64];
+        uint32_t len = 0;
+        bool ok = inject_clock_build_report(desc, g_state.button_mask.load(), st, buf, sizeof(buf),
+                                            &len);
+        if (ok) ok = sink(user, static_cast<uint8_t>(iface), buf, len);
+        if (!ok) {
+            // 投不出去就把这一拍退回挂起量（不丢位移），下一拍重试
+            if (len == 0) g_state.inject_build_fail.fetch_add(1);
+            else g_state.inject_retry.fetch_add(1);
+            add_pending(g_state.pending_dx, st.dx);
+            add_pending(g_state.pending_dy, st.dy);
+            add_pending(g_state.pending_wheel, st.wheel);
+            continue;
+        }
+        g_state.inject_count.fetch_add(1);
+        g_state.last_move_ts_us.store(now_us());
+        layout_summary_maybe();
+    }
+    return nullptr;
+}
+
+static int injector_start() {
+    if (g_inject_srv.running.load()) return 0;
+    g_inject_srv.running.store(true);
+    if (pthread_create(&g_inject_srv.thread, nullptr, inject_loop, nullptr) != 0) {
+        g_inject_srv.running.store(false);
+        return -1;
+    }
+    return 0;
+}
+
+static void injector_stop() {
+    if (!g_inject_srv.running.load()) return;
+    g_inject_srv.running.store(false);
+    pthread_join(g_inject_srv.thread, nullptr);
 }
 
 bool mouse_control_get_layout(uint8_t interface_number, HidMouseDescriptor* out) {
@@ -761,9 +928,8 @@ bool mouse_control_merge_report(uint8_t interface_number, uint8_t* data, uint32_
         return false;
     }
 
-    const int32_t dx = g_state.pending_dx.exchange(0);
-    const int32_t dy = g_state.pending_dy.exchange(0);
-    if (dx == 0 && dy == 0) {
+    const InjectStep st = take_step();
+    if (st.dx == 0 && st.dy == 0) {
         g_layout_diag.merge_ok.fetch_add(1);
         return false;
     }
@@ -776,8 +942,8 @@ bool mouse_control_merge_report(uint8_t interface_number, uint8_t* data, uint32_
         count_reject(kRejectLen);
         return false;
     }
-    if (!hid_field_write_signed(mutable_body, body_len, lay->x, cur_x + dx) ||
-        !hid_field_write_signed(mutable_body, body_len, lay->y, cur_y + dy)) {
+    if (!hid_field_write_signed(mutable_body, body_len, lay->x, cur_x + st.dx) ||
+        !hid_field_write_signed(mutable_body, body_len, lay->y, cur_y + st.dy)) {
         count_reject(kRejectLen);
         return false;
     }

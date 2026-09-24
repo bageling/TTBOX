@@ -80,6 +80,11 @@ bool hid_field_write_signed(uint8_t* report, size_t report_len,
 bool hid_field_read_mask(const uint8_t* report, size_t report_len,
                          const HidField& f, uint32_t* out);
 
+// 写入位掩码（buttons 用；只取 mask 的低 bit_size 位，其余位保持原样）。
+// 越界、位宽不支持（>16）、非字节对齐一律拒写并返回 false。
+bool hid_field_write_mask(uint8_t* report, size_t report_len,
+                          const HidField& f, uint32_t mask);
+
 // 两个字段占用的**字节区间**是否重叠 —— 用于"写 X/Y 绝不能碰到 buttons/wheel"的最后一道闸。
 bool hid_fields_overlap_bytes(const HidField& a, const HidField& b);
 

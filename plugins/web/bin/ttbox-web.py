@@ -3696,8 +3696,9 @@ def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
     """自动调参核心：按标定实测 gain + 延迟推导整组 PID 参数并写回。
 
     不同客户场景（屏幕灵敏度/DPI/系统延迟/游戏内灵敏度）→ 实测 gain/延迟不同
-    → 推导出不同的最佳 KP/KD/predict。只动这三个参数，rate/smooth 保持
-    架构常量；predict_y 保持 0（Y 轴无预测，pid1 参考行为）。
+    → 推导出不同的最佳 KP/KD/predict。只动 kp/kd/predict_x 这三个，
+    rate/smooth 保持架构常量；**predict_y 一律不动** —— Y 轴预判在面板上已独立可调
+    （pid1.cpp 参考默认 0），自动调参不该覆盖业主手设的值。
     """
     try:
         pid = derive_pid_params(

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "hid_report_layout.hpp"
+#include "inject_clock.hpp"
 
 namespace ttbox_usbproxy {
 
@@ -83,9 +84,15 @@ struct InterfaceLayout {
     HidMouseDescriptor desc;
 };
 
+// ── 注入出口（把一份报告交给主机 IN 端点队列）──
+// 由 proxy.cpp 在**物理鼠标接口的 interrupt IN 线程**里注册；返回 false = 队列满/未就绪
+// ⇒ mouse_control 会把这一步位移退回挂起量，下一拍再投（不丢位移）。
+// user 是调用方自己的上下文（proxy 侧存 {queue, mutex, ep_num}）。
+typedef bool (*InjectSink)(void* user, uint8_t interface_number, const uint8_t* data, uint32_t len);
+
 // ── 共享状态 ──
 struct MouseControlState {
-    // AI 注入挂起位移（物理报告到达时"搭车"合并；synthetic 模式直接注入）
+    // AI 注入挂起位移（1ms 节拍线程投递；物理报告到达时也会顺带合并一份）
     std::atomic<int32_t> pending_dx{0};
     std::atomic<int32_t> pending_dy{0};
     std::atomic<int32_t> pending_wheel{0};
@@ -123,6 +130,20 @@ struct MouseControlState {
     std::atomic<uint64_t> move_count{0};
     std::atomic<uint64_t> merge_count{0};
     std::atomic<int64_t> last_move_ts_us{0};
+
+    // ── 注入自有时钟（2026-09-24 新增）──
+    //
+    // 现场实测：这只 dongle 静止时 IN 端点 0 reports/s、移动时 105~170/s ⇒ 只靠"搭车"
+    // 的话，手一停 AI 位移就发不出去（详见 inject_clock.hpp）。故本模块自带 1ms 节拍，
+    // 把挂起位移按真实布局构造成独立 HID 报告，直接写进主机的 IN 队列。
+    std::atomic<int> inject_iface{-1};       // 有可用布局的接口号（-1 = 还没拿到描述符）
+    std::atomic<uint64_t> inject_count{0};   // 成功投出的报告数
+    std::atomic<uint64_t> inject_retry{0};   // 队列满被退回的次数
+    std::atomic<uint64_t> inject_drop{0};    // 因余量上限丢弃的 count 数（绝对值累加）
+    std::atomic<uint64_t> inject_build_fail{0};
+    std::mutex inject_sink_mutex;
+    InjectSink inject_sinks[8] = {nullptr};  // 索引 = interface_number
+    void* inject_sink_users[8] = {nullptr};
 };
 
 extern MouseControlState g_state;
@@ -147,7 +168,12 @@ void mouse_control_set_report_descriptor(uint8_t interface_number,
 // 查询某接口的解析结果（诊断用）。返回 false = 该接口还没有可用布局。
 bool mouse_control_get_layout(uint8_t interface_number, HidMouseDescriptor* out);
 
-// 物理报告到达时调用：将挂起 AI 位移合并进 HID 报告的 X/Y 字段。
+// 注册/注销注入出口（proxy.cpp 在物理鼠标接口的 interrupt IN 线程里调用）。
+// 注册后 mouse_control 的 1ms 节拍线程会往这个出口投递 AI 位移报告。
+void mouse_control_set_inject_sink(uint8_t interface_number, InjectSink fn, void* user);
+void mouse_control_clear_inject_sink(uint8_t interface_number);
+
+// 物理报告到达时调用：把挂起 AI 位移合并进 HID 报告的 X/Y 字段。
 // data/len 指向物理鼠标 HID 报告（可能原地修改）。返回是否发生合并。
 bool mouse_control_merge_report(uint8_t interface_number, uint8_t* data, uint32_t len);
 

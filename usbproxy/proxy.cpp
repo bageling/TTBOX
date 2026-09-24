@@ -1179,6 +1179,43 @@ void *ep_loop_read(void *arg) {
 	return NULL;
 }
 
+// ── AI 位移注入出口（mouse_control 的 1ms 节拍线程调用）──────────────
+//
+// 为什么要有它（2026-09-24 板端实测）：物理报告只在"用户在动鼠标"时才来，
+// 现场那只 dongle 静止时 IN 端点报告率 0/s ⇒ 只靠把 AI 位移搭在物理报告上，
+// 手一停准星就完全不动、手一动又把积压一次性抖出来。所以给 AI 位移一条**自己的出路**：
+// 由 mouse_control 按 1ms 节拍构造报告，经这里推进该接口 IN 端点的队列 —— 与物理报告
+// 走同一条出主机的路（同一队列、同一个 ep），主机侧看到的仍是一个普通的 HID 鼠标。
+struct InjectSinkCtx {
+	std::deque<usb_raw_transfer_io>	*queue = NULL;
+	std::mutex			*mutex = NULL;
+	int				ep_num = -1;
+	uint8_t				iface = 0xFF;
+};
+
+static struct InjectSinkCtx g_inject_ctx[8];
+
+static bool inject_sink_push(void *user, uint8_t interface_number,
+			     const uint8_t *data, uint32_t len)
+{
+	(void)interface_number;
+	struct InjectSinkCtx *c = (struct InjectSinkCtx *)user;
+	if (!c || !c->queue || !c->mutex) return false;
+	if (!data || len == 0 || len > MAX_TRANSFER_SIZE) return false;
+
+	struct usb_raw_transfer_io io;
+	memcpy(io.data, data, len);
+	io.inner.ep = c->ep_num;
+	io.inner.flags = 0;
+	io.inner.length = len;
+
+	std::lock_guard<std::mutex> lk(*c->mutex);
+	// 与物理路径同一个上限：队列满就返回 false，让调用方把这一拍退回挂起量、下一拍再投
+	if (c->queue->size() >= 32) return false;
+	c->queue->push_back(io);
+	return true;
+}
+
 void process_eps(int fd, int config, int interface, int altsetting) {
 	struct raw_gadget_altsetting *alt = &host_device_desc.configs[config]
 					.interfaces[interface].altsettings[altsetting];
@@ -1226,6 +1263,22 @@ void process_eps(int fd, int config, int interface, int altsetting) {
 			ep->thread_info.dir.c_str(),
 			addr, ep->thread_info.ep_num);
 
+		// 给 mouse_control 的注入节拍线程留一个出口：只有 interrupt IN 端点能回主机。
+		// 具体哪个接口是"鼠标"由 mouse_control 决定（它按描述符解析结果挑 inject_iface），
+		// 这里只把每个接口的出口登记好。
+		if (usb_endpoint_dir_in(&ep->endpoint) &&
+		    usb_endpoint_type(&ep->endpoint) == USB_ENDPOINT_XFER_INT) {
+			const uint8_t iface = ep->thread_info.interface_number;
+			if (iface < 8) {
+				g_inject_ctx[iface].queue = ep->thread_info.data_queue;
+				g_inject_ctx[iface].mutex = ep->thread_info.data_mutex;
+				g_inject_ctx[iface].ep_num = ep->thread_info.ep_num;
+				g_inject_ctx[iface].iface = iface;
+				ttbox_usbproxy::mouse_control_set_inject_sink(
+					iface, inject_sink_push, &g_inject_ctx[iface]);
+			}
+		}
+
 		if (verbose_level)
 			printf("Creating thread for EP%02x\n",
 				ep->thread_info.endpoint.bEndpointAddress);
@@ -1272,6 +1325,9 @@ void terminate_eps(int fd, int config, int interface, int altsetting) {
 	// Phase 3: Clean up resources after all threads have exited.
 	for (int i = 0; i < alt->interface.bNumEndpoints; i++) {
 		struct raw_gadget_endpoint *ep = &alt->endpoints[i];
+		// 先摘掉注入出口：队列马上要被 delete，绝不能让注入节拍线程拿到悬空指针
+		if (ep->thread_info.interface_number < 8)
+			ttbox_usbproxy::mouse_control_clear_inject_sink(ep->thread_info.interface_number);
 		usb_raw_ep_disable(fd, ep->thread_info.ep_num);
 		ep->thread_info.ep_num = -1;
 
