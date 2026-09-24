@@ -475,32 +475,6 @@ html[data-theme="light"] .top-shell {
   background: rgba(255, 255, 255, 0.04);
 }
 
-/* 2026-09-20：面板上「有 UI 但内核未实现」的区块统一标记，避免用户以为是坏的。 */
-.unimplemented-tag {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 1px 7px;
-  border: 1px solid rgba(242, 198, 109, 0.5);
-  border-radius: 999px;
-  color: var(--amber);
-  font-size: 11px;
-  font-weight: 760;
-  line-height: 1.7;
-  white-space: nowrap;
-}
-
-.unimplemented-notice {
-  margin: 0 0 12px;
-  padding: 10px 12px;
-  border: 1px solid rgba(242, 198, 109, 0.42);
-  border-radius: 10px;
-  background: rgba(242, 198, 109, 0.1);
-  color: var(--amber);
-  font-size: 12.5px;
-  line-height: 1.65;
-}
-
 .status-badge.error,
 .sync-badge.error {
   color: #fff5f7;
@@ -1232,8 +1206,7 @@ html[data-theme="light"] .control-section-tab.is-active span {
   background: var(--accent);
 }
 
-/* 2026-09-22：内核未实现的区块不可进入 —— 保留可见（展示功能规划），
-   但禁用点击，避免用户改完配置才发现"保存时会被忽略"。功能实现后去掉 disabled 即恢复。 */
+/* 分区页签禁用态：仅用于「当前条件不可用」的页签。 */
 .control-section-tab:disabled,
 .control-section-tab[aria-disabled="true"] {
   cursor: not-allowed;
@@ -1245,11 +1218,6 @@ html[data-theme="light"] .control-section-tab.is-active span {
   color: var(--muted-strong);
   border-color: transparent;
   background: transparent;
-}
-
-.control-section-tab:disabled .unimplemented-tag,
-.control-section-tab[aria-disabled="true"] .unimplemented-tag {
-  opacity: 0.9;
 }
 
 .control-section-stack {
@@ -2058,27 +2026,6 @@ input[type="file"]::file-selector-button {
   line-height: 1.25;
 }
 
-.aim-profile-offset-switch {
-  display: grid;
-  gap: 12px;
-  min-width: 0;
-}
-
-.aim-profile-offset-switch-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 220px);
-  gap: 12px;
-  align-items: end;
-}
-
-.aim-profile-offset-switch-panel[hidden] {
-  display: none;
-}
-
-.aim-profile-offset-switch-hotkey-field {
-  padding: 10px;
-}
-
 .span-all {
   grid-column: 1 / -1;
 }
@@ -2182,10 +2129,6 @@ html[data-theme="light"] .danger-button:disabled {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
-}
-
-.auto-back-flick-class-picker {
-  min-width: 0;
 }
 
 .class-chip {
@@ -2426,171 +2369,6 @@ html[data-theme="light"] .danger-button:disabled {
 
 #assist-page .assist-section .assist-humanize-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.crosshair-color-slots {
-  display: grid;
-  gap: 10px;
-}
-
-.crosshair-fire-gate {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.9fr);
-  gap: 10px;
-  align-items: stretch;
-}
-
-.crosshair-fire-switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 36px;
-  color: var(--muted-strong);
-  font-size: 12px;
-  font-weight: 780;
-}
-
-.crosshair-color-slot {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  overflow: hidden;
-}
-
-.crosshair-color-slot summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 44px;
-  padding: 10px 12px;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 860;
-  cursor: pointer;
-  list-style: none;
-}
-
-.crosshair-color-slot summary::-webkit-details-marker {
-  display: none;
-}
-
-.crosshair-color-slot summary::before {
-  content: ">";
-  color: var(--muted);
-  font-size: 11px;
-  transform: rotate(0deg);
-  transition: transform 0.16s ease;
-}
-
-.crosshair-color-slot[open] summary::before {
-  transform: rotate(90deg);
-}
-
-.crosshair-color-slot summary > span {
-  margin-right: auto;
-}
-
-.crosshair-slot-enable {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--muted-strong);
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.crosshair-slot-enable input {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.crosshair-slot-options {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
-  gap: 10px;
-  padding: 0 12px 12px;
-}
-
-.crosshair-color-slot:has(.crosshair-slot-enable input:not(:checked)) .crosshair-slot-options {
-  opacity: 0.55;
-}
-
-.crosshair-color-option {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-height: 42px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.035);
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 820;
-  cursor: pointer;
-}
-
-.crosshair-color-option:has(input[type="radio"]:checked) {
-  border-color: rgba(89, 185, 123, 0.62);
-  background: rgba(89, 185, 123, 0.12);
-}
-
-.crosshair-color-option input[type="radio"] {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.crosshair-color-swatch {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  border: 1px solid rgba(255, 255, 255, 0.38);
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
-}
-
-.crosshair-color-red {
-  background: #ff2b2b;
-}
-
-.crosshair-color-green {
-  background: #16d85b;
-}
-
-.crosshair-color-blue {
-  background: #2d6dff;
-}
-
-.crosshair-color-cyan {
-  background: #1cd8e9;
-}
-
-.crosshair-color-white {
-  background: #f6f6f6;
-}
-
-.crosshair-color-black {
-  background: #05070a;
-}
-
-html[data-theme="light"] .crosshair-color-slot,
-html[data-theme="light"] .crosshair-color-option {
-  background: rgba(31, 43, 35, 0.035);
-}
-
-html[data-theme="light"] .crosshair-color-option:has(input[type="radio"]:checked) {
-  background: rgba(47, 143, 86, 0.11);
-}
-
-html[data-theme="light"] .crosshair-color-swatch {
-  border-color: rgba(25, 32, 27, 0.32);
 }
 
 .auto-trigger-config-toolbar {
@@ -4791,8 +4569,7 @@ html[data-theme="light"] .toast {
 
   #assist-page .assist-section .field-grid.compact,
   #assist-page .assist-section .assist-field-pair,
-  #assist-page .assist-section .assist-humanize-grid,
-  .crosshair-fire-gate {
+  #assist-page .assist-section .assist-humanize-grid {
     grid-template-columns: 1fr;
   }
 
@@ -4885,10 +4662,6 @@ html[data-theme="light"] .toast {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  #assist-page .auto-back-flick-class-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   input,
   select,
   textarea {
@@ -4917,9 +4690,6 @@ html[data-theme="light"] .toast {
     flex-wrap: wrap;
   }
 
-  .aim-profile-offset-switch-head {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 0px) { /* TTBOX 定死布局：上游 480px 断点停用 */
@@ -5538,15 +5308,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <label class="field"><span class="field-label">丢失宽限 ms</span><input id="controller_selector_lost_grace_ms" data-config type="number" step="1"><span class="field-hint">目标短暂丢失后继续保持锁定的毫秒数；越大越不容易丢锁，过大可能粘住错误目标。</span></label>
                   </div>
                 </article>
-                <article class="module-tile">
-                  <div class="module-title"><strong>开火延迟释放Y轴<span class="unimplemented-tag">未实现</span></strong></div>
-                  <div class="unimplemented-notice">开火延迟释放Y轴尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
-                  <label class="check-line"><input id="controller_aim_fire_lock_y" data-config type="checkbox"> 开火延迟释放Y轴</label>
-                  <div class="field-grid compact">
-                    <label class="field">开火按键<select id="controller_y_axis_fire_hotkey" data-config></select><span class="field-hint">用于判断开火状态，默认左键。</span></label>
-                    <label class="field"><span class="field-label">释放延迟 s</span><input id="controller_y_axis_fire_release_delay_sec" data-config type="number" step="0.01"><span class="field-hint">持续开火超过该时长后，停止输出Y轴方向，只保留X轴跟随。</span></label>
-                  </div>
-                </article>
               </div>
             </section>
 
@@ -5603,12 +5364,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             </button>
             <button id="assistSectionTabRapid" class="control-section-tab" type="button" data-assist-section-target="assist-section-rapid" aria-selected="false" disabled aria-disabled="true" title="内核尚未实现，暂不可进入；功能实现后自动放开">
               <span>03</span>连点<span class="unimplemented-tag">未实现</span>
-            </button>
-            <button id="assistSectionTabBackFlick" class="control-section-tab" type="button" data-assist-section-target="assist-section-back-flick" aria-selected="false" disabled aria-disabled="true" title="内核尚未实现，暂不可进入；功能实现后自动放开">
-              <span>04</span>自动背闪<span class="unimplemented-tag">未实现</span>
-            </button>
-            <button id="assistSectionTabCrosshair" class="control-section-tab" type="button" data-assist-section-target="assist-section-crosshair" aria-selected="false" disabled aria-disabled="true" title="内核尚未实现，暂不可进入；功能实现后自动放开">
-              <span>05</span>准星找色<span class="unimplemented-tag">未实现</span>
             </button>
           </nav>
 
@@ -5691,94 +5446,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
               </article>
             </section>
 
-            <section id="assist-section-back-flick" class="assist-section" data-assist-section hidden>
-              <article class="module-tile assist-card-back-flick">
-                <div class="module-title">
-                  <h3>自动背闪</h3>
-                  <label class="switch"><input id="auto_back_flick_enabled" data-config type="checkbox"><span></span></label>
-                </div>
-                <div class="assist-section-body">
-                  <div class="unimplemented-notice">自动背闪尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
-                  <div id="autoBackFlickClassPicker" class="class-picker auto-back-flick-class-picker"></div>
-                  <div class="field-grid compact assist-field-pair">
-                    <label class="inline-checkbox"><input id="auto_back_flick_random_direction" data-config type="checkbox">随机方向</label>
-                    <label class="inline-checkbox"><input id="auto_back_flick_dodge_away_from_target" data-config type="checkbox">根据检测目标位置反向闪避</label>
-                  </div>
-                  <div class="field-grid compact assist-field-pair">
-                    <label class="field">转身像素<input id="auto_back_flick_turn_pixels" data-config type="number" step="10"><span class="field-hint">背闪时横向移动距离；正值向右，负值向左。</span></label>
-                    <label class="field">停顿 ms<input id="auto_back_flick_wait_ms" data-config type="number" step="10"><span class="field-hint">转身完成后等待多久再回正。</span></label>
-                    <label class="field">平滑步数<input id="auto_back_flick_steps" data-config type="number" step="1"><span class="field-hint">把转身和回正拆成多少步，低一点更快，高一点更平滑。</span></label>
-                    <label class="field">冷却 ms<input id="auto_back_flick_cooldown_ms" data-config type="number" step="100"><span class="field-hint">一次背闪完成后，至少等待多久才允许再次触发。</span></label>
-                    <label class="field">转身随机<input id="auto_back_flick_turn_random" data-config type="number" step="1"><span class="field-hint">转身距离附加的随机像素范围，降低每次动作重复感。</span></label>
-                    <label class="field">回正随机<input id="auto_back_flick_return_random" data-config type="number" step="1"><span class="field-hint">回正距离附加的随机像素范围，避免回正动作完全固定。</span></label>
-                  </div>
-                </div>
-              </article>
-            </section>
-
-            <section id="assist-section-crosshair" class="assist-section" data-assist-section hidden>
-              <article class="module-tile assist-card-crosshair">
-                <div class="module-title">
-                  <h3>准星找色</h3>
-                  <label class="switch"><input id="crosshair_detection_enabled" data-config type="checkbox"><span></span></label>
-                </div>
-                <div class="assist-section-body">
-                  <div class="unimplemented-notice">准星找色尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
-                  <div class="crosshair-fire-gate">
-                    <div class="crosshair-fire-switch"><span>开火时生效</span><label class="switch"><input id="crosshair_only_when_fire_held" data-config type="checkbox"><span></span></label></div>
-                    <label class="field">开火按键<select id="crosshair_fire_hotkey" data-config></select><span class="field-hint">开启后只在按住该键时使用找色结果。</span></label>
-                  </div>
-                  <div class="field-grid compact assist-field-pair">
-                    <label class="field">ROI 宽<input id="crosshair_roi_w" data-config type="number" min="2" max="150" step="1"><span class="field-hint">围绕画面中心横向取样范围。</span></label>
-                    <label class="field">ROI 高<input id="crosshair_roi_h" data-config type="number" min="2" max="150" step="1"><span class="field-hint">围绕画面中心纵向取样范围。</span></label>
-                  </div>
-                  <div class="crosshair-color-slots" aria-label="准星颜色">
-                    <details id="crosshair_slot_0" class="crosshair-color-slot" open>
-                      <summary>
-                        <span>颜色1</span>
-                        <label class="crosshair-slot-enable"><input id="crosshair_slot_0_enabled" data-config type="checkbox">启用</label>
-                      </summary>
-                      <div class="crosshair-slot-options">
-                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_red" name="crosshair_slot_0_color" data-config type="radio" value="red"><span class="crosshair-color-swatch crosshair-color-red"></span><span>红色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_green" name="crosshair_slot_0_color" data-config type="radio" value="green"><span class="crosshair-color-swatch crosshair-color-green"></span><span>绿色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_blue" name="crosshair_slot_0_color" data-config type="radio" value="blue"><span class="crosshair-color-swatch crosshair-color-blue"></span><span>蓝色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_cyan" name="crosshair_slot_0_color" data-config type="radio" value="cyan"><span class="crosshair-color-swatch crosshair-color-cyan"></span><span>青色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_white" name="crosshair_slot_0_color" data-config type="radio" value="white"><span class="crosshair-color-swatch crosshair-color-white"></span><span>白色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_0_color_black" name="crosshair_slot_0_color" data-config type="radio" value="black"><span class="crosshair-color-swatch crosshair-color-black"></span><span>黑色</span></label>
-                      </div>
-                    </details>
-                    <details id="crosshair_slot_1" class="crosshair-color-slot">
-                      <summary>
-                        <span>颜色2</span>
-                        <label class="crosshair-slot-enable"><input id="crosshair_slot_1_enabled" data-config type="checkbox">启用</label>
-                      </summary>
-                      <div class="crosshair-slot-options">
-                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_red" name="crosshair_slot_1_color" data-config type="radio" value="red"><span class="crosshair-color-swatch crosshair-color-red"></span><span>红色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_green" name="crosshair_slot_1_color" data-config type="radio" value="green"><span class="crosshair-color-swatch crosshair-color-green"></span><span>绿色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_blue" name="crosshair_slot_1_color" data-config type="radio" value="blue"><span class="crosshair-color-swatch crosshair-color-blue"></span><span>蓝色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_cyan" name="crosshair_slot_1_color" data-config type="radio" value="cyan"><span class="crosshair-color-swatch crosshair-color-cyan"></span><span>青色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_white" name="crosshair_slot_1_color" data-config type="radio" value="white"><span class="crosshair-color-swatch crosshair-color-white"></span><span>白色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_1_color_black" name="crosshair_slot_1_color" data-config type="radio" value="black"><span class="crosshair-color-swatch crosshair-color-black"></span><span>黑色</span></label>
-                      </div>
-                    </details>
-                    <details id="crosshair_slot_2" class="crosshair-color-slot">
-                      <summary>
-                        <span>颜色3</span>
-                        <label class="crosshair-slot-enable"><input id="crosshair_slot_2_enabled" data-config type="checkbox">启用</label>
-                      </summary>
-                      <div class="crosshair-slot-options">
-                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_red" name="crosshair_slot_2_color" data-config type="radio" value="red"><span class="crosshair-color-swatch crosshair-color-red"></span><span>红色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_green" name="crosshair_slot_2_color" data-config type="radio" value="green"><span class="crosshair-color-swatch crosshair-color-green"></span><span>绿色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_blue" name="crosshair_slot_2_color" data-config type="radio" value="blue"><span class="crosshair-color-swatch crosshair-color-blue"></span><span>蓝色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_cyan" name="crosshair_slot_2_color" data-config type="radio" value="cyan"><span class="crosshair-color-swatch crosshair-color-cyan"></span><span>青色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_white" name="crosshair_slot_2_color" data-config type="radio" value="white"><span class="crosshair-color-swatch crosshair-color-white"></span><span>白色</span></label>
-                        <label class="crosshair-color-option"><input id="crosshair_slot_2_color_black" name="crosshair_slot_2_color" data-config type="radio" value="black"><span class="crosshair-color-swatch crosshair-color-black"></span><span>黑色</span></label>
-                      </div>
-                    </details>
-                  </div>
-                </div>
-              </article>
-            </section>
           </div>
         </section>
 
@@ -6138,26 +5805,7 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             <span id="fanControlPill" class="pill">未检测到PWM接口</span>
           </div>
 
-          <div class="unimplemented-notice">风扇温控尚未实现：固件当前把风扇固定为满速（防 NPU 热节流），这里的温度曲线设置在保存时会被忽略，仅作界面预留；“运行状态”一栏是真实硬件读数。</div>
-
           <div class="hardware-grid fan-page-grid">
-            <article class="module-tile">
-              <div class="module-title">
-                <h3>全速运行<span class="unimplemented-tag">未实现</span></h3>
-                <label class="switch"><input id="fan_control_enabled" data-config type="checkbox"><span></span></label>
-              </div>
-              <div class="field-grid compact fan-control-grid">
-                <label class="field">温度来源
-                  <select id="fan_control_temperature_source" data-config>
-                    <option value="auto">自动</option>
-                    <option value="soc">RK3588 SoC</option>
-                    <option value="cpu_big">CPU 大核</option>
-                    <option value="gpu">GPU</option>
-                    <option value="npu">NPU</option>
-                  </select>
-                </label>
-              </div>
-            </article>
 
             <article class="module-tile">
               <div class="module-title">
@@ -6339,9 +5987,6 @@ const CROP_SIZE_MAX = 1080;
 const CAPTURE_CROP_OFFSET_MIN = -150;
 const CAPTURE_CROP_OFFSET_MAX = 150;
 const AIM_REFERENCE_OFFSET_MAX = 320;
-const CROSSHAIR_MAX_COLORS = 3;
-const CROSSHAIR_PRESET_COLORS = ["red", "green", "blue", "cyan", "white", "black"];
-const CROSSHAIR_SLOT_DEFAULT_COLORS = ["red", "green", "blue"];
 const AIM_OVERLAY_CONFIG_IDS = new Set([
   "capture_crop_size",
   "range_factor",
@@ -6387,7 +6032,6 @@ const NUMERIC_RANGE_LIMITS = {
   controller_aim_reference_offset_x: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_aim_reference_offset_y: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_selector_lost_grace_ms: [0, 2000],
-  controller_y_axis_fire_release_delay_sec: [0, 2],
   recoil_strength: [0, 300],
   recoil_speed: [0.1, 3],
   recoil_target_lost_release_ms: [0, 3000],
@@ -6397,18 +6041,6 @@ const NUMERIC_RANGE_LIMITS = {
   recoil_humanize_jitter_frequency: [0, 30],
   rapid_fire_press_base_ms: [30, 300],
   rapid_fire_interval_base_ms: [8, 120],
-  crosshair_roi_w: [2, 150],
-  crosshair_roi_h: [2, 150],
-  fan_control_start_celsius: [20, 90],
-  fan_control_full_celsius: [20, 90],
-  fan_control_min_pwm_percent: [0, 100],
-  fan_control_max_pwm_percent: [0, 100],
-  auto_back_flick_turn_pixels: [-20000, 20000],
-  auto_back_flick_wait_ms: [0, 2000],
-  auto_back_flick_turn_random: [0, 1000],
-  auto_back_flick_return_random: [0, 1000],
-  auto_back_flick_steps: [1, 300],
-  auto_back_flick_cooldown_ms: [500, 10000],
   hailo_pipeline_depth: [1, 4],
 };
 const OVERVIEW_DEFAULTS = {
@@ -6449,11 +6081,8 @@ const CONTROLLER_DEFAULTS = {
   continuous_lead_fade_in_ms: 300,
   continuous_lead_fade_out_ms: 300,
   continuous_lead_near_disable_ratio: 0.66,
-  aim_fire_lock_y: false,
   aim_reference_offset_x: 0,
   aim_reference_offset_y: 0,
-  y_axis_fire_hotkey: "left",
-  y_axis_fire_release_delay_sec: 0.3,
   selector_lost_grace_ms: 78,
 };
 const MOVEMENT_CONTROL_DEFAULTS = {
@@ -6494,36 +6123,6 @@ const RAPID_FIRE_DEFAULTS = {
   hotkey: "forward",
   press_base_ms: 170,
   interval_base_ms: 13,
-};
-const CROSSHAIR_DEFAULTS = {
-  detection_enabled: false,
-  only_when_fire_held: true,
-  fire_hotkey: "left",
-  roi_w: 50,
-  roi_h: 50,
-  preset_colors: ["red"],
-};
-const FAN_CONTROL_DEFAULTS = {
-  enabled: false,
-  temperature_source: "auto",
-  start_celsius: 45,
-  full_celsius: 70,
-  min_pwm_percent: 100,
-  max_pwm_percent: 100,
-  stop_hysteresis_celsius: 3,
-};
-const AUTO_BACK_FLICK_DEFAULTS = {
-  enabled: false,
-  random_direction: false,
-  dodge_away_from_target: false,
-  class_id: 0,
-  class_filter_mask: 1,
-  turn_pixels: 3000,
-  wait_ms: 150,
-  turn_random: 50,
-  return_random: 20,
-  steps: 100,
-  cooldown_ms: 3000,
 };
 const HOTKEY_GUARD_DEFAULTS = {
   enabled: false,
@@ -8363,124 +7962,6 @@ function modelClassEditCount(model) {
   return Math.min(AIM_CLASS_MAX_COUNT, Math.max(1, modelClassNames(model).length || 1));
 }
 
-function classMaskFromClassId(classId) {
-  const classCount = currentModelClassCount();
-  const safeClassId = Math.floor(clamp(
-    Number.isFinite(Number(classId)) ? Number(classId) : AUTO_BACK_FLICK_DEFAULTS.class_id,
-    0,
-    Math.max(0, classCount - 1)
-  ));
-  return 1 << safeClassId;
-}
-
-function firstClassIdFromMask(mask, fallback = AUTO_BACK_FLICK_DEFAULTS.class_id) {
-  const visibleMask = currentModelClassMask();
-  const normalizedMask = Number(mask) & visibleMask;
-  for (let classId = 0; classId < currentModelClassCount(); classId += 1) {
-    if ((normalizedMask & (1 << classId)) !== 0) {
-      return classId;
-    }
-  }
-  return Math.floor(clamp(
-    Number.isFinite(Number(fallback)) ? Number(fallback) : AUTO_BACK_FLICK_DEFAULTS.class_id,
-    0,
-    Math.max(0, currentModelClassCount() - 1)
-  ));
-}
-
-function autoBackFlickClassMask(autoBackFlick = {}) {
-  const visibleMask = currentModelClassMask();
-  const rawMask = Number(autoBackFlick && autoBackFlick.class_filter_mask);
-  if (Number.isFinite(rawMask) && rawMask >= 0) {
-    return rawMask & visibleMask;
-  }
-  return classMaskFromClassId(
-    autoBackFlick && autoBackFlick.class_id !== undefined
-      ? autoBackFlick.class_id
-      : AUTO_BACK_FLICK_DEFAULTS.class_id
-  ) & visibleMask;
-}
-
-function collectAutoBackFlickClassMask(fallback = AUTO_BACK_FLICK_DEFAULTS) {
-  const picker = $("autoBackFlickClassPicker");
-  if (!picker) {
-    return autoBackFlickClassMask(fallback);
-  }
-  const checkboxes = Array.from(picker.querySelectorAll(".auto-back-flick-class"));
-  if (checkboxes.length === 0) {
-    return autoBackFlickClassMask(fallback);
-  }
-  let mask = 0;
-  checkboxes.forEach((checkbox) => {
-    if (checkbox.checked) {
-      mask |= 1 << Number(checkbox.dataset.classId);
-    }
-  });
-  return mask & currentModelClassMask();
-}
-
-function currentAutoBackFlickClassConfig() {
-  const fallback = state.config && state.config.auto_back_flick
-    ? state.config.auto_back_flick
-    : AUTO_BACK_FLICK_DEFAULTS;
-  const mask = collectAutoBackFlickClassMask(fallback);
-  return {
-    class_id: firstClassIdFromMask(mask, fallback.class_id ?? AUTO_BACK_FLICK_DEFAULTS.class_id),
-    class_filter_mask: mask,
-  };
-}
-
-function renderAutoBackFlickClassPicker(autoBackFlick = AUTO_BACK_FLICK_DEFAULTS) {
-  const picker = $("autoBackFlickClassPicker");
-  if (!picker) {
-    return;
-  }
-  const classCount = currentModelClassCount();
-  const classNames = currentModelClassNames();
-  const mask = autoBackFlickClassMask(autoBackFlick);
-  const classPickers = Array.from({ length: classCount }, (_, classId) => {
-    const checked = mask & (1 << classId) ? "checked" : "";
-    const className = classDisplayName(classId, classNames);
-    const classLabel = `${classId} ${className}`;
-    return `
-      <label class="class-chip auto-back-flick-class-chip" title="${escapeAttr(classLabel)}">
-        <input class="aim-profile-class auto-back-flick-class" type="checkbox" data-class-id="${classId}" ${checked}>
-        <span class="class-chip-name">${escapeHtml(classLabel)}</span>
-      </label>
-    `;
-  }).join("");
-  picker.innerHTML = `
-    <div class="class-picker-head">
-      <span>触发类别 · ${classCount} 类</span>
-      <button class="mini-button" type="button" data-select-all-classes>全选</button>
-    </div>
-    <div class="class-chip-grid auto-back-flick-class-grid">
-      ${classPickers}
-    </div>
-    <span class="field-hint">检测到任一勾选类别后触发背闪动作。</span>
-  `;
-  picker.querySelectorAll(".auto-back-flick-class").forEach((checkbox) => {
-    checkbox.addEventListener("change", () => {
-      updateClassToggleButton(picker);
-      requestConfigApply(80);
-    });
-  });
-  const toggleButton = picker.querySelector("[data-select-all-classes]");
-  if (toggleButton) {
-    toggleButton.addEventListener("click", () => {
-      const checkboxes = Array.from(picker.querySelectorAll(".auto-back-flick-class"));
-      const shouldCheck = !checkboxes.every((checkbox) => checkbox.checked);
-      checkboxes.forEach((checkbox) => {
-        checkbox.checked = shouldCheck;
-      });
-      updateClassToggleButton(picker);
-      requestConfigApply(80);
-    });
-  }
-  updateClassToggleButton(picker);
-  state.autoBackFlickClassRenderSignature = currentModelClassRenderSignature();
-}
-
 function classMaskForCount(count) {
   const safeCount = Math.min(AIM_CLASS_MAX_COUNT, Math.max(1, Math.floor(Number(count) || 1)));
   return safeCount >= AIM_CLASS_MAX_COUNT ? AIM_CLASS_ALL_MASK : ((1 << safeCount) - 1);
@@ -8531,29 +8012,6 @@ function aimProfileOffsetY(profile) {
   return legacyAimPosToOffsetY(profile && profile.pos !== undefined ? profile.pos : 0.5);
 }
 
-function aimProfileOffsetSwitchEnabled(profile) {
-  return Boolean(profile && profile.offset_switch_enabled);
-}
-
-function aimProfileOffsetSwitchHotkey(profile) {
-  const hotkey = profile && typeof profile.offset_switch_hotkey === "string" ? profile.offset_switch_hotkey : "";
-  return OPTIONAL_POINTER_HOTKEYS.includes(hotkey) ? hotkey : "";
-}
-
-function aimProfileAlternateOffsetX(profile) {
-  if (profile && profile.alternate_offset_x !== undefined) {
-    return clampAimProfileOffset(profile.alternate_offset_x, aimProfileOffsetX(profile));
-  }
-  return aimProfileOffsetX(profile);
-}
-
-function aimProfileAlternateOffsetY(profile) {
-  if (profile && profile.alternate_offset_y !== undefined) {
-    return clampAimProfileOffset(profile.alternate_offset_y, aimProfileOffsetY(profile));
-  }
-  return aimProfileOffsetY(profile);
-}
-
 function aimProfileClassOffsets(profile) {
   const classCount = currentModelClassCount();
   const byClass = new Map();
@@ -8593,10 +8051,6 @@ function profileTemplate(profile, index) {
   const mask = classMaskFromProfile(profile);
   const offsetX = aimProfileOffsetX(profile).toFixed(2);
   const offsetY = aimProfileOffsetY(profile).toFixed(2);
-  const alternateOffsetX = aimProfileAlternateOffsetX(profile).toFixed(2);
-  const alternateOffsetY = aimProfileAlternateOffsetY(profile).toFixed(2);
-  const offsetSwitchChecked = aimProfileOffsetSwitchEnabled(profile) ? "checked" : "";
-  const offsetSwitchPanelHidden = aimProfileOffsetSwitchEnabled(profile) ? "" : "hidden";
   const sensitivity = clamp(Number(profile && profile.sensitivity !== undefined ? profile.sensitivity : 1), 0.1, 3).toFixed(2);
   const fovScale = aimProfileFovScale(profile).toFixed(2);
   const classPickers = Array.from({ length: classCount }, (_, classId) => {
@@ -8699,32 +8153,6 @@ function profileTemplate(profile, index) {
           </div>
           <input class="aim-profile-offset-y-range" type="range" min="0" max="1" step="0.01" value="${offsetY}">
           <span class="field-hint aim-profile-axis-hint">0 上 · 0.5 中 · 1 下</span>
-        </div>
-      </div>
-      <div class="aim-profile-offset-switch span-all">
-        <div class="aim-profile-offset-switch-head">
-          <label class="check-line"><input class="aim-profile-offset-switch-enabled" type="checkbox" ${offsetSwitchChecked}> 偏移切换<span class="unimplemented-tag">未实现</span></label>
-          <label class="field aim-profile-offset-switch-hotkey-field" ${offsetSwitchPanelHidden}>切换热键
-            <select class="aim-profile-offset-switch-hotkey"></select>
-          </label>
-        </div>
-        <div class="aim-profile-axis-grid aim-profile-offset-switch-panel" ${offsetSwitchPanelHidden}>
-          <div class="slider-field aim-profile-axis-field">
-            <div class="label-row">
-              <label>备用X轴偏移</label>
-              <input class="aim-profile-alternate-offset-x value-input" type="number" min="0" max="1" step="0.01" autocomplete="off" value="${alternateOffsetX}">
-            </div>
-            <input class="aim-profile-alternate-offset-x-range" type="range" min="0" max="1" step="0.01" value="${alternateOffsetX}">
-            <span class="field-hint aim-profile-axis-hint">0 左 · 0.5 中 · 1 右</span>
-          </div>
-          <div class="slider-field aim-profile-axis-field">
-            <div class="label-row">
-              <label>备用Y轴偏移</label>
-              <input class="aim-profile-alternate-offset-y value-input" type="number" min="0" max="1" step="0.01" autocomplete="off" value="${alternateOffsetY}">
-            </div>
-            <input class="aim-profile-alternate-offset-y-range" type="range" min="0" max="1" step="0.01" value="${alternateOffsetY}">
-            <span class="field-hint aim-profile-axis-hint">0 上 · 0.5 中 · 1 下</span>
-          </div>
         </div>
       </div>
       <div class="class-picker span-all">
@@ -8961,42 +8389,10 @@ function bindAimProfileCard(card, profile) {
   hotkey2Select.addEventListener("change", () => requestConfigApply(80));
   hotkeyModeSelect.addEventListener("change", () => requestConfigApply(80));
 
-  const offsetSwitchToggle = card.querySelector(".aim-profile-offset-switch-enabled");
-  const offsetSwitchHotkey = card.querySelector(".aim-profile-offset-switch-hotkey");
-  const offsetSwitchHotkeyField = card.querySelector(".aim-profile-offset-switch-hotkey-field");
-  const offsetSwitchPanel = card.querySelector(".aim-profile-offset-switch-panel");
-  fillOptions(offsetSwitchHotkey, OPTIONAL_POINTER_HOTKEYS);
-  offsetSwitchHotkey.value = aimProfileOffsetSwitchHotkey(profile);
-  const syncOffsetSwitchPanel = () => {
-    const enabled = Boolean(offsetSwitchToggle && offsetSwitchToggle.checked);
-    if (offsetSwitchPanel) {
-      offsetSwitchPanel.hidden = !enabled;
-    }
-    if (offsetSwitchHotkeyField) {
-      offsetSwitchHotkeyField.hidden = !enabled;
-    }
-    if (offsetSwitchHotkey) {
-      offsetSwitchHotkey.disabled = !enabled;
-    }
-    card.classList.toggle("offset-switch-enabled", enabled);
-  };
-  if (offsetSwitchToggle) {
-    offsetSwitchToggle.addEventListener("change", () => {
-      syncOffsetSwitchPanel();
-      requestConfigApply(80);
-    });
-  }
-  if (offsetSwitchHotkey) {
-    offsetSwitchHotkey.addEventListener("change", () => requestConfigApply(80));
-  }
-
   bindProfileNumberRange(card, ".aim-profile-offset-x", ".aim-profile-offset-x-range", 0.5, 0, 1);
   bindProfileNumberRange(card, ".aim-profile-offset-y", ".aim-profile-offset-y-range", 0.5, 0, 1);
-  bindProfileNumberRange(card, ".aim-profile-alternate-offset-x", ".aim-profile-alternate-offset-x-range", aimProfileOffsetX(profile), 0, 1);
-  bindProfileNumberRange(card, ".aim-profile-alternate-offset-y", ".aim-profile-alternate-offset-y-range", aimProfileOffsetY(profile), 0, 1);
   bindProfileNumberRange(card, ".aim-profile-sensitivity", ".aim-profile-sensitivity-range", 1, 0.1, 3);
   bindProfileNumberRange(card, ".aim-profile-fov-scale", ".aim-profile-fov-scale-range", 1, 0.1, 1);
-  syncOffsetSwitchPanel();
 
   card.querySelectorAll(".aim-profile-class").forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
@@ -9106,15 +8502,6 @@ function collectAimProfiles() {
     });
     const offsetX = clampAimProfileOffset(card.querySelector(".aim-profile-offset-x").value, 0.5);
     const offsetY = clampAimProfileOffset(card.querySelector(".aim-profile-offset-y").value, 0.5);
-    const alternateOffsetX = clampAimProfileOffset(
-      card.querySelector(".aim-profile-alternate-offset-x").value,
-      offsetX
-    );
-    const alternateOffsetY = clampAimProfileOffset(
-      card.querySelector(".aim-profile-alternate-offset-y").value,
-      offsetY
-    );
-    const offsetSwitchHotkey = card.querySelector(".aim-profile-offset-switch-hotkey").value || "";
     const classOffsets = Array.from(card.querySelectorAll(".class-chip[data-class-id]"))
       .filter((chip) => chip.dataset.classOffsetEnabled === "1")
       .map((chip) => {
@@ -9137,10 +8524,6 @@ function collectAimProfiles() {
       offset_x: offsetX,
       offset_y: offsetY,
       pos: aimOffsetYToLegacyPos(offsetY),
-      offset_switch_enabled: Boolean(card.querySelector(".aim-profile-offset-switch-enabled").checked),
-      offset_switch_hotkey: OPTIONAL_POINTER_HOTKEYS.includes(offsetSwitchHotkey) ? offsetSwitchHotkey : "",
-      alternate_offset_x: alternateOffsetX,
-      alternate_offset_y: alternateOffsetY,
       class_offsets: classOffsets,
       sensitivity: clamp(Number(card.querySelector(".aim-profile-sensitivity").value || 1), 0.1, 3),
       fov_scale: aimProfileFovScale({
@@ -9571,168 +8954,6 @@ function collectAutoTriggerProfiles() {
   });
 }
 
-function normalizeCrosshairPresetColor(value) {
-  const key = String(value || "").trim().toLowerCase();
-  return CROSSHAIR_PRESET_COLORS.includes(key) ? key : "";
-}
-
-function uniqueCrosshairPresetColors(colors) {
-  const normalized = [];
-  (Array.isArray(colors) ? colors : []).forEach((color) => {
-    const key = normalizeCrosshairPresetColor(color);
-    if (key && !normalized.includes(key) && normalized.length < CROSSHAIR_MAX_COLORS) {
-      normalized.push(key);
-    }
-  });
-  return normalized.length ? normalized : [...CROSSHAIR_DEFAULTS.preset_colors];
-}
-
-function crosshairPresetColorsFromConfig(crosshair = {}) {
-  return uniqueCrosshairPresetColors(Array.isArray(crosshair.preset_colors) ? crosshair.preset_colors : []);
-}
-
-function setCrosshairColorSlots(colors) {
-  const selected = uniqueCrosshairPresetColors(colors);
-  for (let index = 0; index < CROSSHAIR_MAX_COLORS; index += 1) {
-    const enabled = index < selected.length;
-    const color = selected[index] || CROSSHAIR_SLOT_DEFAULT_COLORS[index] || CROSSHAIR_PRESET_COLORS[0];
-    setCheckbox(`crosshair_slot_${index}_enabled`, enabled);
-    setRadioValue(`crosshair_slot_${index}_color`, color);
-    const details = $(`crosshair_slot_${index}`);
-    if (details) {
-      details.open = enabled || index === 0;
-    }
-  }
-}
-
-function populateCrosshairConfig(crosshair) {
-  const safeCrosshair = crosshair || {};
-  setCheckbox(
-    "crosshair_detection_enabled",
-    safeCrosshair.detection_enabled ?? CROSSHAIR_DEFAULTS.detection_enabled
-  );
-  setCheckbox(
-    "crosshair_only_when_fire_held",
-    safeCrosshair.only_when_fire_held ?? CROSSHAIR_DEFAULTS.only_when_fire_held
-  );
-  setValue("crosshair_fire_hotkey", safeCrosshair.fire_hotkey ?? CROSSHAIR_DEFAULTS.fire_hotkey);
-  setValue("crosshair_roi_w", safeCrosshair.roi_w ?? CROSSHAIR_DEFAULTS.roi_w);
-  setValue("crosshair_roi_h", safeCrosshair.roi_h ?? CROSSHAIR_DEFAULTS.roi_h);
-  setCrosshairColorSlots(crosshairPresetColorsFromConfig(safeCrosshair));
-}
-
-function crosshairDefaultControlValues() {
-  const values = {
-    crosshair_detection_enabled: CROSSHAIR_DEFAULTS.detection_enabled,
-    crosshair_only_when_fire_held: CROSSHAIR_DEFAULTS.only_when_fire_held,
-    crosshair_fire_hotkey: CROSSHAIR_DEFAULTS.fire_hotkey,
-    crosshair_roi_w: CROSSHAIR_DEFAULTS.roi_w,
-    crosshair_roi_h: CROSSHAIR_DEFAULTS.roi_h,
-  };
-  for (let index = 0; index < CROSSHAIR_MAX_COLORS; index += 1) {
-    const defaultColor = CROSSHAIR_SLOT_DEFAULT_COLORS[index] || CROSSHAIR_PRESET_COLORS[0];
-    values[`crosshair_slot_${index}_enabled`] = index < CROSSHAIR_DEFAULTS.preset_colors.length;
-    CROSSHAIR_PRESET_COLORS.forEach((color) => {
-      values[`crosshair_slot_${index}_color_${color}`] = color === defaultColor;
-    });
-  }
-  return values;
-}
-
-function collectCrosshairPresetColors() {
-  const colors = [];
-  for (let index = 0; index < CROSSHAIR_MAX_COLORS; index += 1) {
-    if (!getCheckbox(`crosshair_slot_${index}_enabled`)) {
-      continue;
-    }
-    const color = normalizeCrosshairPresetColor(
-      getRadioValue(
-        `crosshair_slot_${index}_color`,
-        CROSSHAIR_SLOT_DEFAULT_COLORS[index] || CROSSHAIR_PRESET_COLORS[0]
-      )
-    );
-    if (color) {
-      colors.push(color);
-    }
-  }
-  return uniqueCrosshairPresetColors(colors);
-}
-
-function collectCrosshairConfig() {
-  const fireHotkey = getString("crosshair_fire_hotkey");
-  return {
-    detection_enabled: getCheckbox("crosshair_detection_enabled"),
-    only_when_fire_held: getCheckbox("crosshair_only_when_fire_held"),
-    fire_hotkey: POINTER_HOTKEYS.includes(fireHotkey) ? fireHotkey : CROSSHAIR_DEFAULTS.fire_hotkey,
-    roi_w: Math.round(getNumberInRange("crosshair_roi_w", CROSSHAIR_DEFAULTS.roi_w)),
-    roi_h: Math.round(getNumberInRange("crosshair_roi_h", CROSSHAIR_DEFAULTS.roi_h)),
-    preset_colors: collectCrosshairPresetColors(),
-  };
-}
-
-function normalizeFanTemperatureSource(value) {
-  const source = String(value || "").trim();
-  // A1201（2026-09-18）：Hailo-8 温度来源已随 Hailo 页整体移除，core 不认识该值
-  return ["auto", "soc", "cpu_big", "gpu", "npu"].includes(source) ? source : "auto";
-}
-
-function populateFanControlConfig(fanControl) {
-  const config = fanControl || {};
-  setCheckbox("fan_control_enabled", config.enabled ?? FAN_CONTROL_DEFAULTS.enabled);
-  setValue(
-    "fan_control_temperature_source",
-    normalizeFanTemperatureSource(config.temperature_source ?? FAN_CONTROL_DEFAULTS.temperature_source)
-  );
-  setValue("fan_control_start_celsius", config.start_celsius ?? FAN_CONTROL_DEFAULTS.start_celsius);
-  setValue("fan_control_full_celsius", config.full_celsius ?? FAN_CONTROL_DEFAULTS.full_celsius);
-  setValue("fan_control_min_pwm_percent", config.min_pwm_percent ?? FAN_CONTROL_DEFAULTS.min_pwm_percent);
-  setValue("fan_control_max_pwm_percent", config.max_pwm_percent ?? FAN_CONTROL_DEFAULTS.max_pwm_percent);
-}
-
-function collectFanControlConfig(previousFanControl = {}) {
-  const start = Math.round(getNumberInRange("fan_control_start_celsius", previousFanControl.start_celsius ?? FAN_CONTROL_DEFAULTS.start_celsius));
-  const fullRaw = Math.round(getNumberInRange("fan_control_full_celsius", previousFanControl.full_celsius ?? FAN_CONTROL_DEFAULTS.full_celsius));
-  return {
-    enabled: getCheckbox("fan_control_enabled"),
-    temperature_source: normalizeFanTemperatureSource(getString("fan_control_temperature_source")),
-    start_celsius: start,
-    full_celsius: Math.max(start + 1, fullRaw),
-    min_pwm_percent: 100,
-    max_pwm_percent: 100,
-    stop_hysteresis_celsius: Number.isFinite(Number(previousFanControl.stop_hysteresis_celsius))
-      ? Number(previousFanControl.stop_hysteresis_celsius)
-      : FAN_CONTROL_DEFAULTS.stop_hysteresis_celsius,
-  };
-}
-
-function enforceFanControlInputPairs(changedId = "") {
-  if (changedId === "fan_control_start_celsius" || changedId === "fan_control_full_celsius") {
-    const startInput = $("fan_control_start_celsius");
-    const fullInput = $("fan_control_full_celsius");
-    const start = startInput ? Number(startInput.value) : NaN;
-    const full = fullInput ? Number(fullInput.value) : NaN;
-    if (Number.isFinite(start) && Number.isFinite(full) && full <= start && fullInput) {
-      fullInput.value = formatControlValue(fullInput, Math.min(90, start + 1));
-      const fullRange = $("fan_control_full_celsius_range");
-      if (fullRange) {
-        fullRange.value = fullInput.value;
-      }
-    }
-  } else if (changedId === "fan_control_min_pwm_percent" || changedId === "fan_control_max_pwm_percent") {
-    const minInput = $("fan_control_min_pwm_percent");
-    const maxInput = $("fan_control_max_pwm_percent");
-    const minValue = minInput ? Number(minInput.value) : NaN;
-    const maxValue = maxInput ? Number(maxInput.value) : NaN;
-    if (Number.isFinite(minValue) && Number.isFinite(maxValue) && maxValue < minValue && maxInput) {
-      maxInput.value = formatControlValue(maxInput, minValue);
-      const maxRange = $("fan_control_max_pwm_percent_range");
-      if (maxRange) {
-        maxRange.value = maxInput.value;
-      }
-    }
-  }
-}
-
 function renderFanControlStatus(fanControl) {
   const fan = fanControl || {};
   const controlAvailable = !!fan.control_available;
@@ -9779,12 +9000,9 @@ function populateForm(config) {
   const recoil = config.recoil || {};
   const autoTrigger = config.auto_trigger || {};
   const rapidFire = config.rapid_fire || {};
-  const crosshair = config.crosshair || {};
-  const autoBackFlick = config.auto_back_flick || {};
   const hotkeyGuard = config.hotkey_guard || {};
   const mouseOutput = config.mouse_output || {};
   const latency = config.latency || {};
-  const fanControl = config.fan_control || {};
 
   setValue("capture_device", capture.device);
   setCropSizeValue(capture.crop_size);
@@ -9824,13 +9042,10 @@ function populateForm(config) {
     "controller_continuous_lead_near_disable_ratio",
     controller.continuous_lead_near_disable_ratio ?? CONTROLLER_DEFAULTS.continuous_lead_near_disable_ratio
   );
-  setCheckbox("controller_aim_fire_lock_y", controller.aim_fire_lock_y ?? CONTROLLER_DEFAULTS.aim_fire_lock_y);
   setValue("controller_aim_reference_offset_x", controller.aim_reference_offset_x ?? CONTROLLER_DEFAULTS.aim_reference_offset_x);
   setValue("controller_aim_reference_offset_y", controller.aim_reference_offset_y ?? CONTROLLER_DEFAULTS.aim_reference_offset_y);
   updateDynamicOffsetControlLimits({ clampValues: true });
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms ?? CONTROLLER_DEFAULTS.selector_lost_grace_ms);
-  setValue("controller_y_axis_fire_hotkey", controller.y_axis_fire_hotkey ?? CONTROLLER_DEFAULTS.y_axis_fire_hotkey);
-  setValue("controller_y_axis_fire_release_delay_sec", controller.y_axis_fire_release_delay_sec ?? CONTROLLER_DEFAULTS.y_axis_fire_release_delay_sec);
 
   setCheckbox("recoil_enabled", recoil.enabled ?? RECOIL_DEFAULTS.enabled);
   setCheckbox("recoil_only_when_target_visible", recoil.only_when_target_visible ?? RECOIL_DEFAULTS.only_when_target_visible);
@@ -9854,24 +9069,7 @@ function populateForm(config) {
   setValue("rapid_fire_press_base_ms", rapidFire.press_base_ms ?? RAPID_FIRE_DEFAULTS.press_base_ms);
   setValue("rapid_fire_interval_base_ms", rapidFire.interval_base_ms ?? RAPID_FIRE_DEFAULTS.interval_base_ms);
 
-  populateCrosshairConfig(crosshair);
-
-  setCheckbox("auto_back_flick_enabled", autoBackFlick.enabled ?? AUTO_BACK_FLICK_DEFAULTS.enabled);
-  setCheckbox("auto_back_flick_random_direction", autoBackFlick.random_direction ?? AUTO_BACK_FLICK_DEFAULTS.random_direction);
-  setCheckbox(
-    "auto_back_flick_dodge_away_from_target",
-    (autoBackFlick.random_direction ? false : autoBackFlick.dodge_away_from_target) ??
-      AUTO_BACK_FLICK_DEFAULTS.dodge_away_from_target
-  );
-  renderAutoBackFlickClassPicker(autoBackFlick);
-  setValue("auto_back_flick_turn_pixels", autoBackFlick.turn_pixels ?? AUTO_BACK_FLICK_DEFAULTS.turn_pixels);
-  setValue("auto_back_flick_wait_ms", autoBackFlick.wait_ms ?? AUTO_BACK_FLICK_DEFAULTS.wait_ms);
-  setValue("auto_back_flick_turn_random", autoBackFlick.turn_random ?? AUTO_BACK_FLICK_DEFAULTS.turn_random);
-  setValue("auto_back_flick_return_random", autoBackFlick.return_random ?? AUTO_BACK_FLICK_DEFAULTS.return_random);
-  setValue("auto_back_flick_steps", autoBackFlick.steps ?? AUTO_BACK_FLICK_DEFAULTS.steps);
-  setValue("auto_back_flick_cooldown_ms", autoBackFlick.cooldown_ms ?? AUTO_BACK_FLICK_DEFAULTS.cooldown_ms);
   setValue("hailo_pipeline_depth", latency.hailo_pipeline_depth ?? 3);
-  populateFanControlConfig(fanControl);
 
   syncAllRangeFields();
   updateAimRangeOverlay();
@@ -9899,10 +9097,7 @@ function setMovementControlDefaultsToForm() {
   setValue("controller_continuous_lead_fade_in_ms", controller.continuous_lead_fade_in_ms);
   setValue("controller_continuous_lead_fade_out_ms", controller.continuous_lead_fade_out_ms);
   setValue("controller_continuous_lead_near_disable_ratio", controller.continuous_lead_near_disable_ratio);
-  setCheckbox("controller_aim_fire_lock_y", controller.aim_fire_lock_y);
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms);
-  setValue("controller_y_axis_fire_hotkey", controller.y_axis_fire_hotkey);
-  setValue("controller_y_axis_fire_release_delay_sec", controller.y_axis_fire_release_delay_sec);
 }
 
 function syncRangeFieldsForIds(ids) {
@@ -9964,9 +9159,6 @@ function movementDefaultsForSection(sectionId) {
       controller_smooth: controller.smooth,
       controller_output_deadzone: controller.output_deadzone,
       controller_selector_lost_grace_ms: controller.selector_lost_grace_ms,
-      controller_aim_fire_lock_y: controller.aim_fire_lock_y,
-      controller_y_axis_fire_hotkey: controller.y_axis_fire_hotkey,
-      controller_y_axis_fire_release_delay_sec: controller.y_axis_fire_release_delay_sec,
     },
     "control-section-pull-curve": {
       controller_pull_curve_enabled: controller.pull_curve_enabled,
@@ -10020,18 +9212,6 @@ function assistDefaultsForSection(sectionId) {
       rapid_fire_press_base_ms: RAPID_FIRE_DEFAULTS.press_base_ms,
       rapid_fire_interval_base_ms: RAPID_FIRE_DEFAULTS.interval_base_ms,
     },
-    "assist-section-back-flick": {
-      auto_back_flick_enabled: AUTO_BACK_FLICK_DEFAULTS.enabled,
-      auto_back_flick_random_direction: AUTO_BACK_FLICK_DEFAULTS.random_direction,
-      auto_back_flick_dodge_away_from_target: AUTO_BACK_FLICK_DEFAULTS.dodge_away_from_target,
-      auto_back_flick_turn_pixels: AUTO_BACK_FLICK_DEFAULTS.turn_pixels,
-      auto_back_flick_wait_ms: AUTO_BACK_FLICK_DEFAULTS.wait_ms,
-      auto_back_flick_steps: AUTO_BACK_FLICK_DEFAULTS.steps,
-      auto_back_flick_cooldown_ms: AUTO_BACK_FLICK_DEFAULTS.cooldown_ms,
-      auto_back_flick_turn_random: AUTO_BACK_FLICK_DEFAULTS.turn_random,
-      auto_back_flick_return_random: AUTO_BACK_FLICK_DEFAULTS.return_random,
-    },
-    "assist-section-crosshair": crosshairDefaultControlValues(),
   };
   return defaultsBySection[sectionId] || defaultsBySection["assist-section-recoil"];
 }
@@ -10041,8 +9221,6 @@ function assistSectionLabel(sectionId) {
     "assist-section-recoil": "压枪",
     "assist-section-trigger": "自动开火",
     "assist-section-rapid": "连点",
-    "assist-section-back-flick": "自动背闪",
-    "assist-section-crosshair": "准星找色",
   };
   return labels[sectionId] || "当前页";
 }
@@ -10053,8 +9231,6 @@ function resetCurrentAssistSectionDefaults() {
   resetFieldDefaults(assistDefaultsForSection(sectionId));
   if (sectionId === "assist-section-trigger") {
     renderAutoTriggerProfiles({ enabled: false, profiles: [] });
-  } else if (sectionId === "assist-section-back-flick") {
-    renderAutoBackFlickClassPicker(AUTO_BACK_FLICK_DEFAULTS);
   }
   state.isPopulating = false;
   updateAssistModuleCollapseStates();
@@ -10065,17 +9241,11 @@ function resetCurrentAssistSectionDefaults() {
 function collectConfig() {
   const previousCapture = state.config && state.config.capture ? state.config.capture : {};
   const previousLatency = state.config && state.config.latency ? state.config.latency : {};
-  const previousFanControl = state.config && state.config.fan_control ? state.config.fan_control : {};
   const selectedModel = (state.config && state.config.model_id) ||
     (state.data && state.data.config && state.data.config.model_id) ||
     "";
   const autoTriggerProfiles = collectAutoTriggerProfiles();
   const primaryAutoTriggerProfile = autoTriggerProfiles[0] || defaultAutoTriggerProfile();
-  const autoBackFlickClassMask = collectAutoBackFlickClassMask(
-    state.config && state.config.auto_back_flick
-      ? state.config.auto_back_flick
-      : AUTO_BACK_FLICK_DEFAULTS
-  );
   return {
     model_id: selectedModel,
     video_detection_confidence: getNumber("video_detection_confidence", 0.25),
@@ -10102,7 +9272,6 @@ function collectConfig() {
         previousLatency.hailo_pipeline_depth ?? 3
       )),
     },
-    fan_control: collectFanControlConfig(previousFanControl),
     mouse_output: {
       mode: "passthrough",
     },
@@ -10141,11 +9310,8 @@ function collectConfig() {
           "controller_continuous_lead_near_disable_ratio",
           CONTROLLER_DEFAULTS.continuous_lead_near_disable_ratio
         ),
-        aim_fire_lock_y: getCheckbox("controller_aim_fire_lock_y"),
         aim_reference_offset_x: getNumberInRange("controller_aim_reference_offset_x", CONTROLLER_DEFAULTS.aim_reference_offset_x),
         aim_reference_offset_y: getNumberInRange("controller_aim_reference_offset_y", CONTROLLER_DEFAULTS.aim_reference_offset_y),
-        y_axis_fire_hotkey: getString("controller_y_axis_fire_hotkey") || CONTROLLER_DEFAULTS.y_axis_fire_hotkey,
-        y_axis_fire_release_delay_sec: getNumber("controller_y_axis_fire_release_delay_sec", CONTROLLER_DEFAULTS.y_axis_fire_release_delay_sec),
         selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
       },
     },
@@ -10184,29 +9350,12 @@ function collectConfig() {
       press_base_ms: getNumber("rapid_fire_press_base_ms", RAPID_FIRE_DEFAULTS.press_base_ms),
       interval_base_ms: getNumber("rapid_fire_interval_base_ms", RAPID_FIRE_DEFAULTS.interval_base_ms),
     },
-    crosshair: collectCrosshairConfig(),
-    auto_back_flick: {
-      enabled: getCheckbox("auto_back_flick_enabled"),
-      random_direction: getCheckbox("auto_back_flick_random_direction"),
-      dodge_away_from_target:
-        getCheckbox("auto_back_flick_random_direction")
-          ? false
-          : getCheckbox("auto_back_flick_dodge_away_from_target"),
-      class_id: firstClassIdFromMask(autoBackFlickClassMask, AUTO_BACK_FLICK_DEFAULTS.class_id),
-      class_filter_mask: autoBackFlickClassMask,
-      turn_pixels: getNumber("auto_back_flick_turn_pixels", AUTO_BACK_FLICK_DEFAULTS.turn_pixels),
-      wait_ms: getNumber("auto_back_flick_wait_ms", AUTO_BACK_FLICK_DEFAULTS.wait_ms),
-      turn_random: getNumber("auto_back_flick_turn_random", AUTO_BACK_FLICK_DEFAULTS.turn_random),
-      return_random: getNumber("auto_back_flick_return_random", AUTO_BACK_FLICK_DEFAULTS.return_random),
-      steps: getNumber("auto_back_flick_steps", AUTO_BACK_FLICK_DEFAULTS.steps),
-      cooldown_ms: getNumber("auto_back_flick_cooldown_ms", AUTO_BACK_FLICK_DEFAULTS.cooldown_ms),
-    },
   };
 }
 
 function hasInvalidConfigInput() {
   const fields = Array.from(document.querySelectorAll(
-    "[data-config][type='number'], .aim-profile-offset-x, .aim-profile-offset-y, .aim-profile-alternate-offset-x, .aim-profile-alternate-offset-y, .aim-profile-class-offset-x, .aim-profile-class-offset-y, .aim-profile-sensitivity, .aim-profile-fov-scale, .auto-trigger-profile-enter-delay-min-ms, .auto-trigger-profile-enter-delay-max-ms, .auto-trigger-profile-cooldown-min-ms, .auto-trigger-profile-cooldown-max-ms, .auto-trigger-profile-spray-release-delay-ms"
+    "[data-config][type='number'], .aim-profile-offset-x, .aim-profile-offset-y, .aim-profile-class-offset-x, .aim-profile-class-offset-y, .aim-profile-sensitivity, .aim-profile-fov-scale, .auto-trigger-profile-enter-delay-min-ms, .auto-trigger-profile-enter-delay-max-ms, .auto-trigger-profile-cooldown-min-ms, .auto-trigger-profile-cooldown-max-ms, .auto-trigger-profile-spray-release-delay-ms"
   ));
   return fields.some((field) => {
     const value = field.value.trim();
@@ -11741,7 +10890,6 @@ function renderModels(payload, selectedModelId) {
   ) {
     renderAutoTriggerProfiles({ profiles: collectAutoTriggerProfiles() });
   }
-  renderAutoBackFlickClassPicker(currentAutoBackFlickClassConfig());
   updatePresetCleanupButton();
 }
 
@@ -12840,21 +11988,6 @@ async function runUiAction(fn) {
   }
 }
 
-function enforceAutoBackFlickDirectionExclusion(changedId = "") {
-  const randomDirection = $("auto_back_flick_random_direction");
-  const dodgeAway = $("auto_back_flick_dodge_away_from_target");
-  if (!randomDirection || !dodgeAway) {
-    return;
-  }
-  if (changedId === "auto_back_flick_random_direction" && randomDirection.checked) {
-    dodgeAway.checked = false;
-  } else if (changedId === "auto_back_flick_dodge_away_from_target" && dodgeAway.checked) {
-    randomDirection.checked = false;
-  } else if (randomDirection.checked && dodgeAway.checked) {
-    dodgeAway.checked = false;
-  }
-}
-
 function bindConfigAutoApply() {
   document.querySelectorAll("[data-config]").forEach((el) => {
     if (el.type === "number") {
@@ -12876,7 +12009,6 @@ function bindConfigAutoApply() {
       });
       el.addEventListener("change", () => {
         clampNumberInputToLimits(el);
-        enforceFanControlInputPairs(el.id);
         if (el.id === "capture_crop_size") {
           updateDynamicOffsetControlLimits({ clampValues: true });
         }
@@ -12891,13 +12023,6 @@ function bindConfigAutoApply() {
     const eventName = isInstant ? "change" : "input";
     const delay = isInstant ? 70 : 180;
     el.addEventListener(eventName, () => {
-      if (
-        el.id === "auto_back_flick_random_direction" ||
-        el.id === "auto_back_flick_dodge_away_from_target"
-      ) {
-        enforceAutoBackFlickDirectionExclusion(el.id);
-      }
-      enforceFanControlInputPairs(el.id);
       if (el.id === "capture_crop_size") {
         updateDynamicOffsetControlLimits({ clampValues: true });
       } else if (AIM_OVERLAY_CONFIG_IDS.has(el.id)) {
@@ -13258,7 +12383,6 @@ function refreshClassNameDependentViews() {
   }
   renderAimProfiles(collectAimProfiles());
   renderAutoTriggerProfiles({ profiles: collectAutoTriggerProfiles() });
-  renderAutoBackFlickClassPicker(currentAutoBackFlickClassConfig());
 }
 
 async function saveModelClassNames(modelId, classNames) {
@@ -14049,8 +13173,6 @@ async function main() {
   fillOptions($("recoil_hotkey"), POINTER_HOTKEYS);
   fillOptions($("recoil_hotkey2"), OPTIONAL_POINTER_HOTKEYS);
   fillOptions($("rapid_fire_hotkey"), RAPID_FIRE_HOTKEYS);
-  fillOptions($("controller_y_axis_fire_hotkey"), POINTER_HOTKEYS);
-  fillOptions($("crosshair_fire_hotkey"), POINTER_HOTKEYS);
   fillOptions($("hotkey_guard_toggle_hotkey"), POINTER_HOTKEYS);
   initPageNavigation();
   initControlSectionNavigation();
