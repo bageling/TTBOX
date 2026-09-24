@@ -210,29 +210,46 @@ def test_range_factor_above_one_is_clamped(web_mod, monkeypatch):
     assert fov['radius'] == pytest.approx(0.5)
 
 
-def test_hotkey_fov_scale_multiplies_overview_factor(web_mod, monkeypatch):
-    """★ 热键卡旋钮必须真的参与相乘（旧实现从不读它）。1.0 × 0.5 ⇒ 0.5×。"""
-    fov = _fov_of(web_mod, monkeypatch,
-                  {'range_factor': 1.0, 'aim_profiles': [{'fov_scale': 0.5}]})
-    assert fov['enabled'] is True
-    assert fov['radius'] == pytest.approx(0.25)
-    assert fov['radius'] * 2.0 == pytest.approx(0.5)
+def test_hotkey_fov_scale_is_stored_per_profile_not_baked_into_radius(web_mod, monkeypatch):
+    """★ 热键卡的 FOV 倍率**不再**在后端乘进 fov.radius，而是按档存进 aim_profiles[i].fov_scale。
+
+    为什么必须拆开：总览半径（range_factor）是全局的，热键卡倍率是按档的。
+    多档位之后如果后端一次性乘完，所有档就被锁死在同一个半径上 —— 卡上的旋钮
+    看着能拖、实际对别的档毫无作用。乘法改由 core 按当前档做：
+    fov_range = (fov.radius × 2) × aim_profiles[active].fov_scale（AimThread）。
+    """
+    prof = web_mod.web_body_to_profile(
+        {'range_factor': 1.0, 'aim_profiles': [{'hotkey': 'right', 'fov_scale': 0.5}]})
+    assert prof['fov']['enabled'] is True
+    # 基准半径只由总览倍率决定：1.0 ⇒ radius = 0.5（= 内接圆）
+    assert prof['fov']['radius'] == pytest.approx(0.5)
+    # 档倍率原样落到档里，等 core 再乘
+    assert prof['mouse']['aim_profiles'][0]['fov_scale'] == pytest.approx(0.5)
 
 
-def test_hotkey_fov_scale_only_uses_current_core_radius_as_base(web_mod, monkeypatch):
-    """只拖热键卡旋钮（未动总览）⇒ 基准取 core 当前生效半径，不当作 1.0 重置。
+def test_hotkey_fov_scale_alone_never_touches_the_base_radius(web_mod, monkeypatch):
+    """只拖热键卡旋钮（没动总览）⇒ 基准半径必须原样沿用 core 现值。
 
-    core 现值 radius=0.4 ⇒ 当前倍率 0.8；再乘 0.5 ⇒ 0.4 ⇒ radius=0.2。
-    若把缺省基准错当成 1.0，就会得到 0.5× —— 用户看着圆没缩小，但一拖就跳。
+    旧实现会先把现值反推回倍率再乘，等于把 core 的半径改了一遍；
+    拆开之后两边互不干涉：总览没提交就不动 fov，档倍率只进档。
+    core 现值 radius=0.4 ⇒ 保存后仍是 0.4，倍率 0.5 落到档里。
     """
     prof = _base_profile(fov={'enabled': True, 'radius': 0.4})
-    fov = _fov_of(web_mod, monkeypatch,
-                  {'aim_profiles': [{'fov_scale': 0.5}]}, profile=prof)
-    assert fov['radius'] == pytest.approx(0.2)
+    monkeypatch.setattr(web_mod, '_get_runtime_profile',
+                        lambda: json.loads(json.dumps(prof)))
+    out = web_mod.web_body_to_profile(
+        {'aim_profiles': [{'hotkey': 'right', 'fov_scale': 0.5}]})
+    assert out['fov']['radius'] == pytest.approx(0.4)
+    assert out['fov']['enabled'] is True
+    assert out['mouse']['aim_profiles'][0]['fov_scale'] == pytest.approx(0.5)
 
 
 def test_both_factors_absent_leaves_core_value_untouched(web_mod, monkeypatch):
-    """两项都没提交（只改别的字段）⇒ 本项不参与保存，原样沿用 core 现值。"""
+    """总览倍率没提交（只改别的字段）⇒ 本项不参与保存，原样沿用 core 现值。
+
+    档倍率已不进 fov，所以现在"不动 fov"只取决于 range_factor 有没有来。
+    漏了这条守卫的表现是：改个截取尺寸顺手把 FOV 半径顶回默认值。
+    """
     prof = _base_profile(fov={'enabled': True, 'radius': 0.3})
     fov = _fov_of(web_mod, monkeypatch, {'capture': {'crop_size': 0}}, profile=prof)
     assert fov['enabled'] is True
@@ -249,16 +266,40 @@ def test_fov_center_and_shape_are_preserved(web_mod, monkeypatch):
     assert fov['radius'] == pytest.approx(0.25)
 
 
-def test_product_of_two_factors_is_clamped_once(web_mod, monkeypatch):
-    """两个 0.1 相乘 = 0.01，不能写成 radius=0.005（虽仍合法，但会把圆缩到近乎全灭）。
+def test_base_radius_and_profile_scale_are_two_independent_layers(web_mod, monkeypatch):
+    """两层缩放各归各位：总览倍率 → fov.radius，档倍率 → aim_profiles[i].fov_scale。
 
-    约定：先各自夹到 [0.1,1] 再相乘，乘积不再回夹 —— 这是"两层缩放叠乘"的真实语义；
-    但结果必须仍满足 core 的 radius ∈ (0,1]。
+    后端**不做**乘法（乘法在 core 按当前档做）。所以这里要能看出两层没被压成一层：
+    (总览 0.5, 档 0.5) 的 radius 必须是 0.25 而不是 0.125 —— 写成 0.125 就等于
+    后端把两层乘掉了，之后用户在卡上改倍率对整个半径不再有任何影响。
     """
-    fov = _fov_of(web_mod, monkeypatch,
-                  {'range_factor': 0.1, 'aim_profiles': [{'fov_scale': 0.1}]})
-    assert fov['radius'] == pytest.approx(0.005)
-    assert 0.0 < fov['radius'] <= 1.0
+    a = web_mod.web_body_to_profile(
+        {'range_factor': 0.5, 'aim_profiles': [{'hotkey': 'right', 'fov_scale': 0.5}]})
+    assert a['fov']['radius'] == pytest.approx(0.25)
+    assert a['mouse']['aim_profiles'][0]['fov_scale'] == pytest.approx(0.5)
+    # core 侧生效值 = radius×2 × 档倍率（AimThread）
+    effective = a['fov']['radius'] * 2.0 * a['mouse']['aim_profiles'][0]['fov_scale']
+    assert effective == pytest.approx(0.25)
+
+
+def test_per_profile_fov_scale_is_clamped_and_never_leaks_illegal_values(web_mod, monkeypatch):
+    """档倍率逐档夹到 [0.1,1]：0 / 越界 / 非数值都不能漏进档里。
+
+    漏进 0 的后果不在 fov.radius（那是基准，仍然合法），而在 core 侧
+    fov_range = 基准 × 0 = 0 ⇒ 选靶范围全灭、自瞄彻底不出手，而且全程不报错。
+    """
+    prof = web_mod.web_body_to_profile({
+        'aim_profiles': [
+            {'hotkey': 'right', 'fov_scale': 0.0},
+            {'hotkey': 'left', 'fov_scale': 1.8},
+            {'hotkey': 'middle', 'fov_scale': float('nan')},
+        ]})
+    scales = [p['fov_scale'] for p in prof['mouse']['aim_profiles']]
+    assert scales[0] == pytest.approx(0.1)
+    assert scales[1] == pytest.approx(1.0)
+    assert scales[2] == pytest.approx(1.0)
+    for s in scales:
+        assert 0.0 < s <= 1.0
 
 
 # ===========================================================================
@@ -326,11 +367,79 @@ def test_profile_to_web_disabled_fov_reports_one(web_mod):
     assert body['range_factor'] == pytest.approx(1.0)
 
 
-def test_profile_to_web_hotkey_fov_scale_is_pinned_to_one(web_mod):
-    """热键卡倍率恒回 1.0：core 只存一份最终半径，拆不开；回 1.0 防下次保存重复相乘。"""
+def test_profile_to_web_legacy_profile_synthesizes_one_card(web_mod):
+    """core 没写 aim_profiles（1.5.50 及更早的配置）⇒ 合成一张卡，口径与 core 侧一致。
+
+    ★ fov_scale / sensitivity 必须都回 1.0：core 合成的那一档就是这两个值
+      （= 不额外缩放）。回成别的值，用户一进面板再保存就会把倍率悄悄改掉。
+    """
     prof = _base_profile(fov={'enabled': True, 'radius': 0.4})
+    prof['mouse'].update({'aim_hotkey': 8, 'aim_hotkey2': 0, 'aim_hotkey_mode': 'all'})
+    prof['inference']['class_filter'] = [2]
     body = web_mod.profile_to_web(prof)
-    assert body['aim_profiles'][0]['fov_scale'] == pytest.approx(1.0)
+    assert len(body['aim_profiles']) == 1
+    card = body['aim_profiles'][0]
+    assert card['hotkey'] == 'back'          # 位掩码 8 = back
+    assert card['hotkey2'] == ''
+    assert card['hotkey_mode'] == 'all'
+    assert card['fov_scale'] == pytest.approx(1.0)
+    assert card['sensitivity'] == pytest.approx(1.0)
+    assert card['class_filter_mask'] == 1 << 2
+
+
+def test_profile_to_web_returns_every_profile_with_its_own_fov_scale(web_mod):
+    """core 有数组 ⇒ 每档自己的键位 / 倍率 / 类别原样回填，不压缩、不重排。
+
+    ★ 顺序有语义：多键同按时 core 取数组里第一个命中的档，回填不能重排。
+    """
+    prof = _base_profile(fov={'enabled': True, 'radius': 0.4})
+    prof['mouse']['aim_profiles'] = [
+        {'hotkey': 1, 'hotkey2': 0, 'hotkey_mode': 'any', 'offset_x': 0.4, 'offset_y': 0.3,
+         'sensitivity': 1.2, 'fov_scale': 0.5, 'class_filter': [0, 3]},
+        {'hotkey': 16, 'hotkey2': 8, 'hotkey_mode': 'all', 'offset_x': 0.6, 'offset_y': 0.7,
+         'sensitivity': 0.9, 'fov_scale': 0.8, 'class_filter': [1]},
+    ]
+    cards = web_mod.profile_to_web(prof)['aim_profiles']
+    assert len(cards) == 2
+    assert cards[0]['hotkey'] == 'left'
+    assert cards[0]['fov_scale'] == pytest.approx(0.5)
+    assert cards[0]['sensitivity'] == pytest.approx(1.2)
+    assert cards[0]['offset_y'] == pytest.approx(0.3)
+    assert cards[0]['class_filter_mask'] == (1 << 0) | (1 << 3)
+    assert cards[1]['hotkey'] == 'forward'
+    assert cards[1]['hotkey2'] == 'back'
+    assert cards[1]['hotkey_mode'] == 'all'
+    assert cards[1]['fov_scale'] == pytest.approx(0.8)
+    assert cards[1]['class_filter_mask'] == (1 << 1)
+
+
+def test_multi_profile_roundtrip_is_stable(web_mod, monkeypatch):
+    """回填 → 原样存回：档数、键位、倍率、类别全部稳定。
+
+    面板是"改完即存"，每次 PUT 都走这条路。往返一旦不稳，用户每动一个无关旋钮
+    就会把档位表改一遍 —— 这正是旧实现里"第 2 张卡刷新后消失"的同类事故。
+    """
+    prof = _base_profile(fov={'enabled': True, 'radius': 0.4})
+    prof['mouse']['aim_profiles'] = [
+        {'hotkey': 1, 'hotkey2': 0, 'hotkey_mode': 'any', 'offset_x': 0.4, 'offset_y': 0.3,
+         'sensitivity': 1.2, 'fov_scale': 0.5, 'class_filter': [0, 3]},
+        {'hotkey': 16, 'hotkey2': 8, 'hotkey_mode': 'all', 'offset_x': 0.6, 'offset_y': 0.7,
+         'sensitivity': 0.9, 'fov_scale': 0.8, 'class_filter': [1]},
+    ]
+    body = web_mod.profile_to_web(prof)
+    out = web_mod.web_body_to_profile(body)
+    profs = out['mouse']['aim_profiles']
+    assert len(profs) == 2
+    assert profs[0]['hotkey'] == 1 and profs[0]['hotkey_mode'] == 'any'
+    assert profs[0]['sensitivity'] == pytest.approx(1.2)
+    assert profs[0]['fov_scale'] == pytest.approx(0.5)
+    assert profs[0]['class_filter'] == [0, 3]
+    assert profs[1]['hotkey'] == 16 and profs[1]['hotkey2'] == 8
+    assert profs[1]['hotkey_mode'] == 'all'
+    assert profs[1]['offset_y'] == pytest.approx(0.7)
+    assert profs[1]['class_filter'] == [1]
+    # 总览基准半径不受档倍率影响（两层独立）
+    assert out['fov']['radius'] == pytest.approx(0.4)
 
 
 @pytest.mark.parametrize('radius', [0.5, 0.4, 0.3, 0.2, 0.1, 0.05])
@@ -365,10 +474,9 @@ def test_profile_to_web_clamps_oversized_radius_back_to_inscribed_circle(
     assert fov2['radius'] == pytest.approx(fov['radius'])
 
 
-def test_profile_to_web_hotkey_card_entries_share_the_pinned_scale(web_mod):
-    """面板可有多张热键卡；core 侧只有一份半径，每张卡的 fov_scale 都必须回 1.0。"""
-    prof = _base_profile(fov={'enabled': True, 'radius': 0.4})
-    body = web_mod.profile_to_web(prof)
+def test_profile_to_web_legacy_card_count_is_one_never_zero(web_mod):
+    """回填永远至少给一张卡：core 侧 aim_profiles 非空是不变量（面板不能出现"零卡但能存"）。"""
+    body = web_mod.profile_to_web(_base_profile(fov={'enabled': True, 'radius': 0.4}))
     assert len(body['aim_profiles']) >= 1
     for card in body['aim_profiles']:
         assert card['fov_scale'] == pytest.approx(1.0)
@@ -474,13 +582,17 @@ def test_html_range_factor_hint_states_the_inscribed_circle_rule():
     assert '截取' in hint and '圆' in hint, hint[:400]
 
 
-def test_html_hotkey_fov_scale_hint_says_multiply_and_unified(web_mod):
-    """热键卡提示必须说清是"在总览半径上再乘"，且对所有热键统一生效。
+def test_html_hotkey_fov_scale_hint_says_multiply_and_per_profile(web_mod):
+    """热键卡提示必须说清是"在总览半径上再乘"，且只对本组热键生效。
 
-    后端只存一份半径，拆不开；文案若还写"每个热键独立"，用户会以为设了没用。
+    2026-09-24 语义翻转：这条用例原来钉的是"对所有热键统一生效"，
+    因为当时倍率是 web 侧乘法（后端只存一份半径，拆不开）。
+    本轮回把乘法移进 core 按当前档做 —— scfg.fov_range = (radius*2) * ap->fov_scale
+    —— 所以倍率是**按档**的，文案再说"统一"就是反向误导。别把旧断言改回来。
     """
     src = _html()
     i = src.index('aim-profile-fov-scale-range')
     hint = src[i:i + 700]
     assert '乘' in hint, hint[:400]
-    assert '统一' in hint or '所有热键' in hint, hint[:400]
+    assert '本组' in hint or '本档' in hint, hint[:400]
+    assert '所有热键' not in hint and '统一' not in hint, hint[:400]

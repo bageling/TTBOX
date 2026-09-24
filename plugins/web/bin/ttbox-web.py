@@ -1072,6 +1072,98 @@ def _fov_radius_to_factor(radius, enabled=True) -> float:
         return 1.0
 
 
+# ---- 瞄准档位（多热键，2026-09-24）----
+# 面板「热键与类别」页每张卡片 = 一个档位，提交体是 aim_profiles[] 数组。
+# core 侧 MouseProfile.aim_profiles 是热键的**唯一真源**：老的平铺
+# aim_hotkey / aim_hotkey2 / aim_hotkey_mode 已从结构体删除，只在 JSON 解析时
+# 作为「数组缺失（老配置）」的合成源。所以这里必须整表遍历，不能再只取 [0]。
+AIM_PROFILE_MAX = 8   # 档位数上限（面板能加卡，这里是硬护栏）
+AIM_PROFILE_MIN = 1   # 至少一档：core 侧 aim_profiles 非空是不变量
+
+
+class ConfigValidationError(ValueError):
+    """提交体语义非法（JSON 没坏，是参数配错了）。调用方转成 400 + 可读原因。"""
+
+
+def _aim_profile_core_dict(p: dict) -> dict:
+    """单张热键卡 → core aim_profiles[] 的一项。缺字段不写（让 core 吃结构体默认）。"""
+    p = p if isinstance(p, dict) else {}
+    out: dict = {}
+    out['hotkey'] = _hotkey_to_bits(p.get('hotkey'), 2) or 2
+    out['hotkey2'] = _hotkey_to_bits(p.get('hotkey2'), 0)
+    out['hotkey_mode'] = _hotkey_mode_to_web(p.get('hotkey_mode'))
+    if p.get('offset_x') is not None:
+        out['offset_x'] = p['offset_x']
+    if p.get('offset_y') is not None:
+        out['offset_y'] = p['offset_y']
+    if p.get('class_offsets'):
+        out['class_offsets'] = p['class_offsets']
+    if p.get('sensitivity') is not None:
+        out['sensitivity'] = p['sensitivity']
+    if p.get('fov_scale') is not None:
+        out['fov_scale'] = _fov_factor_clamp(p['fov_scale'])
+    mask = p.get('class_filter_mask')
+    if mask is not None:
+        m = int(mask or 0)
+        out['class_filter'] = [i for i in range(32) if m & (1 << i)]
+    return out
+
+
+def _aim_profile_key_bits(p: dict) -> int:
+    """一张卡的键位并集（主 ∪ 副）。与 core 的 aim_profiles_overlap 同一口径。"""
+    p = p if isinstance(p, dict) else {}
+    hk = _hotkey_to_bits(p.get('hotkey'), 0)
+    hk2 = _hotkey_to_bits(p.get('hotkey2'), 0)
+    return hk | hk2
+
+
+def validate_aim_profiles(profiles) -> list:
+    """校验并归一化 aim_profiles。非法时抛 ConfigValidationError（带人话原因）。
+
+    规则与 core/src/mouse/MouseTypes.hpp 的注释同源：
+      · 至少 1 档、最多 AIM_PROFILE_MAX 档；
+      · 档内：主键必须有效；副键不能与主键撞（撞了等于没按副键）；
+        「同时按下」模式副键必须非空；
+      · 档间：**任意两档的键位并集必须互斥**（按位与 == 0），即"同一个键不能给两档"。
+        这条挡的是"单个键按下时判不出该用哪档"的配错。
+
+    ★ 它**不保证**选档唯一，这点别搞混：同时按下两档各自的键（左键开火 + 右键瞄准）
+      仍然会两档都命中，物理上禁不掉。core 侧此时取**面板顺序里第一个命中的档**
+      （aim_profile_match 命中即返回）。所以"顺序优先"是必需兜底，不是可选优化。
+
+    提交体里的每张卡都必须带 hotkey：core 侧 mouse.aim_profiles 是**整表替换**，
+    少一个 hotkey 就会把那一档的键位重置成默认值（右键），属于静默改配置。
+    """
+    if not isinstance(profiles, list) or not profiles:
+        return []
+    if len(profiles) > AIM_PROFILE_MAX:
+        raise ConfigValidationError(f'热键最多 {AIM_PROFILE_MAX} 组，当前提交了 {len(profiles)} 组')
+    key_names = {v: k for k, v in HOTKEY_BITS.items()}
+    masks: list = []
+    for i, p in enumerate(profiles, start=1):
+        p = p if isinstance(p, dict) else {}
+        hk = _hotkey_to_bits(p.get('hotkey'), 0)
+        hk2 = _hotkey_to_bits(p.get('hotkey2'), 0)
+        mode = _hotkey_mode_to_web(p.get('hotkey_mode'))
+        if hk == 0:
+            raise ConfigValidationError(f'热键 {i}：请选择主按键')
+        if hk & hk2:
+            raise ConfigValidationError(f'热键 {i}：副按键不能与主按键相同（同一个键等于没按）')
+        if mode == 'all' and hk2 == 0:
+            raise ConfigValidationError(f'热键 {i}：触发方式选了「同时按下」，必须再选一个副按键')
+        masks.append(hk | hk2)
+    for i in range(len(masks)):
+        for j in range(i + 1, len(masks)):
+            dup = masks[i] & masks[j]
+            if dup:
+                names = '、'.join(key_names.get(1 << b, str(1 << b))
+                                  for b in range(5) if dup & (1 << b))
+                raise ConfigValidationError(
+                    f'热键 {i + 1} 与热键 {j + 1} 不能共用按键（重复：{names}）。'
+                    '一个按键只能归一组 —— 请换一个键，或删掉其中一组')
+    return [_aim_profile_core_dict(p) for p in profiles]
+
+
 def web_body_to_profile(body: dict) -> dict:
     """Web 前端保存的配置格式（collectConfig 扁平结构）→ RuntimeProfile。"""
     ctrl = (body.get('ai') or {}).get('controller') or {}
@@ -1262,34 +1354,47 @@ def web_body_to_profile(body: dict) -> dict:
     if ctrl.get('selector_lost_grace_ms') is not None:
         mouse['lost_grace_ms'] = ctrl['selector_lost_grace_ms']
 
-    # 5) aim_profiles[0]：热键 / 瞄准点 / profile 灵敏度
-    profiles = body.get('aim_profiles') or []
-    p0 = profiles[0] if profiles else {}
-    class_filter_mask = int(p0.get('class_filter_mask', 0) or 0)
-    if p0.get('hotkey') is not None:
-        mouse['aim_hotkey'] = _hotkey_to_bits(p0['hotkey'], 2) or 2
-    if p0.get('hotkey2') is not None:
-        mouse['aim_hotkey2'] = _hotkey_to_bits(p0['hotkey2'], 0)
-    if p0.get('hotkey_mode') is not None:
-        mouse['aim_hotkey_mode'] = 1 if p0['hotkey_mode'] == 'all' else 0
+    # 5) 瞄准档位 aim_profiles[]：热键 / 瞄准点 / 移动倍率 / FOV 倍率 / 目标类别
+    #    ★ 必须整表遍历。旧实现只取 [0]，面板「新增热键」加出来的第 2 张卡起，
+    #      所有字段在保存时静默丢弃、刷新后连卡本身都消失 —— 那不是"少读一行"，
+    #      是面板长了个 core 没有的功能（面板多卡 UI 来自 e874b2c 照抄上游 YU 面板）。
+    #    提交体带 aim_profiles 时整表替换（core 侧数组就是一个整体，没有按键级合并）；
+    #    不带时整段不动，避免"改个灵敏度把热键顺手重置"。
+    profiles = body.get('aim_profiles')
+    core_profiles = validate_aim_profiles(profiles) if profiles is not None else []
+    if core_profiles:
+        mouse['aim_profiles'] = core_profiles
+    p0 = core_profiles[0] if core_profiles else {}
+    # 目标类别：推理侧（DecodeNMS）逐帧解码、没有"哪个热键"的概念 ⇒ 只能收**全档并集**，
+    # 否则档 2 要用的类别会在推理阶段就被丢掉。瞄准侧再按当前档窄化（AimThread 的
+    # scfg.class_filter），单档时两侧相同 ⇒ 行为与加档位之前逐位一致。
+    # 提交体不带 aim_profiles 时不动这一项（None 哨兵），免得"改个别处把类别清空"。
+    class_union_mask = None
+    if profiles is not None:
+        class_union_mask = 0
+        for p in (profiles or []):
+            class_union_mask |= int((p or {}).get('class_filter_mask') or 0)
+
+    # 5b) 全局量：sens / pos
+    #    sens → sensitivity（输出全局缩放）；pos → offset_y（瞄准高度）。
+    #    ★ 卡片的「热键移动倍率」**不再**写进全局 sensitivity：core 侧现在是
+    #      out = 全局 sensitivity × 当前档 sensitivity，写进全局就会把倍率乘两遍。
+    #      旧实现把 card[0].sensitivity 覆盖到 mouse.sensitivity 上 ⇒ 总览「移动倍率」
+    #      那个滑块其实一直是死的（被卡片顶掉），这次一并修掉。
+    if body.get('sens') is not None:
+        mouse['sensitivity'] = body['sens']
     aim_point_vals: dict = {}
     if p0.get('offset_x') is not None:
         aim_point_vals['offset_x'] = p0['offset_x']
     if p0.get('offset_y') is not None:
         aim_point_vals['offset_y'] = p0['offset_y']
-
-    # 5) 全局量：sens / pos / range_factor
-    #    sens → sensitivity（输出全局缩放）；pos → aim_point.offset_y（瞄准高度）
-    if body.get('sens') is not None:
-        mouse['sensitivity'] = body['sens']
-    if p0.get('sensitivity') is not None:
-        mouse['sensitivity'] = p0['sensitivity']
-    if p0.get('offset_y') is None and body.get('pos') is not None:
+    elif body.get('pos') is not None:
         aim_point_vals['offset_y'] = body['pos']
     if p0.get('class_offsets'):
         mouse['class_offsets'] = p0['class_offsets']
     # RuntimeProfile::from_json 读平铺的 offset_x/offset_y（mouse.aim_point 是内部结构，
     # JSON 层平铺为 mouse.offset_x/mouse.offset_y），此处按 Core 契约平铺写入。
+    # 这两个是"全局基底瞄准点"，core 侧再被当前档的 offset 覆盖。
     for k, v in aim_point_vals.items():
         mouse[k] = v
 
@@ -1299,8 +1404,9 @@ def web_body_to_profile(body: dict) -> dict:
         inference['confidence'] = body['video_detection_confidence']
     if body.get('video_detection_iou') is not None:
         inference['iou'] = body['video_detection_iou']
-    if class_filter_mask >= 0:
-        inference['class_filter'] = [i for i in range(32) if class_filter_mask & (1 << i)]
+    if class_union_mask is not None:
+        # 全档类别并集（见第 5 段的说明）：推理侧不能按档过滤，瞄准侧才按档窄化。
+        inference['class_filter'] = [i for i in range(32) if class_union_mask & (1 << i)]
 
     # 7) 采集
     capture: dict = {}
@@ -1315,13 +1421,17 @@ def web_body_to_profile(body: dict) -> dict:
     if cap.get('crop_offset_y') is not None:
         capture['offset_y'] = cap['crop_offset_y']
 
-    # 8) FOV：瞄准范围 = 截取尺寸内划最大的圆形（业主口径）
-    #    半径 = 内接圆半径 × range_factor（总览「FOV 半径」）× fov_scale（热键卡「热键 FOV 缩放」）。
-    #    core 侧 AimThread 取 fov_range = fov.enabled ? fov.radius*2 : 1.0（AimThread.cpp:117），
+    # 8) FOV 基准半径：瞄准范围 = 截取尺寸内划最大的圆形（业主口径）
+    #    半径基准 = 内接圆半径 × range_factor（总览「FOV 半径」）。
+    #    ★ 档位倍率（热键卡的「热键 FOV 缩放」）**不在这里乘**：总览半径是全局的、
+    #      倍率是按档的，乘法必须在 core 侧按当前档做 ——
+    #      core AimThread 取 fov_range = (fov.radius × 2) × aim_profiles[active].fov_scale。
+    #      5e8d3a5 曾在这一处一次性乘完；多档位之后那样做会把所有档锁死在同一个半径。
+    #    core 侧 fov_range = fov.enabled ? fov.radius*2 : 1.0（AimThread.cpp:117），
     #    所以这里必须写 radius = k/2 且 enabled=True。旧实现两处有问题：
     #      · `enabled = range_factor < 1.0` ⇒ 1.00 走 enabled=False（fov_range 被强制成 1.0）、
     #        0.99 走 enabled=True（fov_range=1.98）⇒ 滑块往小拖，圆反而几乎翻倍（非单调）；
-    #      · 从不读 p0['fov_scale']，回填时又恒写 1.0 ⇒ 热键卡那个旋钮是死的，提示文案却在承诺"乘"。
+    #      · 从不读 fov_scale，回填时又恒写 1.0 ⇒ 热键卡那个旋钮是死的，提示文案却在承诺"乘"。
     fov: dict = {}
     try:
         prev = _get_runtime_profile()
@@ -1331,19 +1441,13 @@ def web_body_to_profile(body: dict) -> dict:
     fov['shape'] = prev_fov.get('shape', 0)
     fov['center_x'] = prev_fov.get('center_x', 0.5)
     fov['center_y'] = prev_fov.get('center_y', 0.5)
-    if body.get('range_factor') is None and p0.get('fov_scale') is None:
-        # 两个倍率都没带 ⇒ 沿用 Core 现值，本项不参与本次保存
+    if body.get('range_factor') is None:
+        # 没带总览倍率 ⇒ 沿用 Core 现值，本项不参与本次保存
         fov['enabled'] = prev_fov.get('enabled', False)
         fov['radius'] = prev_fov.get('radius', 0.5)
     else:
-        base_factor = body.get('range_factor')
-        if base_factor is None:
-            # 只传了热键卡倍数：先把当前生效半径换算回总览倍率，再乘
-            base_factor = _fov_radius_to_factor(prev_fov.get('radius', 0.5),
-                                                prev_fov.get('enabled'))
-        factor = _fov_factor_clamp(base_factor) * _fov_factor_clamp(p0.get('fov_scale'))
         fov['enabled'] = True
-        fov['radius'] = round(factor / 2.0, 6)
+        fov['radius'] = round(_fov_factor_clamp(body['range_factor']) / 2.0, 6)
 
     # 9) 预览帧率
     preview: dict = {}
@@ -1365,6 +1469,85 @@ def web_body_to_profile(body: dict) -> dict:
         prof['model_id'] = body['model_id']
 
     return prof
+
+
+def _hotkey_mode_to_web(v) -> str:
+    """core 的触发方式 → 面板选单值（'all' / 'any'）。
+
+    ★ core 侧 aim_profiles[].hotkey_mode 序列化成**字符串** "all"/"any"
+      （mouse_hotkey_mode_name），而压枪那一路（recoil.hotkey_mode）是数字 1/2。
+      旧回填代码一律写 `mouse.get('aim_hotkey_mode') == 1`，拿字符串比整数 ⇒
+      永远判成 'any'：「同时按下」在面板上从来看不到，而且用户下一次保存就把它
+      真改成「任一按键」。这里两种形式都认，不再依赖序列化类型。
+    """
+    if isinstance(v, bool):
+        return 'all' if v else 'any'
+    if isinstance(v, (int, float)):
+        return 'all' if int(v) == 1 else 'any'
+    return 'all' if str(v).strip().lower() == 'all' else 'any'
+
+
+def _aim_profiles_to_web(mouse: dict, inf: dict) -> list:
+    """core 的 mouse.aim_profiles → 面板热键卡数组（populate 回填）。
+
+    真实路径：core 序列化出的 mouse.aim_profiles[]（每档含 hotkey/hotkey2/hotkey_mode/
+    offset_x/offset_y/class_offsets/class_filter/sensitivity/fov_scale）。
+    老配置路径：core 没写数组（1.5.50 及更早的配置，或数组为空）⇒ 用平铺
+    aim_hotkey/aim_hotkey2/aim_hotkey_mode + mouse.offset_* + inference.class_filter
+    合成一张卡，保证"面板显示的就是实际生效的"，不会因为回填少一项而下次保存写错。
+
+    ★ 档位顺序 = 面板顺序 = core 数组顺序。多键同按（左键+右键）时 core 取数组里
+      第一个命中的档，所以这个顺序是有语义的，回填不能重排。
+    """
+    raw = mouse.get('aim_profiles')
+    if isinstance(raw, list) and raw:
+        cards = []
+        for j in raw:
+            j = j if isinstance(j, dict) else {}
+            cf = j.get('class_filter')
+            mask = 0
+            if isinstance(cf, list):
+                for i in cf:
+                    try:
+                        iv = int(i)
+                    except (TypeError, ValueError):
+                        continue
+                    if iv >= 0:
+                        mask |= 1 << iv
+            ox = j.get('offset_x', 0.5)
+            oy = j.get('offset_y', 0.5)
+            cards.append({
+                'hotkey': _bits_to_hotkey(j.get('hotkey', 2)) or 'right',
+                'hotkey2': _bits_to_hotkey(j.get('hotkey2', 0)),
+                'hotkey_mode': _hotkey_mode_to_web(j.get('hotkey_mode', 'any')),
+                'sensitivity': j.get('sensitivity', 1.0),
+                'fov_scale': j.get('fov_scale', 1.0),
+                'offset_x': ox,
+                'offset_y': oy,
+                'alternate_offset_x': ox,
+                'alternate_offset_y': oy,
+                'class_filter_mask': mask,
+                'class_offsets': j.get('class_offsets', []),
+                'offset_switch_enabled': False, 'offset_switch_hotkey': '',
+            })
+        return cards
+    # 老配置回退：合成单卡（与 core 侧 at RuntimeProfile 的合成口径一致：
+    # sensitivity / fov_scale 都是 1.0 = 不额外缩放；类别继承全局 class_filter）
+    return [{
+        'hotkey': _bits_to_hotkey(mouse.get('aim_hotkey', 2)) or 'right',
+        'hotkey2': _bits_to_hotkey(mouse.get('aim_hotkey2', 0)),
+        'hotkey_mode': _hotkey_mode_to_web(mouse.get('aim_hotkey_mode', 'any')),
+        'sensitivity': 1.0,
+        'fov_scale': 1.0,
+        'offset_x': mouse.get('offset_x', 0.5),
+        'offset_y': mouse.get('offset_y', 0.5),
+        'alternate_offset_x': mouse.get('offset_x', 0.5),
+        'alternate_offset_y': mouse.get('offset_y', 0.5),
+        'class_filter_mask': sum(1 << int(i) for i in inf.get('class_filter', [])
+                                 if int(i) >= 0) if isinstance(inf.get('class_filter'), list) else 0,
+        'class_offsets': mouse.get('class_offsets', []),
+        'offset_switch_enabled': False, 'offset_switch_hotkey': '',
+    }]
 
 
 def profile_to_web(prof: dict) -> dict:
@@ -1483,22 +1666,7 @@ def profile_to_web(prof: dict) -> dict:
         'sens': mouse.get('sensitivity', 1.0),
         'pos': ap.get('offset_y', 0.5),
         'ai': {'controller': ctrl},
-        'aim_profiles': [{
-            'hotkey': _bits_to_hotkey(mouse.get('aim_hotkey', 2)) or 'right',
-            'hotkey2': _bits_to_hotkey(mouse.get('aim_hotkey2', 0)),
-            'hotkey_mode': 'all' if mouse.get('aim_hotkey_mode') == 1 else 'any',
-            'sensitivity': mouse.get('sensitivity', 1.0),
-            'offset_x': ap.get('offset_x', 0.5),
-            'offset_y': ap.get('offset_y', 0.5),
-            'alternate_offset_x': ap.get('alternate_offset_x', ap.get('offset_x', 0.5)), 'alternate_offset_y': ap.get('alternate_offset_y', ap.get('offset_y', 0.5)),
-            'class_filter_mask': sum(1 << int(i) for i in inf.get('class_filter', []) if int(i) >= 0),
-            # fov_scale 恒回 1.0：core 只存一份「最终半径」，总览倍率与热键卡倍率在后端
-            # 已乘成 fov.radius 存下来了（见 web_body_to_profile 第 8 项），无法再拆开；
-            # 回 1.0 可保证"板端现值 = 面板显示 × 卡片倍数"不重复乘一遍。
-            'fov_scale': 1.0,
-            'class_offsets': mouse.get('class_offsets', []),
-            'offset_switch_enabled': False, 'offset_switch_hotkey': '',
-        }],
+        'aim_profiles': _aim_profiles_to_web(mouse, inf),
         'recoil': {
             # ★ 面板只留一个压枪开关（「新版替老版」）：它同时代表 BB 三段查表引擎的开关，
             #   所以回填取「两者任一为真」——只认 recoil.enabled 的话，若某设备
@@ -2660,7 +2828,13 @@ def update_config():
     prof = _get_runtime_profile()
     if not isinstance(body, dict) or not body:
         return jsonify({'ok': True, 'data': profile_to_web(prof)})
-    translated = web_body_to_profile(body)
+    try:
+        translated = web_body_to_profile(body)
+    except ConfigValidationError as exc:
+        # 档位表配错（热键重叠 / 主键缺失 / 同时按下缺副键…）如实报 400 + 人话原因，
+        # 而不是让它冒成 500。面板保存前也跑同一套校验（前端即时提示）；
+        # 这里是硬护栏，防绕过面板的调用把非法档位表写进板子。
+        return jsonify({'ok': False, 'error': str(exc)}), 400
     # 模型选中唯一真源是 ModelRegistry 的 active（/api/models/select 修改）。
     # 配置保存只在 body 明确携带非空 model_id 时透传；空串/缺失一律忽略，
     # 防止前端临时缺模型列表时回写空 model_id 把激活模型清掉。
@@ -3513,11 +3687,18 @@ def load_preset():
     #  1) Web 前端格式（新版）：有 video_detection_confidence/ai/aim_profiles → web_body_to_profile 翻译
     #  2) RuntimeProfile 结构（旧版）：有 inference/mouse/fov/capture 键 → 直接深合并
     if any(k in config for k in ('video_detection_confidence', 'ai', 'aim_profiles')):
-        translated = web_body_to_profile(config)
+        needs_translate = True
     elif any(k in config for k in ('inference', 'mouse', 'fov', 'capture')):
+        needs_translate = False
         translated = config
     else:
-        translated = web_body_to_profile(config)
+        needs_translate = True
+    if needs_translate:
+        try:
+            translated = web_body_to_profile(config)
+        except ConfigValidationError as exc:
+            # 预设里的档位表配错 → 400 + 人话原因（与 /api/config 同一口径）
+            return jsonify({'ok': False, 'error': f'预设内容非法：{exc}'}), 400
     prof = _deep_merge_profile(_get_runtime_profile(), translated)
     prof = normalize_profile_capture_size(prof)
     r = ipc_request('SET_CONFIG', {'profile': prof})

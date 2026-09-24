@@ -6269,6 +6269,11 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
 const HOTKEYS = ["left", "right", "middle", "back", "forward", "auto"];
 const POINTER_HOTKEYS = ["left", "right", "middle", "back", "forward"];
 const OPTIONAL_POINTER_HOTKEYS = ["", ...POINTER_HOTKEYS];
+// 鼠标五键位掩码 —— 必须与后端 HOTKEY_BITS（ttbox-web.py）和 core
+// MouseTypes.hpp 的 AimHotkeyProfile 注释同域，否则档位重叠校验的口径会漂。
+const AIM_HOTKEY_BITS = { left: 1, right: 2, middle: 4, back: 8, forward: 16 };
+// 档位数上限，与后端 AIM_PROFILE_MAX 同值。
+const AIM_PROFILE_MAX = 8;
 const HOTKEY_LABELS = {
   left: "左键",
   right: "右键",
@@ -6717,6 +6722,9 @@ const state = {
   livePollTimer: null,
   livePollInFlight: false,
   livePollErrorNotified: false,
+  // 热键档位冲突的最近一次提示文案。自动保存会被反复触发，
+  // 拿它去重，免得同一句「热键冲突」弹一屏。
+  aimProfileConflictNotified: "",
   activationRedirecting: false,
 };
 
@@ -8621,7 +8629,7 @@ function profileTemplate(profile, index) {
           <input class="aim-profile-fov-scale value-input" type="number" min="0.1" max="1" step="0.01" autocomplete="off" value="${fovScale}">
         </div>
         <input class="aim-profile-fov-scale-range" type="range" min="0.1" max="1" step="0.01" value="${fovScale}">
-        <span class="field-hint">在总览 FOV 半径上再乘这个倍率（当前后端只存一份半径，对所有热键统一生效）。</span>
+        <span class="field-hint">在总览 FOV 半径上再乘这个倍率，只对本组热键生效。</span>
       </div>
       <div class="aim-profile-axis-grid span-all">
         <div class="slider-field aim-profile-axis-field">
@@ -8866,9 +8874,11 @@ function bindAimProfileCard(card, profile) {
   const hotkeySelect = card.querySelector(".aim-profile-hotkey");
   const hotkey2Select = card.querySelector(".aim-profile-hotkey2");
   const hotkeyModeSelect = card.querySelector(".aim-profile-hotkey-mode");
-  fillOptions(hotkeySelect, HOTKEYS);
+  // 主按键只给真实鼠标键：HOTKEYS 里的 "auto" 后端没有对应位掩码，
+  // 存下去会被当作缺省值（右键）—— 看着选了「自动」其实变成右键，属于静默改配置。
+  fillOptions(hotkeySelect, POINTER_HOTKEYS);
   fillOptions(hotkey2Select, OPTIONAL_POINTER_HOTKEYS);
-  hotkeySelect.value = profile && HOTKEYS.includes(profile.hotkey) ? profile.hotkey : "left";
+  hotkeySelect.value = profile && POINTER_HOTKEYS.includes(profile.hotkey) ? profile.hotkey : "left";
   hotkey2Select.value = profile && OPTIONAL_POINTER_HOTKEYS.includes(profile.hotkey2) ? profile.hotkey2 : "";
   hotkeyModeSelect.value = profile && profile.hotkey_mode === "all" ? "all" : "any";
   hotkeySelect.addEventListener("change", () => requestConfigApply(80));
@@ -8922,6 +8932,84 @@ function addAimProfileCard(profile = {}, emitChange = true) {
   if (emitChange && state.configReady) {
     requestConfigApply(80);
   }
+}
+
+// 单张卡的键位并集（主 ∪ 副）。未知 / 空值按 0 算。
+function aimProfileKeyBits(hotkey, hotkey2) {
+  const a = AIM_HOTKEY_BITS[String(hotkey || "").trim().toLowerCase()] || 0;
+  const b = AIM_HOTKEY_BITS[String(hotkey2 || "").trim().toLowerCase()] || 0;
+  return a | b;
+}
+
+// 档位表冲突校验：返回人话原因，没问题返回 ""。
+// 规则与后端 validate_aim_profiles、core aim_profiles_overlap 同一口径：
+//   ① 至少留一组、最多 AIM_PROFILE_MAX 组；
+//   ② 每组必须有主按键；副按键不能与主按键相同；「同时按下」必须有副按键；
+//   ③ 任意两组的键位并集必须互斥（按位与 == 0）—— **同一个键不能给两组**。
+//     这条挡的是"单个键按下时判不出该用哪档"的配错，所以保存必须报错。
+// ★ 互斥不保证选档唯一：同时按下两档各自的键（左键开火 + 右键瞄准）会两档都命中，
+//   物理上禁不掉。那时 core 取**面板顺序里靠上的那张卡**，所以卡片顺序有语义，
+//   别随手拖动 —— 想换优先级就换位置。
+function aimProfilesConflict() {
+  const cards = Array.from(document.querySelectorAll("#aimProfilesEditor .aim-profile-card"));
+  if (cards.length === 0) {
+    return "至少要保留一组热键";
+  }
+  if (cards.length > AIM_PROFILE_MAX) {
+    return `热键最多 ${AIM_PROFILE_MAX} 组，当前 ${cards.length} 组`;
+  }
+  const names = {};
+  Object.keys(AIM_HOTKEY_BITS).forEach((k) => { names[AIM_HOTKEY_BITS[k]] = HOTKEY_LABELS[k] || k; });
+  const masks = [];
+  for (let i = 0; i < cards.length; i += 1) {
+    const hotkey = cards[i].querySelector(".aim-profile-hotkey");
+    const hotkey2 = cards[i].querySelector(".aim-profile-hotkey2");
+    const mode = cards[i].querySelector(".aim-profile-hotkey-mode");
+    const a = aimProfileKeyBits(hotkey && hotkey.value, "");
+    const b = aimProfileKeyBits(hotkey2 && hotkey2.value, "");
+    if (a === 0) {
+      return `热键 ${i + 1}：请选择主按键`;
+    }
+    if ((a & b) !== 0) {
+      return `热键 ${i + 1}：副按键不能与主按键相同（同一个键等于没按）`;
+    }
+    if (mode && mode.value === "all" && b === 0) {
+      return `热键 ${i + 1}：触发方式选了「同时按下」，必须再选一个副按键`;
+    }
+    masks.push(a | b);
+  }
+  for (let i = 0; i < masks.length; i += 1) {
+    for (let j = i + 1; j < masks.length; j += 1) {
+      const dup = masks[i] & masks[j];
+      if (dup !== 0) {
+        const dupNames = Object.keys(names)
+          .filter((bit) => dup & Number(bit))
+          .map((bit) => names[bit])
+          .join("、");
+        return `热键 ${i + 1} 与热键 ${j + 1} 不能共用按键（重复：${dupNames}）。`
+          + "一个按键只能归一组 —— 请换一个键，或删掉其中一组";
+      }
+    }
+  }
+  return "";
+}
+
+// 新增卡片时挑一个还没被占用的主按键，避免刚点「添加」就撞车报错。
+// 全占满了就退回 "left"（那时校验会直接拦下来，提示用户换键或删卡）。
+function nextFreeAimHotkey() {
+  let taken = 0;
+  document.querySelectorAll("#aimProfilesEditor .aim-profile-card").forEach((card) => {
+    const a = card.querySelector(".aim-profile-hotkey");
+    const b = card.querySelector(".aim-profile-hotkey2");
+    taken |= aimProfileKeyBits(a && a.value, b && b.value);
+  });
+  for (let i = 0; i < POINTER_HOTKEYS.length; i += 1) {
+    const bit = AIM_HOTKEY_BITS[POINTER_HOTKEYS[i]] || 0;
+    if (bit !== 0 && (taken & bit) === 0) {
+      return POINTER_HOTKEYS[i];
+    }
+  }
+  return "left";
 }
 
 function renderAimProfiles(profiles) {
@@ -9569,6 +9657,19 @@ async function applyConfigNow() {
     setApplyStatus("pending", "等待数值");
     return;
   }
+  // 多档位键位冲突 = 配错了，不能提交。提交上去后端也会返回 400
+  // （plugins/web/bin/ttbox-web.py 的 validate_aim_profiles），
+  // 在本地先拦住是为了即时给提示，不用等一趟网络往返。
+  const profileConflict = aimProfilesConflict();
+  if (profileConflict) {
+    setApplyStatus("error", "热键冲突");
+    if (state.aimProfileConflictNotified !== profileConflict) {
+      showToast(profileConflict, true);
+      state.aimProfileConflictNotified = profileConflict;
+    }
+    return;
+  }
+  state.aimProfileConflictNotified = "";
   if (state.isApplying) {
     state.applyQueued = true;
     return;
@@ -13275,8 +13376,14 @@ function bindEvents() {
   on("expandStorageButton", "click", () => runUiAction(expandStorage));
 
   on("addAimProfileButton", "click", () => {
+    const current = document.querySelectorAll("#aimProfilesEditor .aim-profile-card").length;
+    if (current >= AIM_PROFILE_MAX) {
+      showToast(`热键最多 ${AIM_PROFILE_MAX} 组`, true);
+      return;
+    }
     addAimProfileCard({
-      hotkey: "left",
+      // 挑一个还没被占的键，否则刚加完就冲突、自动保存立刻报错。
+      hotkey: nextFreeAimHotkey(),
       class_filter_mask: currentModelClassMask(),
       offset_x: defaultAimProfileOffsetX(),
       offset_y: defaultAimProfileOffsetY(),
