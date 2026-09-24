@@ -80,6 +80,57 @@ TEST(mouse_target_selector_class_filter) {
     CHECK(sel.select(dets, cfg).valid);
 }
 
+// 瞄准范围 = 截取尺寸内划最大的圆形（业主口径，2026-09-24）。
+// 框坐标是整帧坐标系（AimThread 传 task.frame_width/height），所以整帧尺寸算出来的
+// 半径 min(2560,1440)/2 = 720px 已经大于检测区半宽（capture 640 ⇒ 320px）——
+// 圆心到框的距离是拿 aim_ratio 算的，故这里把 aim_ratio 设 0.5 让几何直白。
+TEST(mouse_target_selector_aim_range_is_capture_inscribed_circle) {
+    aim::TargetSelector sel;
+    aim::TargetSelectorConfig cfg;
+    cfg.roi_w = 2560;  // 整帧（框坐标系）
+    cfg.roi_h = 1440;
+    cfg.center_x = 0.5f;
+    cfg.center_y = 0.5f;   // FOV 中心 = (1280, 720)
+    cfg.aim_ratio_x = 0.5f;
+    cfg.aim_ratio_y = 0.5f;
+    cfg.fov_range = 1.0f;
+    cfg.confidence = 0.3f;
+    cfg.search_radius_px = 320.0f;   // 截取尺寸 640×640 内划最大圆
+
+    // inner 中心 (1480,920)：距中心 282.8px ⇒ 圆内
+    DetectionBox inner;
+    inner.x1 = 1470; inner.y1 = 910; inner.x2 = 1490; inner.y2 = 930;
+    inner.score = 0.9f; inner.class_id = 0;
+    // corner 中心 (1520,960)：距中心 339.4px ⇒ 圆外（但在旧口径 720px 圆内）
+    DetectionBox corner;
+    corner.x1 = 1510; corner.y1 = 950; corner.x2 = 1530; corner.y2 = 970;
+    corner.score = 0.9f; corner.class_id = 0;
+
+    // 只有角上那个 ⇒ 被圆滤掉（这一条就是本次修复的墓碑）
+    std::vector<DetectionBox> only_corner = {corner};
+    CHECK(!sel.select(only_corner, cfg).valid);
+
+    // 圆内 + 圆外同时在 ⇒ 选圆内那个
+    std::vector<DetectionBox> both;
+    both.push_back(corner);
+    both.push_back(inner);
+    auto s = sel.select(both, cfg);
+    CHECK(s.valid);
+    CHECK_EQ(static_cast<int>(s.box.x1), 1470);
+
+    // 半径随 fov_range 缩放：0.5 ⇒ 160px，连 inner（282.8px）也出圈
+    cfg.fov_range = 0.5f;
+    std::vector<DetectionBox> only_inner = {inner};
+    CHECK(!sel.select(only_inner, cfg).valid);
+
+    // search_radius_px = 0 ⇒ 回退旧口径 min(roi_w,roi_h)/2 = 720px：
+    // 角上那个又会被收（保证未接线的调用方行为不变）
+    cfg.fov_range = 1.0f;
+    cfg.search_radius_px = 0.0f;
+    aim::TargetSelector legacy;
+    CHECK(legacy.select(only_corner, cfg).valid);
+}
+
 // ---------------------------------------------------------------------------
 // 2. AimPointProfile
 // ---------------------------------------------------------------------------

@@ -153,9 +153,15 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
     // 旧实现只在“无检测”分支调用，目标持续存在时轨迹数会越过 max_tracks。
     trim_tracks(cfg);
 
-    const float cx = static_cast<float>(cfg.roi_w) * cfg.center_x;
+                const float cx = static_cast<float>(cfg.roi_w) * cfg.center_x;
                 const float cy = static_cast<float>(cfg.roi_h) * cfg.center_y;
-                const float radius = std::min(cfg.roi_w, cfg.roi_h) * 0.5f * cfg.fov_range;
+                // 半径基准优先用 search_radius_px（= 截取尺寸内划最大圆的半径，
+                // 由 AimThread 从 capture.width/height 填）；未填时回退旧口径
+                // min(roi_w, roi_h)/2（整帧），保证未接线的调用方行为不变。
+                const float base_radius = cfg.search_radius_px > 0.0f
+                    ? cfg.search_radius_px
+                    : std::min(cfg.roi_w, cfg.roi_h) * 0.5f;
+                const float radius = base_radius * cfg.fov_range;
                 const float radius_sq = radius * radius;
 
                 // ByteTrack：每帧先对现有轨迹做卡尔曼预测（写入 pred_cx/pred_cy 供关联参考）

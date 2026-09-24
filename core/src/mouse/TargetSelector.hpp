@@ -40,6 +40,14 @@ struct TargetSelectorConfig {
     std::vector<int> class_filter;   // 空 = 全部保留
     uint32_t roi_w = 0;              // ROI/crop 宽（DetectionBox 所在坐标系）
     uint32_t roi_h = 0;
+    // 搜索半径基准（px，与 DetectionBox 同坐标系；0 = 回退 min(roi_w, roi_h) / 2）。
+    // 为什么单独留一个字段：roi_w/roi_h 同时用于计算 FOV 中心（cx = roi_w × center_x），
+    // 而框坐标是**整帧**坐标系（AimThread 传 task.frame_width/height）——把 roi_w/roi_h
+    // 换成截取尺寸会让中心错位到帧的左上角。
+    // 而业主口径要求瞄准范围 = **截取尺寸内划最大的圆形**，半径必须取截取尺寸：
+    // 整帧 min(2560,1440)/2 = 720px 已经大于检测区半宽（640/2 = 320px），
+    // 圆比检测区还大 ⇒ 这条范围约束形同没写。故半径单独走这个字段。
+    float search_radius_px = 0.0f;
     float center_x = 0.5f;           // 选择中心（crop 系归一化）
     float center_y = 0.5f;
     float lost_grace_ms = 30.0f;     // 目标丢失宽限（对齐参考 selector_lost_grace_ms=30）

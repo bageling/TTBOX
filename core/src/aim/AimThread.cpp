@@ -115,6 +115,20 @@ void AimThread::loop() {
             }
             if (frame_profile) {
                 scfg.fov_range = frame_profile->fov.enabled ? frame_profile->fov.radius * 2.0f : 1.0f;
+                // 瞄准范围 = **截取尺寸内划最大的圆形**（业主口径）：
+                // 半径基准取 capture（中心截取尺寸，板端 640×640）⇒ 320px。
+                // 之前用整帧 task.frame_width/height（2560×1440）⇒ min/2 = 720px，
+                // 比检测区半宽（320px）还大 ⇒ 圆从未真正约束过选靶。
+                // 框坐标与 capture 是同一套 1:1 像素（中心裁剪不缩放，见 fov_map_no_roi_full_frame
+                // / fov_map_with_roi 用例），故半径可直接用；capture 为 0（全帧）时留 0，
+                // TargetSelector 会回退旧口径。
+                {
+                    const auto& cap = frame_profile->capture;
+                    if (cap.width > 0 && cap.height > 0) {
+                        scfg.search_radius_px =
+                            static_cast<float>(cap.width < cap.height ? cap.width : cap.height) * 0.5f;
+                    }
+                }
                 scfg.lost_grace_ms = frame_profile->mouse.lost_grace_ms;
                 // 切靶防抖（对齐 BB 的 hysteresis / cooldown）：配置缺省即取 MouseProfile 默认
                 // 0.5 / 600ms；两者置 0 可完全关闭，回到加此机制前的行为。
