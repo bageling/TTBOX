@@ -5128,9 +5128,10 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
               <div class="slider-field">
                 <div class="label-row">
                   <label for="range_factor_range">FOV 半径</label>
-                  <input id="range_factor" data-config class="value-input" type="number" min="0" max="1" step="0.01">
+                  <input id="range_factor" data-config class="value-input" type="number" min="0.1" max="1" step="0.01">
                 </div>
-                <input id="range_factor_range" type="range" min="0" max="1" step="0.01">
+                <input id="range_factor_range" type="range" min="0.1" max="1" step="0.01">
+                <span class="field-hint">瞄准范围是截取区（画幅裁剪大小）内划最大的圆形，1.00 = 这个内接圆；缩小即把圆按比例收小。</span>
               </div>
 
               <label class="field overview-field">截取位置 X轴偏移
@@ -6290,6 +6291,9 @@ const AIM_PROFILE_AXIS_OFFSET_MIN = 0;
 const AIM_PROFILE_AXIS_OFFSET_MAX = 1;
 const AIM_PROFILE_FOV_SCALE_MIN = 0.1;
 const AIM_PROFILE_FOV_SCALE_MAX = 1;
+// 总览「FOV 半径」= 内接圆倍率，下限与后端 FOV_FACTOR_MIN（ttbox-web.py）保持一致：
+// 倍率 0 会让 core 的 fov.radius=0 撞上「必须在 (0,1]」校验，整个保存失败。
+const OVERVIEW_FOV_FACTOR_MIN = 0.1;
 const CROP_SIZE_OPTIONS = [192, 256, 320, 416, 640];
 const CROP_SIZE_MIN = 1;
 const CROP_SIZE_MAX = 1080;
@@ -6321,7 +6325,7 @@ const NUMERIC_RANGE_LIMITS = {
   aim_profile_fov_scale: [AIM_PROFILE_FOV_SCALE_MIN, AIM_PROFILE_FOV_SCALE_MAX],
   aim_profile_offset_x: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
   aim_profile_offset_y: [AIM_PROFILE_AXIS_OFFSET_MIN, AIM_PROFILE_AXIS_OFFSET_MAX],
-  range_factor: [0, 1],
+  range_factor: [OVERVIEW_FOV_FACTOR_MIN, 1],
   capture_crop_offset_x: [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX],
   capture_crop_offset_y: [CAPTURE_CROP_OFFSET_MIN, CAPTURE_CROP_OFFSET_MAX],
   controller_kp: [0, 200],
@@ -8179,7 +8183,14 @@ function updateAimRangeOverlay() {
   }
 
   if (overlay) {
-    const rangeFactor = clamp(getNumber("range_factor", state.config ? state.config.range_factor : 1), 0, 1);
+    // 下限必须与保存侧同值（OVERVIEW_FOV_FACTOR_MIN）：倍率 0 在 core 侧撞
+    // 「FOV 半径必须在 (0,1]」会被整份拒收；画布上也会把圆缩成一个点。
+    const rangeFactor = clamp(
+      getNumber("range_factor", state.config ? state.config.range_factor : 1),
+      OVERVIEW_FOV_FACTOR_MIN,
+      1
+    );
+    // 边长 = 截取尺寸 × 倍率 = 瞄准范围圆的**直径**（倍率 1.00 即截取区内接圆）。
     const side = cropSize * rangeFactor * layout.cropScale;
     overlay.style.left = `${layout.imageLeft + layout.imageWidth * 0.5}px`;
     overlay.style.top = `${layout.imageTop + layout.imageHeight * 0.5}px`;
@@ -8606,7 +8617,7 @@ function profileTemplate(profile, index) {
           <input class="aim-profile-fov-scale value-input" type="number" min="0.1" max="1" step="0.01" autocomplete="off" value="${fovScale}">
         </div>
         <input class="aim-profile-fov-scale-range" type="range" min="0.1" max="1" step="0.01" value="${fovScale}">
-        <span class="field-hint">当前热键生效时，在总览 FOV 半径之后再乘这个倍率。</span>
+        <span class="field-hint">在总览 FOV 半径上再乘这个倍率（当前后端只存一份半径，对所有热键统一生效）。</span>
       </div>
       <div class="aim-profile-axis-grid span-all">
         <div class="slider-field aim-profile-axis-field">

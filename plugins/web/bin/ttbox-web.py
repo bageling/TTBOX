@@ -1040,6 +1040,38 @@ def normalize_profile_capture_size(prof: dict) -> dict:
     return prof
 
 
+# 瞄准半径倍率（总览「FOV 半径」/ 热键卡「热键 FOV 缩放」）的合法区间与夹取。
+# 为什么必须有下限：倍率 0 会让 core 的 fov.radius 撞上「FOV 半径必须在 (0,1]」校验
+# （core/src/model/RuntimeProfile.cpp:141）⇒ 整个保存失败；半径 0 本身也等于选靶全灭。
+# 取 0.1 ⇒ 半径 = 0.05 × 内接圆（板端 640 截取 ⇒ 32px），仍可用且合法。
+FOV_FACTOR_MIN = 0.1
+
+
+def _fov_factor_clamp(v, default=1.0) -> float:
+    """把倍率夹到 [FOV_FACTOR_MIN, 1.0]；非数值 / NaN 回退 default。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return default
+    if f != f:  # NaN
+        return default
+    return max(FOV_FACTOR_MIN, min(1.0, f))
+
+
+def _fov_radius_to_factor(radius, enabled=True) -> float:
+    """core 的 fov.radius → 面板倍率。
+
+    core 侧 fov_range = fov.radius × 2（AimThread.cpp:117），所以倍率 = radius × 2；
+    enabled=False 时 core 强制 fov_range=1.0 ⇒ 倍率就是 1.0（= 内接圆）。
+    """
+    if not enabled:
+        return 1.0
+    try:
+        return _fov_factor_clamp(float(radius) * 2.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def web_body_to_profile(body: dict) -> dict:
     """Web 前端保存的配置格式（collectConfig 扁平结构）→ RuntimeProfile。"""
     ctrl = (body.get('ai') or {}).get('controller') or {}
@@ -1283,7 +1315,13 @@ def web_body_to_profile(body: dict) -> dict:
     if cap.get('crop_offset_y') is not None:
         capture['offset_y'] = cap['crop_offset_y']
 
-    # 8) FOV（range_factor <1 = 启用圆形选择区）
+    # 8) FOV：瞄准范围 = 截取尺寸内划最大的圆形（业主口径）
+    #    半径 = 内接圆半径 × range_factor（总览「FOV 半径」）× fov_scale（热键卡「热键 FOV 缩放」）。
+    #    core 侧 AimThread 取 fov_range = fov.enabled ? fov.radius*2 : 1.0（AimThread.cpp:117），
+    #    所以这里必须写 radius = k/2 且 enabled=True。旧实现两处有问题：
+    #      · `enabled = range_factor < 1.0` ⇒ 1.00 走 enabled=False（fov_range 被强制成 1.0）、
+    #        0.99 走 enabled=True（fov_range=1.98）⇒ 滑块往小拖，圆反而几乎翻倍（非单调）；
+    #      · 从不读 p0['fov_scale']，回填时又恒写 1.0 ⇒ 热键卡那个旋钮是死的，提示文案却在承诺"乘"。
     fov: dict = {}
     try:
         prev = _get_runtime_profile()
@@ -1293,12 +1331,19 @@ def web_body_to_profile(body: dict) -> dict:
     fov['shape'] = prev_fov.get('shape', 0)
     fov['center_x'] = prev_fov.get('center_x', 0.5)
     fov['center_y'] = prev_fov.get('center_y', 0.5)
-    if body.get('range_factor') is not None:
-        fov['radius'] = body['range_factor']
-        fov['enabled'] = body['range_factor'] < 1.0
-    else:
+    if body.get('range_factor') is None and p0.get('fov_scale') is None:
+        # 两个倍率都没带 ⇒ 沿用 Core 现值，本项不参与本次保存
         fov['enabled'] = prev_fov.get('enabled', False)
         fov['radius'] = prev_fov.get('radius', 0.5)
+    else:
+        base_factor = body.get('range_factor')
+        if base_factor is None:
+            # 只传了热键卡倍数：先把当前生效半径换算回总览倍率，再乘
+            base_factor = _fov_radius_to_factor(prev_fov.get('radius', 0.5),
+                                                prev_fov.get('enabled'))
+        factor = _fov_factor_clamp(base_factor) * _fov_factor_clamp(p0.get('fov_scale'))
+        fov['enabled'] = True
+        fov['radius'] = round(factor / 2.0, 6)
 
     # 9) 预览帧率
     preview: dict = {}
@@ -1339,6 +1384,9 @@ def profile_to_web(prof: dict) -> dict:
     prev_p = prof.get('preview') or {}
     inf = prof.get('inference') or {}
     cap = prof.get('capture') or {}
+    # 回填「FOV 半径」倍率。上限夹到 1.0：旧配置可能存在 radius=1 & enabled=true
+    # （= 2× 内接圆，圆已超出截取区、无实际意义），夹回 1.0。
+    fov_factor_web = _fov_radius_to_factor(fov_p.get('radius', 0.5), fov_p.get('enabled'))
 
     personal_motion = mouse.get('personal_motion') or {}
     personal_traj = mouse.get('personal_trajectory') or {}
@@ -1431,7 +1479,7 @@ def profile_to_web(prof: dict) -> dict:
             'crop_offset_x': cap.get('offset_x'),
             'crop_offset_y': cap.get('offset_y'),
         },
-        'range_factor': fov_p.get('radius', 1.0) if fov_p.get('enabled') else 1.0,
+        'range_factor': fov_factor_web,
         'sens': mouse.get('sensitivity', 1.0),
         'pos': ap.get('offset_y', 0.5),
         'ai': {'controller': ctrl},
@@ -1443,7 +1491,11 @@ def profile_to_web(prof: dict) -> dict:
             'offset_x': ap.get('offset_x', 0.5),
             'offset_y': ap.get('offset_y', 0.5),
             'alternate_offset_x': ap.get('alternate_offset_x', ap.get('offset_x', 0.5)), 'alternate_offset_y': ap.get('alternate_offset_y', ap.get('offset_y', 0.5)),
-            'class_filter_mask': sum(1 << int(i) for i in inf.get('class_filter', []) if int(i) >= 0), 'fov_scale': 1.0,
+            'class_filter_mask': sum(1 << int(i) for i in inf.get('class_filter', []) if int(i) >= 0),
+            # fov_scale 恒回 1.0：core 只存一份「最终半径」，总览倍率与热键卡倍率在后端
+            # 已乘成 fov.radius 存下来了（见 web_body_to_profile 第 8 项），无法再拆开；
+            # 回 1.0 可保证"板端现值 = 面板显示 × 卡片倍数"不重复乘一遍。
+            'fov_scale': 1.0,
             'class_offsets': mouse.get('class_offsets', []),
             'offset_switch_enabled': False, 'offset_switch_hotkey': '',
         }],
