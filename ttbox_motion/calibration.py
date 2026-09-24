@@ -15,6 +15,12 @@ class CalibrationAxis(str, Enum):
     Y = "y"
 
 
+# 响应延迟验证门（ms）。2026-09-24 板上实测：144fps 采集回路的真实延迟
+# ≈51ms（渲染→采集→推理→注入→游戏应用→再采集），旧上限 50ms 刚好把
+# 完全正常的链路判死。120ms 与 derive_pid_params 里 kd 的延迟满量程一致。
+RESPONSE_DELAY_MAX_MS = 120.0
+
+
 class CalibrationState(str, Enum):
     IDLE = "idle"
     PREPARING = "preparing"
@@ -157,7 +163,7 @@ def fit_axis_measurements(
     if not 0.03 <= result.gain_px_per_count <= 8.0:
         result.failure_reason = f"{axis.value}轴增益超出范围"
         return result
-    if not 0.0 <= result.response_delay_ms <= 50.0:
+    if not 0.0 <= result.response_delay_ms <= RESPONSE_DELAY_MAX_MS:
         result.failure_reason = f"{axis.value}轴响应延迟超出范围"
         return result
     result.converged = True

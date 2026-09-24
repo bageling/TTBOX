@@ -3780,6 +3780,12 @@ CALIBRATION_FILE = '/opt/ttbox/config/calibration.json'
 # ⇒ 比值散开 ⇒ 必挂 fit 的一致性门（MAD/|中位| > 0.35）。交替后相邻两步互相抵消，
 # 同时每个幅度都覆盖到，够撑满 fit 的 min_samples=5。
 CALIB_AMPLITUDES = (8.0, -8.0, 16.0, -16.0, 24.0, -24.0, 32.0, -32.0)
+# 标定期"温和档" PID：bias 是最高 ±32px 的阶跃，用实战参数（kp 常见 25）在
+# ~50ms 采集回路延迟下会打进持续振荡（实测 ±150px），把目标甩出画面 ⇒ 整轮
+# no_target 作废（2026-09-24 板上 A/B：kp10/kd30 十六轮全稳）。gain=Δpx/ΔΣcounts
+# 是闭环恒等式、与 PID 参数无关 ⇒ 压 PID 不影响测量。kd 按 3×kp 给阻尼。
+CALIB_PID_KP_MAX = 10.0
+CALIB_PID_KD_RATIO = 3.0
 # 单个样本的最低信号门槛：count 太少 ⇒ 分母接近 0，比值被噪声主导；
 # 位移太少 ⇒ 被检测噪声（实测静止抖动 ±0.05px）淹没。
 CALIB_MIN_COUNTS = 6
@@ -4071,6 +4077,18 @@ def _calib_worker() -> None:
     # 那会让紧接着的"稳定检测"先把目标拉偏、直接判定目标不稳。
     mo0['calibration_bias_x'] = 0.0
     mo0['calibration_bias_y'] = 0.0
+    # 温和档 PID（见 CALIB_PID_KP_MAX 注释）。保存用户原值：
+    # 失败/取消时在 finally 恢复；成功时推导参数会覆盖，不能回头写旧值。
+    saved_kp = mo0.get('kp_x')
+    saved_kd = mo0.get('kd_x')
+    try:
+        calib_kp = min(float(saved_kp), CALIB_PID_KP_MAX)
+    except (TypeError, ValueError):
+        calib_kp = CALIB_PID_KP_MAX
+    mo0['kp_x'] = calib_kp
+    mo0['kp_y'] = calib_kp
+    mo0['kd_x'] = calib_kp * CALIB_PID_KD_RATIO
+    mo0['kd_y'] = calib_kp * CALIB_PID_KD_RATIO
     ipc_request('SET_CONFIG', {'profile': prof0})
     try:
         _calib_set(state='preparing', status='running', phase='preparing', reason='准备标定环境',
@@ -4238,6 +4256,22 @@ def _calib_worker() -> None:
                     dropped[axis] += 1
                     if d_counts >= CALIB_MIN_COUNTS and not wrote:
                         no_write = True
+                    elif wrote and d_counts >= CALIB_MIN_COUNTS and d_px < CALIB_MIN_DELTA_PX:
+                        # 注入生效但位移不够 ⇒ 温和档对这个低 gain 系统太慢：
+                        # 轮间抬 KP（不超过用户原配置），让后续轮补测。
+                        try:
+                            kp_cap = float(saved_kp)
+                        except (TypeError, ValueError):
+                            kp_cap = CALIB_PID_KP_MAX
+                        new_kp = min(calib_kp * 1.7, max(kp_cap, CALIB_PID_KP_MAX))
+                        if new_kp > calib_kp + 1e-6:
+                            calib_kp = new_kp
+                            prof = _get_runtime_profile()
+                            mo = prof.setdefault('mouse', {})
+                            mo['kp_x'] = mo['kp_y'] = calib_kp
+                            mo['kd_x'] = mo['kd_y'] = calib_kp * CALIB_PID_KD_RATIO
+                            ipc_request('SET_CONFIG', {'profile': prof})
+                            _calib_set(reason='低增益：已抬高标定期 KP 继续测量')
                 _calib_set(dropped_sample_count=sum(dropped.values()))
             if not axis_observations[axis]:
                 # 整轴一个样本都没过门槛：与其让 fit 报一句笼统的"有效样本不足"，
@@ -4328,6 +4362,13 @@ def _calib_worker() -> None:
             #   参考点会被永久顶偏（表现为"标定失败之后自瞄一直瞄偏"），只能靠重启清掉。
             mo['calibration_bias_x'] = 0.0
             mo['calibration_bias_y'] = 0.0
+            # 温和档只在标定期生效：成功路径推导参数已由 _calib_apply_pid 写入，
+            # 不能覆盖回去；失败/取消则恢复用户原 KP/KD。
+            if _cal['state'] in ('failed', 'cancelled'):
+                if saved_kp is not None:
+                    mo['kp_x'] = mo['kp_y'] = saved_kp
+                if saved_kd is not None:
+                    mo['kd_x'] = mo['kd_y'] = saved_kd
             if not was_enabled:
                 mo['enabled'] = False
             ipc_request('SET_CONFIG', {'profile': prof})

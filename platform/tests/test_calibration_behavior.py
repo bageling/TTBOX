@@ -62,6 +62,24 @@ def test_fit_axis_estimates_delay_from_valid_observations():
     assert 7.0 <= result.response_delay_ms <= 9.0
 
 
+def test_fit_axis_accepts_realistic_capture_loop_delay():
+    """2026-09-24 板上实测：144fps 采集回路真实延迟 ≈51ms，
+    旧上限 50ms 把两轴全判死（gain/一致性其实都合格）。51ms 必须收敛，
+    200ms（假回路）仍要拒绝。"""
+    ok = fit_axis_measurements(
+        CalibrationAxis.X,
+        observations(CalibrationAxis.X, [0.68, 0.69, 0.68, 0.70, 0.69], [51.0] * 5),
+    )
+    assert ok.converged is True
+    assert ok.response_delay_ms == pytest.approx(51.0)
+    bad = fit_axis_measurements(
+        CalibrationAxis.Y,
+        observations(CalibrationAxis.Y, [0.69, 0.70, 0.68, 0.70, 0.69], [200.0] * 5),
+    )
+    assert bad.converged is False
+    assert "延迟" in bad.failure_reason
+
+
 def test_calibration_session_has_explicit_state_transitions():
     session = CalibrationSession()
     assert session.state is CalibrationState.IDLE

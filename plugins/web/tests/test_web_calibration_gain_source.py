@@ -311,3 +311,46 @@ def test_payload_exposes_new_diagnostics():
     s = _src()
     for key in ('amplitude_px', 'settle_ms', 'settled', 'dropped_sample_count'):
         assert "'%s'" % key in s, f'payload 缺 {key}'
+
+
+# ===========================================================================
+# 8. 标定期"温和档" PID（2026-09-24 板上 A/B 定死）
+#
+#   实战参数（kp=25/kd=25）在 ~50ms 采集回路延迟下，bias 阶跃（±8..32px 换向）
+#   会把环打进持续振荡（实测准星 ±150px），目标被甩出画面 ⇒ 整轮 no_target。
+#   kp=10/kd=30 同一链路 16 轮全稳、gain 一致性 0.94/0.90。
+#   gain=Δpx/ΔΣcounts 是闭环恒等式 ⇒ 压 PID 不影响测量结果。
+# ===========================================================================
+
+def test_calib_gentle_pid_constants_are_sane(web_mod):
+    assert 4.0 <= web_mod.CALIB_PID_KP_MAX <= 15.0
+    assert 2.0 <= web_mod.CALIB_PID_KD_RATIO <= 4.0
+
+
+def test_worker_enters_with_gentle_pid_and_saves_original():
+    """入场必须：先保存用户原 kp/kd，再把温和档写进**第一次** SET_CONFIG。"""
+    body = _worker_src()
+    assert "saved_kp = mo0.get('kp_x')" in body, '没保存用户原 KP'
+    assert "saved_kd = mo0.get('kd_x')" in body, '没保存用户原 KD'
+    first_set = body.index("ipc_request('SET_CONFIG'")
+    head = body[:first_set]
+    assert "mo0['kp_x'] = calib_kp" in head
+    assert "mo0['kp_y'] = calib_kp" in head
+    assert 'CALIB_PID_KP_MAX' in head, 'KP 没被压到温和档'
+    assert "mo0['kd_x'] = calib_kp * CALIB_PID_KD_RATIO" in head
+
+
+def test_worker_restores_pid_on_failure_but_never_on_success():
+    """失败/取消要恢复用户原 kp/kd；成功路径若恢复会把刚推导的参数覆盖掉。"""
+    body = _worker_src()
+    fin = body[body.index('    finally:'):]
+    assert "in ('failed', 'cancelled')" in fin, '恢复必须只发生在失败/取消'
+    assert "mo['kp_x'] = mo['kp_y'] = saved_kp" in fin
+    assert "mo['kd_x'] = mo['kd_y'] = saved_kd" in fin
+
+
+def test_worker_raises_kp_when_low_gain_samples_are_dropped():
+    """注入生效但位移不够（低 gain 系统温和档太慢）⇒ 轮间抬 KP，上限是用户原值。"""
+    body = _worker_src()
+    assert 'calib_kp * 1.7' in body
+    assert 'd_px < CALIB_MIN_DELTA_PX' in body
