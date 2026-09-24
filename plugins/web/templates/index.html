@@ -949,6 +949,10 @@ html[data-theme="light"] .preview-panel {
   object-fit: contain;
 }
 
+/* 瞄准范围框：**故意画成方形**（业主 2026-09-24 裁定，别当 bug 改成圆）。
+   数值上边长 = 截取尺寸 × 倍率 = 瞄准范围圆的直径（倍率 1.00 即截取区内接圆），
+   方框就是这个内接圆的包围盒 —— 保方形是为了边界看得更清楚。
+   改了倍率语义（见 updateAimRangeOverlay）务必同步复核这里的边长口径。 */
 .aim-range-overlay {
   position: absolute;
   z-index: 2;
