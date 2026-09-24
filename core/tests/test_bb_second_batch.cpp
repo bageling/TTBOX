@@ -742,6 +742,18 @@ void test_profile_roundtrip() {
     p.mouse.speed_adaptive_kp.move_mult = 1.8f;
     p.mouse.global_wave.enabled = true;
     p.mouse.global_wave.freq = 1.7f;
+    // 选靶四项机制（2026-09-24 补的配置通路）
+    p.mouse.lock_hold_ms = 1500.0f;
+    p.mouse.priority_scoring = true;
+    p.mouse.weight_dist = 1.2f;
+    p.mouse.weight_size = 0.4f;
+    p.mouse.stickiness = 0.8f;
+    p.mouse.switch_threshold_px = 75.0f;
+    p.mouse.head_body_stable = true;
+    p.mouse.hb_body1 = 2;
+    p.mouse.hb_head1 = 3;
+    p.mouse.hb_body2 = 4;
+    p.mouse.hb_head2 = 5;
 
     const auto json = p.to_json();
     const auto q = ttbox::core::RuntimeProfile::from_json(json);
@@ -776,6 +788,15 @@ void test_profile_roundtrip() {
           "speed_adaptive_kp 键往返一致");
     check(q.mouse.global_wave.enabled && std::fabs(q.mouse.global_wave.freq - 1.7f) < 1e-4f,
           "global_wave 键往返一致");
+    check(std::fabs(q.mouse.lock_hold_ms - 1500.0f) < 1e-3f && q.mouse.priority_scoring &&
+              std::fabs(q.mouse.weight_dist - 1.2f) < 1e-4f &&
+              std::fabs(q.mouse.weight_size - 0.4f) < 1e-4f &&
+              std::fabs(q.mouse.stickiness - 0.8f) < 1e-4f &&
+              std::fabs(q.mouse.switch_threshold_px - 75.0f) < 1e-4f,
+          "选靶四项（锁定期/打分制/三项权重）往返一致");
+    check(q.mouse.head_body_stable && q.mouse.hb_body1 == 2 && q.mouse.hb_head1 == 3 &&
+              q.mouse.hb_body2 == 4 && q.mouse.hb_head2 == 5,
+          "选靶头身稳定过滤（两组组合）往返一致");
 
     std::string err;
     check(q.validate(&err), "往返后的配置通过校验");
@@ -790,6 +811,20 @@ void test_profile_defaults_zero_behavior() {
               !p.mouse.humanize.enabled && !p.mouse.anti_overshoot.enabled &&
               !p.mouse.speed_adaptive_kp.enabled && !p.mouse.global_wave.enabled,
           "第二批模块默认全关（输出链逐字节不变的前提）");
+    check(p.mouse.lock_hold_ms == 0.0f && !p.mouse.priority_scoring &&
+              !p.mouse.head_body_stable,
+          "选靶四项默认全关（选靶行为逐字节不变的前提）");
+    check(p.mouse.hb_body1 == 0 && p.mouse.hb_head1 == 1 &&
+              p.mouse.hb_body2 == -1 && p.mouse.hb_head2 == -1,
+          "头身稳定过滤默认组合回落到 bb-port/01 的标定值");
+
+    // 反例：选靶四项的负数被拒（负锁定期/负权重的语义不成立）
+    ttbox::core::RuntimeProfile bad_s;
+    bad_s.mouse.lock_hold_ms = -1.0f;
+    check(!bad_s.validate(&err), "lock_hold_ms=-1 ⇒ 校验拒绝");
+    ttbox::core::RuntimeProfile bad_s2;
+    bad_s2.mouse.weight_size = -0.5f;
+    check(!bad_s2.validate(&err), "选靶评分权重为负 ⇒ 校验拒绝");
 
     // 反例：越界值被拒绝
     ttbox::core::RuntimeProfile bad;

@@ -182,6 +182,15 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse.switch_cooldown_ms 不能为负";
         return false;
     }
+    // 选靶四项机制（2026-09-24 补通路）：均为"加进来才生效"的可选增强，默认全关。
+    if (mouse.lock_hold_ms < 0.0f || mouse.switch_threshold_px < 0.0f) {
+        if (error) *error = "mouse.lock_hold_ms / switch_threshold_px 不能为负";
+        return false;
+    }
+    if (mouse.weight_dist < 0.0f || mouse.weight_size < 0.0f || mouse.stickiness < 0.0f) {
+        if (error) *error = "mouse 选靶评分权重不能为负";
+        return false;
+    }
     // 自动扳机（BB 对标，2026-09-24）：时长/距离/计数类不得为负；置信度与比例类限 [0,1]。
     if (mouse.trigger.dist_threshold < 0.0f || mouse.trigger.fire_delay < 0.0f ||
         mouse.trigger.fire_random < 0.0f || mouse.trigger.first_delay_min < 0.0f ||
@@ -712,6 +721,18 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("lost_grace_ms", JsonValue::number(static_cast<double>(mouse.lost_grace_ms)));
     m.set("switch_hysteresis", JsonValue::number(static_cast<double>(mouse.switch_hysteresis)));
     m.set("switch_cooldown_ms", JsonValue::number(static_cast<double>(mouse.switch_cooldown_ms)));
+    // 选靶四项机制（默认 0/false ⇒ 不开时选靶输出与加入前逐字节一致）
+    m.set("lock_hold_ms", JsonValue::number(static_cast<double>(mouse.lock_hold_ms)));
+    m.set("priority_scoring", JsonValue::boolean(mouse.priority_scoring));
+    m.set("weight_dist", JsonValue::number(static_cast<double>(mouse.weight_dist)));
+    m.set("weight_size", JsonValue::number(static_cast<double>(mouse.weight_size)));
+    m.set("stickiness", JsonValue::number(static_cast<double>(mouse.stickiness)));
+    m.set("switch_threshold_px", JsonValue::number(static_cast<double>(mouse.switch_threshold_px)));
+    m.set("head_body_stable", JsonValue::boolean(mouse.head_body_stable));
+    m.set("hb_body1", JsonValue::number(static_cast<double>(mouse.hb_body1)));
+    m.set("hb_head1", JsonValue::number(static_cast<double>(mouse.hb_head1)));
+    m.set("hb_body2", JsonValue::number(static_cast<double>(mouse.hb_body2)));
+    m.set("hb_head2", JsonValue::number(static_cast<double>(mouse.hb_head2)));
     m.set("calibrating", JsonValue::boolean(mouse.calibrating));
     m.set("calibration_bias_x", JsonValue::number(static_cast<double>(mouse.calibration_bias_x)));
     m.set("calibration_bias_y", JsonValue::number(static_cast<double>(mouse.calibration_bias_y)));
@@ -1124,6 +1145,18 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.aim_point.switch_delay_ms = static_cast<int>(obj_int(*m, "switch_delay_ms", 30));
         p.mouse.lost_grace_ms = static_cast<float>(obj_num(*m, "lost_grace_ms", 78.0));
         p.mouse.switch_hysteresis = static_cast<float>(obj_num(*m, "switch_hysteresis", 0.5));
+        // 选靶四项机制（默认 0/false，见 MouseProfile 注释）
+        p.mouse.lock_hold_ms = static_cast<float>(obj_num(*m, "lock_hold_ms", 0.0));
+        p.mouse.priority_scoring = obj_bool(*m, "priority_scoring", false);
+        p.mouse.weight_dist = static_cast<float>(obj_num(*m, "weight_dist", 1.0));
+        p.mouse.weight_size = static_cast<float>(obj_num(*m, "weight_size", 0.3));
+        p.mouse.stickiness = static_cast<float>(obj_num(*m, "stickiness", 1.0));
+        p.mouse.switch_threshold_px = static_cast<float>(obj_num(*m, "switch_threshold_px", 60.0));
+        p.mouse.head_body_stable = obj_bool(*m, "head_body_stable", false);
+        p.mouse.hb_body1 = static_cast<int>(obj_int(*m, "hb_body1", 0));
+        p.mouse.hb_head1 = static_cast<int>(obj_int(*m, "hb_head1", 1));
+        p.mouse.hb_body2 = static_cast<int>(obj_int(*m, "hb_body2", -1));
+        p.mouse.hb_head2 = static_cast<int>(obj_int(*m, "hb_head2", -1));
         p.mouse.switch_cooldown_ms = static_cast<float>(obj_num(*m, "switch_cooldown_ms", 600.0));
         p.mouse.calibrating = obj_bool(*m, "calibrating", false);
         p.mouse.calibration_bias_x = static_cast<float>(obj_num(*m, "calibration_bias_x", 0.0));

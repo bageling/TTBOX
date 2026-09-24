@@ -120,6 +120,20 @@ void AimThread::loop() {
                 // 0.5 / 600ms；两者置 0 可完全关闭，回到加此机制前的行为。
                 scfg.switch_hysteresis = frame_profile->mouse.switch_hysteresis;
                 scfg.switch_cooldown_ms = frame_profile->mouse.switch_cooldown_ms;
+                // 选靶四项机制（2026-09-24 补通路）：锁定期 / 打分制 / 粘滞 / 头身稳定。
+                // ★ 此前 TargetSelector 里算法已实现但这里没赋值 ⇒ 永远吃结构体默认（全关），
+                //   面板也开不了。默认值仍是 0/false ⇒ 不开时选靶行为逐字节不变。
+                scfg.lock_hold_ms = frame_profile->mouse.lock_hold_ms;
+                scfg.priority_scoring = frame_profile->mouse.priority_scoring;
+                scfg.weight_dist = frame_profile->mouse.weight_dist;
+                scfg.weight_size = frame_profile->mouse.weight_size;
+                scfg.stickiness = frame_profile->mouse.stickiness;
+                scfg.switch_threshold_px = frame_profile->mouse.switch_threshold_px;
+                scfg.head_body_stable = frame_profile->mouse.head_body_stable;
+                scfg.hb_body1 = frame_profile->mouse.hb_body1;
+                scfg.hb_head1 = frame_profile->mouse.hb_head1;
+                scfg.hb_body2 = frame_profile->mouse.hb_body2;
+                scfg.hb_head2 = frame_profile->mouse.hb_head2;
                 scfg.confidence = frame_profile->mouse.confidence > 0.0f
                                       ? frame_profile->mouse.confidence : 0.25f;
                 scfg.aim_ratio_x = frame_profile->mouse.aim_point.offset_x;

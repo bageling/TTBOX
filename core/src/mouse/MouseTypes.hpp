@@ -571,6 +571,22 @@ struct MouseProfile {
     //  两者都为 0/0 时行为与加入前逐字节一致（旧用例兼容）。
     float switch_hysteresis = 0.5f;             // 切换滞后比例（0.5 = 需近 50%）
     float switch_cooldown_ms = 600.0f;          // 切换冷却（ms）
+    // ---- 选靶四项机制（对齐 BB 目标选择/锁定，见 bb-port/01 §1）----
+    // ★ 默认 0/false ⇒ 不开时选靶行为与本参数加入前**逐字节一致**（1.5.46 兼容）。
+    //   对应 TargetSelectorConfig 里的同名字段，由 AimThread 逐帧灌进 scfg。
+    //   此前这四项只在 TargetSelector 里实现了算法、**没有配置通路**（AimThread 未赋值、
+    //   JSON 无键）⇒ 永远吃默认值、面板也开不了。2026-09-24 补齐通路。
+    float lock_hold_ms = 0.0f;          // 锁定保持窗：期内只刷新位置、不换目标（0=关）
+    bool priority_scoring = false;      // true=打分制选靶（距离+尺寸+粘滞），false=最近优先
+    float weight_dist = 1.0f;           // 打分制：距离项权重
+    float weight_size = 0.3f;           // 打分制：尺寸项权重
+    float stickiness = 1.0f;            // 打分制：粘滞权重（进公式时 ×0.5）
+    float switch_threshold_px = 60.0f;  // stick 判定半径（px）
+    bool head_body_stable = false;      // 头身稳定过滤总开关（头身同框时删头框，只留身体）
+    int hb_body1 = 0;                   // 组合1：身体类
+    int hb_head1 = 1;                   // 组合1：头类（命中即删）
+    int hb_body2 = -1;                  // 组合2：身体类（-1 = 该组不启用）
+    int hb_head2 = -1;                  // 组合2：头类
     LockConfirmConfig lock_confirm;                 // 目标锁定确认（ENTER/HOLD + instant-enter，第2项）
     // A11 标定闭环：calibrating 强制 AIMING；calibration_bias_* 把准星带到偏置位再拉回
     bool calibrating = false;                   // 标定模式（自瞄全程输出，用偏置测闭环响应）
