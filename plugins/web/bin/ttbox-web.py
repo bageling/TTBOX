@@ -908,6 +908,10 @@ RECOIL_BB_PRESET_DEFAULT_HORIZ = [[0.0, 0.0, 0.0], [-2.0, -2.0, -2.0], [0.0, 0.0
 # 选靶四项机制：Core 侧是 mouse 顶层扁平键（不是子对象），面板键统一加 selector_ 前缀区分
 CTRL_SELECTOR_FIELDS = [
     ('selector_lock_hold_ms', 'lock_hold_ms', 'n', 0.0),
+    # 1.5.46 的切靶防抖两条：Core 与 AimThread 早就在用，但面板一直没有界面
+    #   （这次「选靶」分区补上）。默认值取 MouseProfile 结构体默认。
+    ('selector_switch_hysteresis', 'switch_hysteresis', 'n', 0.5),
+    ('selector_switch_cooldown_ms', 'switch_cooldown_ms', 'n', 600.0),
     ('selector_priority_scoring', 'priority_scoring', 'b', False),
     ('selector_weight_dist', 'weight_dist', 'n', 1.0),
     ('selector_weight_size', 'weight_size', 'n', 0.3),
@@ -1160,6 +1164,15 @@ def web_body_to_profile(body: dict) -> dict:
             rb[tkey] = tbl
     if rb:
         mouse['recoil_bb'] = rb
+
+    # ★ 压枪面板只留一套（业主 2026-09-24 裁定「新版替老版，界面只留一套」）：
+    #   压枪总开关（recoil.enabled）同时驱动 BB 三段查表引擎。
+    #   面板侧刻意**不发** recoil_bb_enabled（见 index.html 的 BB_CTRL_MODULES 生成注释），
+    #   否则开关按了、引擎没开，就是"无声失效"——用户在界面上看不出来。
+    #   老速率模型的参数（strength/speed/humanize_*）仍在 JSON 里保留：已装机设备的
+    #   旧值不丢，只是面板不再暴露，Core 侧也只在 bb.enabled=false 时才会用到。
+    if 'enabled' in recoil:
+        mouse.setdefault('recoil_bb', {})['enabled'] = recoil['enabled']
 
     # 选靶四项机制：Core 侧是 mouse 顶层扁平键
     for web_key, core_key, kind, _dflt in CTRL_SELECTOR_FIELDS:
@@ -1435,23 +1448,15 @@ def profile_to_web(prof: dict) -> dict:
             'offset_switch_enabled': False, 'offset_switch_hotkey': '',
         }],
         'recoil': {
-            'enabled': recoil.get('enabled', False),
-            'only_when_target_visible': recoil.get('only_when_target_visible', True),
-            'target_lost_release_ms': recoil.get('target_lost_release_ms', 200),
+            # ★ 面板只留一个压枪开关（「新版替老版」）：它同时代表 BB 三段查表引擎的开关，
+            #   所以回填取「两者任一为真」——只认 recoil.enabled 的话，若某设备
+            #   recoil_bb.enabled=true 而 recoil.enabled=false，面板会显示"关"但实际在压枪。
+            'enabled': bool(recoil.get('enabled', False))
+                       or bool((mouse.get('recoil_bb') or {}).get('enabled', False)),
             'hotkey': _bits_to_hotkey(recoil.get('hotkey', 1)) or 'left',
             'hotkey2': _bits_to_hotkey(recoil.get('hotkey2', 0)),
             'hotkey_mode': 'all' if recoil.get('hotkey_mode') == 2 else 'any',
-            'trigger_delay_enabled': recoil.get('trigger_delay_enabled', False),
-            'trigger_delay_ms': recoil.get('trigger_delay_ms', 120),
-            'strength': recoil.get('strength', 0),
-            'speed': recoil.get('speed', 1),
-            'humanize_enabled': recoil.get('humanize_enabled', True),
-            'humanize_curve_strength': recoil.get('humanize_curve_strength', 0.45),
-            'humanize_jitter_px': recoil.get('humanize_jitter_px', 0.25),
-            'humanize_jitter_frequency': recoil.get('humanize_jitter_frequency', 8.0),
-        }, 'rapid_fire': {}, 'auto_back_flick': {}, 'crosshair': {},
-        'auto_trigger': {'enabled': False, 'profiles': []},
-        'hotkey_guard': _hotkey_guard_to_web(mouse.get('hotkey_guard')),
+        }, 'hotkey_guard': _hotkey_guard_to_web(mouse.get('hotkey_guard')),
         'mouse_output': {'mode': 'full_passthrough'},
         'latency': lat, 'fan_control': {}, 'loopout_overlay': {},
     }

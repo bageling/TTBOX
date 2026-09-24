@@ -37,22 +37,18 @@ check(bits_to_hotkey(2) == 'right', "2 → 'right'")
 check(bits_to_hotkey(0) == '', "0 → ''")
 
 # 模拟 Web 前端提交的 recoil 块（RECOIL_DEFAULTS 语义）
+#
+# ★ 2026-09-24 面板收敛（业主裁定「新版替老版，界面只留一套」）后，面板提交的 recoil
+#   块只剩「总开关 + 触发键」四项：压枪算法换成 BB 三段查表，其余参数归 recoil_bb_* /
+#   vc_* 两组（走 body.ai.controller，见 test_web_bb_modules.py）。
+#   老速率模型的 strength / speed / humanize_* / trigger_delay_* 后端**仍然认**（已装机
+#   设备的旧值不丢），但面板不再产出它们，所以这里也不再当作提交面来断言。
 print('[映射] Web recoil 块 → mouse.recoil 字段翻译')
 web_recoil = {
     'enabled': True,
-    'only_when_target_visible': True,
-    'target_lost_release_ms': 200,
     'hotkey': 'left',
     'hotkey2': '',
     'hotkey_mode': 'any',
-    'trigger_delay_enabled': False,
-    'trigger_delay_ms': 120,
-    'strength': 60,
-    'speed': 1,
-    'humanize_enabled': True,
-    'humanize_curve_strength': 0.45,
-    'humanize_jitter_px': 0.25,
-    'humanize_jitter_frequency': 8,
 }
 mouse_recoil = {}
 if web_recoil.get('enabled') is not None:
@@ -63,25 +59,29 @@ if web_recoil.get('hotkey2') is not None:
     mouse_recoil['hotkey2'] = hotkey_to_bits(web_recoil['hotkey2'], 0)
 if web_recoil.get('hotkey_mode') is not None:
     mouse_recoil['hotkey_mode'] = 2 if str(web_recoil['hotkey_mode']) == 'all' else 1
-for yk, tk in [('only_when_target_visible', 'only_when_target_visible'),
-               ('target_lost_release_ms', 'target_lost_release_ms'),
-               ('trigger_delay_enabled', 'trigger_delay_enabled'),
-               ('trigger_delay_ms', 'trigger_delay_ms'),
-               ('strength', 'strength'),
-               ('speed', 'speed'),
-               ('humanize_enabled', 'humanize_enabled'),
-               ('humanize_curve_strength', 'humanize_curve_strength'),
-               ('humanize_jitter_px', 'humanize_jitter_px'),
-               ('humanize_jitter_frequency', 'humanize_jitter_frequency')]:
-    if web_recoil.get(yk) is not None:
-        mouse_recoil[tk] = web_recoil[yk]
 
 check(mouse_recoil.get('enabled') is True, "enabled → true")
 check(mouse_recoil.get('hotkey') == 1, "hotkey 'left' → 1")
 check(mouse_recoil.get('hotkey2') == 0, "hotkey2 '' → 0")
 check(mouse_recoil.get('hotkey_mode') == 1, "hotkey_mode 'any' → 1")
-check(mouse_recoil.get('strength') == 60, "strength 直通")
-check(mouse_recoil.get('humanize_curve_strength') == 0.45, "curve_strength 直通")
+
+print('[映射] 压枪总开关 → BB 三段查表引擎（面板只留一套）')
+# 后端 ttbox-web.py 在写完 recoil 之后做这一步镜像；这里照抄同一语义，锁死契约。
+mouse = {'recoil': mouse_recoil}
+if 'enabled' in mouse_recoil:
+    mouse.setdefault('recoil_bb', {})['enabled'] = mouse_recoil['enabled']
+check(mouse['recoil_bb']['enabled'] is True, "开关开 → recoil_bb.enabled 跟着开")
+
+mouse_off = {'recoil': {'enabled': False}}
+if 'enabled' in mouse_off['recoil']:
+    mouse_off.setdefault('recoil_bb', {})['enabled'] = mouse_off['recoil']['enabled']
+check(mouse_off['recoil_bb']['enabled'] is False, "开关关 → recoil_bb.enabled 跟着关")
+
+# 面板没提交压枪块时不得凭空造出 recoil_bb（Core 会保留原值）
+mouse_none = {}
+if 'enabled' in {}:
+    mouse_none.setdefault('recoil_bb', {})['enabled'] = True
+check('recoil_bb' not in mouse_none, "没提交压枪块 → 不造 recoil_bb")
 
 print('[映射] all 模式')
 web_all = dict(web_recoil, hotkey_mode='all')

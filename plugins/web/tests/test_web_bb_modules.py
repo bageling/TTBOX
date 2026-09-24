@@ -14,8 +14,12 @@
 #   · 选靶四项 selector_*（Core 侧是 mouse 顶层扁平键，不是子对象）
 #
 # 契约（改面板或改后端前先读这三条）：
-#   1. 面板元素 id = "controller_" + <数据键>；数据键都在 body['ai']['controller'] 这一层。
+#   1. 面板元素 id 即提交键名，全都在 body['ai']['controller'] 这一层。
+#      老字段用 "controller_" 前缀（history 遗留）；BB 新模块用 "<模块前缀>_<字段>"，
+#      例如 lead1_frames / recoil_bb_preset / selector_lock_hold_ms。
 #      别名一律不要：同一功能的老界面 retired 后，键名也随之下线。
+#   1b. ★ 压枪面板只剩一个总开关（业主 2026-09-24 裁定「新版替老版，界面只留一套」）：
+#       recoil_bb_enabled 由后端从 recoil.enabled 镜像而来，面板**不发**这个键。
 #   2. profile_to_web 缺字段必须补 **Core 结构体默认值**（表里的第三列）——
 #      面板首次打开显示的就是它，对不上会让没存过配置的设备显示成另一套参数。
 #   3. 数组字段形状不对时**整套跳过**（不能写坏配置）；键位字段 Core 侧是位掩码、
@@ -177,6 +181,83 @@ def test_selector_fields_land_on_mouse_top_level():
     assert m['hb_body2'] == 3
     # 面板前缀不得带进 Core
     assert not any(k.startswith('selector_') for k in m)
+
+
+def test_selector_switch_damping_maps_both_ways():
+    """1.5.46 的切靶防抖两条：Core 与 AimThread 早就在用，面板一直没有界面。
+
+    这次「选靶」分区补上，所以必须锁死双向通路 —— 只做单向的话会出现
+    "面板能调但存不下去"，或者"存下去了但面板打开显示 0"。
+    """
+    mod = _load()
+    prof = mod.web_body_to_profile(_body(
+        selector_switch_hysteresis=0.35, selector_switch_cooldown_ms=450))
+    assert abs(prof['mouse']['switch_hysteresis'] - 0.35) < 1e-9
+    assert abs(prof['mouse']['switch_cooldown_ms'] - 450.0) < 1e-9
+
+    c = mod.profile_to_web({'mouse': {'switch_hysteresis': 0.2,
+                                      'switch_cooldown_ms': 300.0}})['ai']['controller']
+    assert abs(c['selector_switch_hysteresis'] - 0.2) < 1e-9
+    assert abs(c['selector_switch_cooldown_ms'] - 300.0) < 1e-9
+
+    # 空 profile ⇒ 落回 Core 结构体默认（0.5 / 600），不能是 None，
+    # 否则面板首次打开会显示成另一套参数。
+    d = mod.profile_to_web({})['ai']['controller']
+    assert d['selector_switch_hysteresis'] == 0.5
+    assert d['selector_switch_cooldown_ms'] == 600.0
+
+
+# ---------------------------------------------------------------------------
+# 1b. 压枪总开关 → BB 引擎（面板只留一套的落地点）
+# ---------------------------------------------------------------------------
+
+def test_recoil_master_switch_drives_bb_engine():
+    """压枪开关一按，BB 三段查表引擎就得跟着开。
+
+    否则就是"无声失效"：面板显示已开启，实际内核走的是老速率模型
+    （strength 默认 0 ⇒ 一点压枪都没有），用户完全看不出来。
+    """
+    mod = _load()
+    prof = mod.web_body_to_profile({
+        'ai': {'controller': {'recoil_bb_preset': 2}},
+        'recoil': {'enabled': True, 'hotkey': 'left'},
+    })
+    assert prof['mouse']['recoil']['enabled'] is True
+    assert prof['mouse']['recoil_bb']['enabled'] is True
+    assert prof['mouse']['recoil_bb']['preset'] == 2
+
+
+def test_recoil_master_switch_off_turns_bb_engine_off():
+    mod = _load()
+    prof = mod.web_body_to_profile({
+        'ai': {'controller': {}},
+        'recoil': {'enabled': False},
+    })
+    assert prof['mouse']['recoil_bb']['enabled'] is False
+
+
+def test_recoil_switch_absent_does_not_invent_bb_block():
+    """面板没提交压枪块时，不得凭空造出 recoil_bb（Core 会保留原值）。"""
+    mod = _load()
+    prof = mod.web_body_to_profile(_body(lead1_enabled=True))
+    assert 'recoil_bb' not in prof['mouse']
+
+
+def test_profile_to_web_recoil_switch_sees_bb_engine():
+    """回填：recoil_bb.enabled=true 而 recoil.enabled=false ⇒ 面板必须显示「开」。
+
+    只认 recoil.enabled 的话，这种设备面板显示"关、实际在压枪"，
+    用户再点一下"开"反而会关掉它。
+    """
+    mod = _load()
+    off = mod.profile_to_web({'mouse': {'recoil': {'enabled': False}}})['recoil']
+    assert off['enabled'] is False
+    on = mod.profile_to_web({'mouse': {'recoil': {'enabled': False},
+                                       'recoil_bb': {'enabled': True}}})['recoil']
+    assert on['enabled'] is True
+    # 面板不再提交的老压枪参数不该再出现在回填里（避免"幽灵字段"被前端拿去用）
+    assert 'strength' not in on
+    assert 'humanize_curve_strength' not in on
 
 
 # ---------------------------------------------------------------------------

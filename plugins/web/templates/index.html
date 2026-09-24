@@ -1528,7 +1528,14 @@ html[data-theme="light"] #control-section-pid .range-control-field .field-hint {
 }
 
 .assist-grid {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  /* 2026-09-24 分区重排：每张卡都是完整功能块。本项目布局是定死的
+     （所有 @media 都被置为 max-width:0，主内容区实测恒 1348px，不随窗口变），
+     所以列数由这个下限决定，1348/320=4.2 ⇒ 恒 4 条轨道：
+     4 张卡的分区（压枪/拟人化）一行排满；3 张卡的分区 auto-fit 收掉空轨道，
+     实际 3 列（每列 449px）照样占满一行。改这个值前先跑
+     Temp/ttbox_layout_probe2.py 对比各区高度，400px 时压枪区 2144px 高且
+     「垂直修正」孤行占 2/3 空白，320px 降到 1437px。 */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   align-items: start;
 }
 
@@ -2357,33 +2364,6 @@ html[data-theme="light"] .danger-button:disabled {
 
 #assist-page .assist-section .assist-humanize-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.auto-trigger-config-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.auto-trigger-config-toolbar > div {
-  display: grid;
-  gap: 4px;
-}
-
-.auto-trigger-config-toolbar strong {
-  color: var(--text);
-  font-size: 14px;
-}
-
-.auto-trigger-profile-list {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
-  max-width: none;
-  margin-top: 0;
-}
-
-.auto-trigger-profile-timing-grid {
-  margin-top: 0;
 }
 
 #assist-page .assist-section .field {
@@ -4570,11 +4550,6 @@ html[data-theme="light"] .toast {
     gap: 10px;
   }
 
-  .auto-trigger-config-toolbar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .model-library-toolbar {
     display: grid;
   }
@@ -4962,8 +4937,7 @@ html[data-ui-brand="xcsh"] .preset-select-button:focus-visible {
 html[data-ui-brand="xcsh"] .wifi-network-button.is-active,
 html[data-ui-brand="xcsh"] .model-card.is-active,
 html[data-ui-brand="xcsh"] .preset-card.is-active,
-html[data-ui-brand="xcsh"] .aim-profile-card.is-active,
-html[data-ui-brand="xcsh"] .auto-trigger-profile-card.is-active {
+html[data-ui-brand="xcsh"] .aim-profile-card.is-active {
   border-color: rgba(var(--xcsh-accent-rgb), 0.7);
   background:
     linear-gradient(135deg, rgba(var(--xcsh-accent-rgb), 0.14), transparent 46%),
@@ -4975,9 +4949,7 @@ html[data-ui-brand="xcsh"] .model-card:focus-visible,
 html[data-ui-brand="xcsh"] .preset-card:hover,
 html[data-ui-brand="xcsh"] .preset-card:focus-visible,
 html[data-ui-brand="xcsh"] .aim-profile-card:hover,
-html[data-ui-brand="xcsh"] .aim-profile-card:focus-visible,
-html[data-ui-brand="xcsh"] .auto-trigger-profile-card:hover,
-html[data-ui-brand="xcsh"] .auto-trigger-profile-card:focus-visible {
+html[data-ui-brand="xcsh"] .aim-profile-card:focus-visible {
   border-color: rgba(var(--xcsh-accent-rgb), 0.4);
   background:
     linear-gradient(135deg, rgba(var(--xcsh-accent-rgb), 0.09), transparent 44%),
@@ -5311,91 +5283,478 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             <button id="assistSectionTabRecoil" class="control-section-tab is-active" type="button" data-assist-section-target="assist-section-recoil" aria-selected="true">
               <span>01</span>压枪
             </button>
-            <button id="assistSectionTabTrigger" class="control-section-tab" type="button" data-assist-section-target="assist-section-trigger" aria-selected="false" disabled aria-disabled="true" title="内核尚未实现，暂不可进入；功能实现后自动放开">
-              <span>02</span>自动开火<span class="unimplemented-tag">未实现</span>
+            <button id="assistSectionTabTrigger" class="control-section-tab" type="button" data-assist-section-target="assist-section-trigger" aria-selected="false">
+              <span>02</span>自动开火
             </button>
-            <button id="assistSectionTabRapid" class="control-section-tab" type="button" data-assist-section-target="assist-section-rapid" aria-selected="false" disabled aria-disabled="true" title="内核尚未实现，暂不可进入；功能实现后自动放开">
-              <span>03</span>连点<span class="unimplemented-tag">未实现</span>
+            <button id="assistSectionTabLead" class="control-section-tab" type="button" data-assist-section-target="assist-section-lead" aria-selected="false">
+              <span>03</span>提前量
+            </button>
+            <button id="assistSectionTabHumanize" class="control-section-tab" type="button" data-assist-section-target="assist-section-humanize" aria-selected="false">
+              <span>04</span>拟人化
+            </button>
+            <button id="assistSectionTabSelector" class="control-section-tab" type="button" data-assist-section-target="assist-section-selector" aria-selected="false">
+              <span>05</span>选靶
             </button>
           </nav>
 
           <div class="assist-section-stack">
             <section id="assist-section-recoil" class="assist-section is-active" data-assist-section>
-              <article class="module-tile assist-card-recoil">
-                <div class="module-title">
-                  <h3>压枪</h3>
-                  <label class="switch"><input id="recoil_enabled" data-config type="checkbox"><span></span></label>
-                </div>
-                <div class="assist-section-body">
-                  <div class="field-grid compact assist-field-pair">
-                    <label class="field">主按键<select id="recoil_hotkey" data-config></select><span class="field-hint">压枪的主要触发键，通常保持左键。</span></label>
-                    <label class="field">副按键<select id="recoil_hotkey2" data-config></select><span class="field-hint">可选第二触发键；不使用时只看主按键。</span></label>
-                    <label class="field">触发方式
-                      <select id="recoil_hotkey_mode" data-config>
-                        <option value="any">任一按键</option>
-                        <option value="all">同时按下</option>
-                      </select>
-                      <span class="field-hint">选择副按键后，决定任一按键触发还是两个键同时按住才触发。</span>
-                    </label>
-                    <label class="field">下压强度<input id="recoil_strength" data-config type="number" step="1"><span class="field-hint">每秒下移像素基准，0 为不输出；越大压得越重。</span></label>
-                    <input id="recoil_speed" data-config type="hidden" value="1">
+              <div class="assist-grid control-group-grid">
+                <article class="module-tile assist-card-recoil">
+                  <div class="module-title">
+                    <h3>压枪</h3>
+                    <label class="switch"><input id="recoil_enabled" data-config type="checkbox"><span></span></label>
                   </div>
-                  <div class="check-field">
-                    <label class="check-line"><input id="recoil_only_when_target_visible" data-config type="checkbox"> 仅有目标时压枪</label>
-                    <span class="field-hint">开启后画面中检测到目标才会下压；关闭时保持默认逻辑，按住热键就下压。</span>
+                  <div class="assist-section-body">
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">主按键<select id="recoil_hotkey" data-config></select><span class="field-hint">压枪的主要触发键，通常保持左键。</span></label>
+                      <label class="field">副按键<select id="recoil_hotkey2" data-config></select><span class="field-hint">可选第二触发键；「不使用」时只看主按键。</span></label>
+                      <label class="field">触发方式
+                        <select id="recoil_hotkey_mode" data-config>
+                          <option value="any">任一按键</option>
+                          <option value="all">同时按下</option>
+                        </select>
+                        <span class="field-hint">选了副按键后，决定任一键触发还是两键同时按住才触发。</span>
+                      </label>
+                      <label class="field">目标距离上限 px<input id="recoil_bb_distance_limit" data-config type="number" min="0" step="5"><span class="field-hint">目标离准星超过它就不压；0 为不限。</span></label>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">开火后延迟 ms<input id="recoil_bb_delay_ms" data-config type="number" min="0" step="10"><span class="field-hint">按下热键后先等这么久再压，避免单点时误压。</span></label>
+                      <label class="field">一阶平滑<input id="recoil_bb_smooth" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">每帧下压量与上一帧混合，越大越柔；0 为不平滑。</span></label>
+                      <label class="field">最大下压距离 px<input id="recoil_bb_max_down_distance" data-config type="number" min="0" step="5"><span class="field-hint">从准星起最多下压这么多像素就停；0 为不限。</span></label>
+                      <label class="field">扳机联动倍率<input id="recoil_bb_adv_mult" data-config type="number" min="0" max="2" step="0.05"><span class="field-hint">自动扳机开火时整体压枪量的倍率，默认 0.9。</span></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="recoil_bb_no_target_always" data-config type="checkbox"> 无目标时也压枪</label>
+                      <span class="field-hint">关闭时只在检测到目标、且满足上面的距离上限才压。</span>
+                    </div>
                   </div>
-                  <div class="field-grid compact assist-field-pair">
-                    <label class="field">目标丢失释放 ms<input id="recoil_target_lost_release_ms" data-config type="number" step="10"><span class="field-hint">仅有目标时压枪开启后，目标消失仍保持压枪的时间；0 为立即释放。</span></label>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title"><strong>三段查表</strong></div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">开火时长按「总时长」三等分，每段用各自的垂直/水平量。三个预设互不影响，切换预设只换下面这组数值。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">当前预设
+                        <select id="recoil_bb_preset" data-config>
+                          <option value="1">预设 1</option>
+                          <option value="2">预设 2</option>
+                          <option value="3">预设 3</option>
+                        </select>
+                        <span class="field-hint">换枪就换预设，三套各自独立保存。</span>
+                      </label>
+                      <label class="field">总时长 ms<input id="recoil_bb_seg_total" data-config type="number" min="1" step="50"><span class="field-hint">该预设按住多久算压完；超过后固定用第 3 段继续压。</span></label>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">第 1 段垂直 px<input id="recoil_bb_seg_v1" data-config type="number" step="0.1"><span class="field-hint">前 1/3 时间每帧下压量（正 = 向下）。</span></label>
+                      <label class="field">第 1 段水平 px<input id="recoil_bb_seg_h1" data-config type="number" step="0.1"><span class="field-hint">正 = 向右修正，负 = 向左。</span></label>
+                      <label class="field">第 2 段垂直 px<input id="recoil_bb_seg_v2" data-config type="number" step="0.1"></label>
+                      <label class="field">第 2 段水平 px<input id="recoil_bb_seg_h2" data-config type="number" step="0.1"></label>
+                      <label class="field">第 3 段垂直 px<input id="recoil_bb_seg_v3" data-config type="number" step="0.1"></label>
+                      <label class="field">第 3 段水平 px<input id="recoil_bb_seg_h3" data-config type="number" step="0.1"></label>
+                      <label class="field">垂直全局倍率<input id="recoil_bb_global_vert" data-config type="number" min="0" max="3" step="0.05"><span class="field-hint">乘在上面三个垂直量上，整体调轻重。</span></label>
+                      <label class="field">水平全局倍率<input id="recoil_bb_global_horiz" data-config type="number" min="0" max="3" step="0.05"></label>
+                    </div>
                   </div>
-                  <div class="check-field">
-                    <label class="check-line"><input id="recoil_trigger_delay_enabled" data-config type="checkbox"> 延迟触发压枪</label>
-                    <span class="field-hint">开启后，只有压枪热键持续按住超过设定时间才开始下压。</span>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>水平漂移 / Y 路屏蔽</strong>
+                    <label class="switch"><input id="recoil_bb_drift_enabled" data-config type="checkbox"><span></span></label>
                   </div>
-                  <div class="field-grid compact assist-field-pair">
-                    <label class="field">压枪延迟 ms<input id="recoil_trigger_delay_ms" data-config type="number" step="10"><span class="field-hint">用于避免单点时下压；松开热键后会重新计时。</span></label>
+                  <div class="assist-section-body">
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">漂移幅度 px<input id="recoil_bb_drift_amplitude" data-config type="number" min="0" step="0.05"><span class="field-hint">水平方向叠加的正弦抖动，模拟枪口左右摆。</span></label>
+                      <label class="field">漂移频率 Hz<input id="recoil_bb_drift_freq" data-config type="number" min="0" step="0.1"></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="recoil_bb_y_suppress_enabled" data-config type="checkbox"> 屏蔽 Y 路下压</label>
+                      <span class="field-hint">按下面的乘子削弱垂直下压；0 为完全屏蔽（只做水平修正）。</span>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">屏蔽乘子<input id="recoil_bb_y_suppress_strength" data-config type="number" min="0" max="1" step="0.05"></label>
+                    </div>
                   </div>
-                  <div class="check-field">
-                    <label class="check-line"><input id="recoil_humanize_enabled" data-config type="checkbox"> 启用拟人曲线</label>
-                    <span class="field-hint">开启后下压会带缓入缓出和轻微横向变化，手感更自然。</span>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>垂直修正</strong>
+                    <label class="switch"><input id="vc_enabled" data-config type="checkbox"><span></span></label>
                   </div>
-                  <div class="field-grid compact assist-humanize-grid">
-                    <label class="field">曲线强度<input id="recoil_humanize_curve_strength" data-config type="number" step="0.01"><span class="field-hint">下压拆步的缓入缓出比例，高一点更柔，太高会慢半拍。</span></label>
-                    <label class="field">横向抖动<input id="recoil_humanize_jitter_px" data-config type="number" step="0.01"><span class="field-hint">压枪时附加的X轴微动幅度，数值过高会明显X轴晃。</span></label>
-                    <label class="field">抖动频率<input id="recoil_humanize_jitter_frequency" data-config type="number" step="0.1"><span class="field-hint">X轴微动的变化速度，低一点更稳，高一点更碎。</span></label>
+                  <div class="assist-section-body">
+                    <div class="field-hint">与压枪同时生效，输出是直接叠加的像素量（不是倍率）。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">基准强度 px/帧<input id="vc_strength" data-config type="number" min="0" step="0.1"></label>
+                      <label class="field">水平修正 px/帧<input id="vc_horiz" data-config type="number" step="0.1"><span class="field-hint">正 = 向右，负 = 向左。</span></label>
+                      <label class="field">起始延迟 ms<input id="vc_delay_ms" data-config type="number" min="0" step="10"></label>
+                      <label class="field">最大下压 px<input id="vc_max_down_distance" data-config type="number" min="0" step="5"><span class="field-hint">0 为不限。</span></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="vc_no_target" data-config type="checkbox"> 无目标时也修正</label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="vc_y_suppress_enabled" data-config type="checkbox"> 屏蔽 Y 路（垂直修正）</label>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">屏蔽乘子<input id="vc_y_suppress_strength" data-config type="number" min="0" max="1" step="0.05"></label>
+                    </div>
+                    <div class="module-title"><strong>力度渐变</strong></div>
+                    <div class="field-hint">三档互斥，靠上的先生效。时间过半取「起始→中段」的中点，跑满取「末段」。</div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="vc_ramp1_enabled" data-config type="checkbox"> 渐变 1</label>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">时长 ms<input id="vc_ramp1_duration_ms" data-config type="number" min="0" step="50"></label>
+                      <label class="field">起始<input id="vc_ramp1_start" data-config type="number" step="0.05"></label>
+                      <label class="field">中段<input id="vc_ramp1_middle" data-config type="number" step="0.05"></label>
+                      <label class="field">末段<input id="vc_ramp1_end" data-config type="number" step="0.05"></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="vc_ramp2_enabled" data-config type="checkbox"> 渐变 2</label>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">时长 ms<input id="vc_ramp2_duration_ms" data-config type="number" min="0" step="50"></label>
+                      <label class="field">起始<input id="vc_ramp2_start" data-config type="number" step="0.05"></label>
+                      <label class="field">中段<input id="vc_ramp2_middle" data-config type="number" step="0.05"></label>
+                      <label class="field">末段<input id="vc_ramp2_end" data-config type="number" step="0.05"></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="vc_ramp3_enabled" data-config type="checkbox"> 渐变 3</label>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">时长 ms<input id="vc_ramp3_duration_ms" data-config type="number" min="0" step="50"></label>
+                      <label class="field">起始<input id="vc_ramp3_start" data-config type="number" step="0.05"></label>
+                      <label class="field">中段<input id="vc_ramp3_middle" data-config type="number" step="0.05"></label>
+                      <label class="field">末段<input id="vc_ramp3_end" data-config type="number" step="0.05"></label>
+                    </div>
                   </div>
-                </div>
-              </article>
-            </section>
-
-            <section id="assist-section-trigger" class="assist-section" data-assist-section hidden>
-              <div class="assist-section-body auto-trigger-section-body">
-                <div class="unimplemented-notice">自动开火尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
-                <div class="auto-trigger-config-toolbar">
-                  <div>
-                    <strong>开火配置</strong>
-                    <span class="field-hint">每条配置独立决定按住热键和目标类别；准星进入匹配目标框内即可触发。</span>
-                  </div>
-                  <button id="addAutoTriggerProfileButton" class="mini-button" type="button">新增配置</button>
-                </div>
-                <div id="autoTriggerProfilesEditor" class="aim-profile-list auto-trigger-profile-list"></div>
+                </article>
               </div>
             </section>
 
-            <section id="assist-section-rapid" class="assist-section" data-assist-section hidden>
-              <article class="module-tile assist-card-rapid">
-                <div class="module-title">
-                  <h3>连点</h3>
-                  <label class="switch"><input id="rapid_fire_enabled" data-config type="checkbox"><span></span></label>
-                </div>
-                <div class="assist-section-body">
-                  <div class="unimplemented-notice">连点尚未实现：内核端没有该功能，这里的设置在保存时会被忽略，仅作界面预留。</div>
-                  <label class="field">触发按键<select id="rapid_fire_hotkey" data-config></select><span class="field-hint">按住该键时循环模拟左键点击。</span></label>
-                  <div class="field-grid compact assist-field-pair">
-                    <label class="field">基础按下时间<input id="rapid_fire_press_base_ms" data-config type="number" step="1"><span class="field-hint">每次左键按住的基准毫秒数；实际会加入随机浮动，偶尔会慢一拍。</span></label>
-                    <label class="field">基础间隔时间<input id="rapid_fire_interval_base_ms" data-config type="number" step="1"><span class="field-hint">两次点击之间的基准间隔；实际会加入随机浮动，越小连点越快。</span></label>
+            <section id="assist-section-trigger" class="assist-section" data-assist-section hidden>
+              <div class="assist-grid control-group-grid">
+                <article class="module-tile">
+                  <div class="module-title">
+                    <h3>自动开火</h3>
+                    <label class="switch"><input id="trigger_enabled" data-config type="checkbox"><span></span></label>
                   </div>
-                </div>
-              </article>
+                  <div class="assist-section-body">
+                    <div class="field-hint">长按组合键激活；点按激活键选了键，要再点一下才开火，选「不使用」则长键按住即开火。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">长按键 1<select id="trigger_key1" data-config></select></label>
+                      <label class="field">长按键 2<select id="trigger_key2" data-config></select><span class="field-hint">「不使用」= 只看长按键 1。</span></label>
+                      <label class="field">点按激活键<select id="trigger_key3" data-config></select><span class="field-hint">「不使用」= 长键按住即激活。</span></label>
+                      <label class="field">目标置信度<input id="trigger_confidence" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">低于它的目标不开火。</span></label>
+                      <label class="field">目标距中心上限 px<input id="trigger_dist_threshold" data-config type="number" min="0" step="5"><span class="field-hint">准星离目标中心超过它不开火。</span></label>
+                      <label class="field">稳定帧数<input id="trigger_stability_frames" data-config type="number" min="0" step="1"><span class="field-hint">非连发模式下先稳定这么多帧才打第一枪；0 = 立即。</span></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger_with_aim" data-config type="checkbox"> 激活时附带自瞄</label>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">附带自瞄置信度<input id="trigger_aim_confidence" data-config type="number" min="0" max="1" step="0.01"></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger_crosshair_check" data-config type="checkbox"> 中心必须被目标框覆盖</label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger_recoil_enabled" data-config type="checkbox"> 开火时联动压枪</label>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">联动偏移比例<input id="trigger_y_offset" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">压枪量按目标框高度的这个比例换算。</span></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger_status_log" data-config type="checkbox"> 输出开火状态日志</label>
+                    </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>连点 / 连发</strong>
+                    <label class="switch"><input id="trigger_rifle_mode" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">这个开关 = 连发模式。开启：每隔「连发间隔」打一发；关闭：按「点击次数」打完就停。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">连发间隔 ms<input id="trigger_rifle_interval" data-config type="number" min="1" step="5"></label>
+                      <label class="field">点击次数<input id="trigger_click_count" data-config type="number" min="1" step="1"><span class="field-hint">非连发模式下最多打几发。</span></label>
+                      <label class="field">开火间隔 ms<input id="trigger_fire_delay" data-config type="number" min="0" step="1"><span class="field-hint">非连发模式的基准间隔。</span></label>
+                      <label class="field">间隔随机 ±ms<input id="trigger_fire_random" data-config type="number" min="0" step="1"><span class="field-hint">每次间隔上下浮动范围，让节奏不那么机械。</span></label>
+                      <label class="field">首枪延迟下限 ms<input id="trigger_first_delay_min" data-config type="number" min="0" step="1"></label>
+                      <label class="field">首枪延迟上限 ms<input id="trigger_first_delay_max" data-config type="number" min="0" step="1"></label>
+                      <label class="field">点击按键<select id="trigger_click_key" data-config></select><span class="field-hint">模拟点击用哪个键，通常左键。</span></label>
+                      <label class="field">按压时长 ms<input id="trigger_press_duration" data-config type="number" min="1" step="5"><span class="field-hint">每次点下去按住多久。</span></label>
+                    </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <h3>自动开火 2.0</h3>
+                    <label class="switch"><input id="trigger2_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">第二套扳机：首枪误差门 + 精度模拟 + 停手检测。与上面那套可以各自独立开。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">长按键 1<select id="trigger2_key1" data-config></select></label>
+                      <label class="field">长按键 2<select id="trigger2_key2" data-config></select><span class="field-hint">「不使用」= 只看长按键 1。</span></label>
+                      <label class="field">开火按键<select id="trigger2_fire_button" data-config></select></label>
+                      <label class="field">目标置信度<input id="trigger2_confidence" data-config type="number" min="0" max="1" step="0.01"></label>
+                      <label class="field">首枪误差 px<input id="trigger2_first_err" data-config type="number" min="0" step="1"><span class="field-hint">准星到目标小于它才允许打第一枪。</span></label>
+                      <label class="field">首枪延迟 ms<input id="trigger2_first_delay" data-config type="number" min="0" step="5"></label>
+                      <label class="field">连发间隔（帧）<input id="trigger2_fire_interval" data-config type="number" min="1" step="1"></label>
+                      <label class="field">间隔随机（帧）<input id="trigger2_fire_random" data-config type="number" min="0" step="1"></label>
+                      <label class="field">每次发数<input id="trigger2_fire_count" data-config type="number" min="1" step="1"></label>
+                      <label class="field">按压时长 ms<input id="trigger2_press_duration" data-config type="number" min="1" step="5"></label>
+                      <label class="field">移动节流帧<input id="trigger2_move_throttle_frames" data-config type="number" min="0" step="1"><span class="field-hint">开火后多少帧内不再修正鼠标，防抖。</span></label>
+                      <label class="field">重锁重置 ms<input id="trigger2_retarget_reset_ms" data-config type="number" min="0" step="50"><span class="field-hint">换目标后多少毫秒内重新走首枪门。</span></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger2_with_aim" data-config type="checkbox"> 附带自瞄</label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger2_with_crosshair" data-config type="checkbox"> 中心须被目标框覆盖</label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger2_lite_mode" data-config type="checkbox"> 精简模式</label>
+                      <span class="field-hint">跳过部分判定，低配机更省算力。</span>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger2_with_simple_recoil" data-config type="checkbox"> 联动简易压枪</label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger2_with_adv_recoil" data-config type="checkbox"> 联动进阶压枪</label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger2_precision_enabled" data-config type="checkbox"> 精度模拟</label>
+                      <span class="field-hint">在作用半径内按持续帧数逐步收束，降低连续空枪。</span>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">作用半径 px<input id="trigger2_precision_range" data-config type="number" min="0" step="1"></label>
+                      <label class="field">持续帧数<input id="trigger2_precision_frames" data-config type="number" min="1" step="1"></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="trigger2_stop_detect_enabled" data-config type="checkbox"> 停手检测</label>
+                      <span class="field-hint">检测准星附近的指定颜色，命中就认为该停手。</span>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">颜色编号<input id="trigger2_stop_detect_color_id" data-config type="number" min="0" step="1"></label>
+                      <label class="field">颜色容差<input id="trigger2_stop_detect_tolerance" data-config type="number" min="0" step="1"></label>
+                      <label class="field">检测半径 px<input id="trigger2_stop_detect_range" data-config type="number" min="0" step="1"></label>
+                      <label class="field">检测周期（帧）<input id="trigger2_stop_detect_interval" data-config type="number" min="1" step="1"></label>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="assist-section-lead" class="assist-section" data-assist-section hidden>
+              <div class="assist-grid control-group-grid">
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>提前量 · 一代（帧窗口投票）</strong>
+                    <label class="switch"><input id="lead1_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">连续若干帧里横向位移以同一方向为主，就按平滑速度给瞄准点加一点提前量。只作用于横轴。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">投票窗口帧数<input id="lead1_frames" data-config type="number" min="1" step="1"><span class="field-hint">看最近多少帧的位移方向。</span></label>
+                      <label class="field">主向占比 %<input id="lead1_direction_ratio" data-config type="number" min="0" max="100" step="1"><span class="field-hint">同向帧占比超过它才算「主向」。越低越容易触发。</span></label>
+                      <label class="field">主反位移倍率<input id="lead1_displacement_ratio" data-config type="number" min="0" step="0.1"><span class="field-hint">主向位移要达到反向位移的这么多倍。</span></label>
+                      <label class="field">提前量强度<input id="lead1_strength" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">偏移 = 平滑速度 × 强度 × 方向；0 等于不开。</span></label>
+                      <label class="field">速度平滑<input id="lead1_smooth" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">越大越滞后也越稳。</span></label>
+                      <label class="field">保持时长 ms<input id="lead1_hold_ms" data-config type="number" min="0" step="10"><span class="field-hint">激活后偏置保持多久。</span></label>
+                      <label class="field">触发距离 px<input id="lead1_activation_distance" data-config type="number" min="0" step="5"><span class="field-hint">准星离目标超过它就不触发。</span></label>
+                      <label class="field">冷却 ms<input id="lead1_settle_ms" data-config type="number" min="0" step="5"><span class="field-hint">进入触发距离后先安静这么久。</span></label>
+                      <label class="field">位移下限 px<input id="lead1_displacement_min" data-config type="number" min="0" step="1"><span class="field-hint">窗口内主向位移总和低于它不激活。</span></label>
+                      <label class="field">位移上限 px<input id="lead1_displacement_max" data-config type="number" min="0" step="1"><span class="field-hint">超过它也不激活（位移太大通常是目标瞬移）。</span></label>
+                      <label class="field">收帧死区 px<input id="lead1_dead_zone" data-config type="number" min="0" step="1"><span class="field-hint">框中心移动小于它就不收这一帧。</span></label>
+                      <label class="field">反向熔断次数<input id="lead1_oscillation_cancel" data-config type="number" min="1" step="1"><span class="field-hint">连续这么多次激活方向相反就熔断归零。</span></label>
+                      <label class="field">单帧过滤基数 px<input id="lead1_filter_base" data-config type="number" min="0" step="0.1"><span class="field-hint">抖动过滤阈值基准。</span></label>
+                      <label class="field">框面积中值<input id="lead1_filter_box_mid" data-config type="number" min="0" step="50"><span class="field-hint">按框面积调整过滤强度；远小目标允许更小的位移参与投票。</span></label>
+                      <label class="field">小目标比例下限<input id="lead1_filter_min_ratio" data-config type="number" min="0" step="0.1"></label>
+                      <label class="field">大目标比例上限<input id="lead1_filter_max_ratio" data-config type="number" min="0" step="0.1"></label>
+                    </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>提前量 · 二代（积分累积）</strong>
+                    <label class="switch"><input id="lead2_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">把横向误差按帧积分累积成偏移（误差越大攒得越快），死区内自动衰减。纵向输出越大，横向提前量越小，防斜拉。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">积分增益<input id="lead2_gain" data-config type="number" min="0" step="0.005"><span class="field-hint">每帧把误差攒进去的比例。</span></label>
+                      <label class="field">偏移上限 px<input id="lead2_max_offset" data-config type="number" min="0" step="1"></label>
+                      <label class="field">死区衰减系数<input id="lead2_decay" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">误差在死区内时，每帧把积分乘上它慢慢放掉。</span></label>
+                      <label class="field">激活距离 px<input id="lead2_activation_distance" data-config type="number" min="0" step="5"></label>
+                      <label class="field">误差死区 px<input id="lead2_dead_zone" data-config type="number" min="0" step="0.5"></label>
+                      <label class="field">保持时长 ms<input id="lead2_hold_ms" data-config type="number" min="0" step="5"></label>
+                      <label class="field">冷却 ms<input id="lead2_cooldown_ms" data-config type="number" min="0" step="10"></label>
+                      <label class="field">Y 抑制下限 px/帧<input id="lead2_y_suppress_min" data-config type="number" min="0" step="0.1"><span class="field-hint">纵向输出小于它不抑制。</span></label>
+                      <label class="field">Y 抑制上限 px/帧<input id="lead2_y_suppress_max" data-config type="number" min="0" step="0.1"><span class="field-hint">纵向输出大于它则完全抑制横向提前量。</span></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="lead2_y_suppress_enabled" data-config type="checkbox"> 开启 Y 轴抑制</label>
+                    </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>拉枪曲线</strong>
+                    <label class="switch"><input id="controller_pull_curve_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">曲线强度<input id="controller_pull_curve_strength" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">只在新目标远距离拉枪时加入轻微弧线；0 为关闭。</span></label>
+                      <label class="field">随机抖动 px<input id="controller_pull_curve_jitter_px" data-config type="number" min="0" max="12" step="0.1"><span class="field-hint">只在拉枪期间加入；0 为关闭。</span></label>
+                      <label class="field">启用距离 px<input id="controller_pull_curve_min_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">目标离准星超过它才启用；锁定后自动停止。</span></label>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="assist-section-humanize" class="assist-section" data-assist-section hidden>
+              <div class="assist-grid control-group-grid">
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>移动整形链</strong>
+                    <label class="switch"><input id="humanize_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">按固定顺序处理每一步：低通 → 反应延迟 → 过冲 → 制动 → 高斯噪声。全关时输出与不开完全一致。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">低通系数<input id="humanize_smooth_factor" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">把本帧输出向上一帧靠；0 为关闭。开了会更柔但更迟钝。</span></label>
+                      <label class="field">过冲强度<input id="humanize_overshoot" data-config type="number" min="0" step="0.05"><span class="field-hint">离目标越远越容易冲过头一点；0 为关闭。</span></label>
+                      <label class="field">制动距离 px<input id="humanize_brake_distance" data-config type="number" min="0" step="5"><span class="field-hint">进入这个距离后主动减速；0 为关闭。</span></label>
+                      <label class="field">噪声标准差 px<input id="humanize_noise_sigma" data-config type="number" min="0" step="0.05"></label>
+                      <label class="field">反应延迟 ms<input id="humanize_delay_ms" data-config type="number" min="0" step="5"></label>
+                      <label class="field">延迟随机 ±ms<input id="humanize_delay_random_ms" data-config type="number" min="0" step="5"></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="humanize_speed_fluctuation_enabled" data-config type="checkbox"> 速度波动</label>
+                      <span class="field-hint">整段移动的速度曲线做轻微起伏，看起来更像手在动。</span>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">起始速度<input id="humanize_speed_fluctuation_start_speed" data-config type="number" min="0" step="0.05"></label>
+                      <label class="field">加速段比例<input id="humanize_speed_fluctuation_accel_ratio" data-config type="number" min="0" max="1" step="0.05"></label>
+                      <label class="field">减速段比例<input id="humanize_speed_fluctuation_decel_ratio" data-config type="number" min="0" max="1" step="0.05"></label>
+                      <label class="field">波动强度<input id="humanize_speed_fluctuation_intensity" data-config type="number" min="0" max="1" step="0.05"></label>
+                    </div>
+                    <div class="check-field">
+                      <label class="check-line"><input id="humanize_accuracy_sim_enabled" data-config type="checkbox"> 精度模拟</label>
+                      <span class="field-hint">不是每次都钉在正中，按概率把落点推到框边或四角。</span>
+                    </div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">完美命中概率 %<input id="humanize_accuracy_sim_perfect_rate" data-config type="number" min="0" max="100" step="1"></label>
+                      <label class="field">偏移强度<input id="humanize_accuracy_sim_offset_strength" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">占框半径的比例。</span></label>
+                      <label class="field">落点方式
+                        <select id="humanize_accuracy_sim_direction" data-config>
+                          <option value="0">四角优先</option>
+                          <option value="1">边缘随机</option>
+                          <option value="2">随机</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>抗过冲</strong>
+                    <label class="switch"><input id="anti_overshoot_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">接近目标时按内/外圈分段衰减位移，每圈最多衰减若干帧，跑满就停手（防止在目标上反复拉锯）。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">外圈半径 px<input id="anti_overshoot_outer_distance" data-config type="number" min="0" step="1"></label>
+                      <label class="field">外圈衰减强度 %<input id="anti_overshoot_outer_strength" data-config type="number" min="0" max="100" step="1"></label>
+                      <label class="field">内圈半径 px<input id="anti_overshoot_inner_distance" data-config type="number" min="0" step="1"></label>
+                      <label class="field">内圈衰减强度 %<input id="anti_overshoot_inner_strength" data-config type="number" min="0" max="100" step="1"></label>
+                      <label class="field">外圈最多帧数<input id="anti_overshoot_outer_frames" data-config type="number" min="0" step="1"></label>
+                      <label class="field">内圈最多帧数<input id="anti_overshoot_inner_frames" data-config type="number" min="0" step="1"></label>
+                      <label class="field">复位冷却 ms<input id="anti_overshoot_reset_cooldown_ms" data-config type="number" min="0" step="10"><span class="field-hint">持续越界多久后重新计数。</span></label>
+                    </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>速度自适应 Kp</strong>
+                    <label class="switch"><input id="speed_adaptive_kp_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">按最近几帧的平均位移判断目标在动还是静止：动的目标加大 Kp 跟紧，静止的减小 Kp 防抖。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">移动时倍率<input id="speed_adaptive_kp_move_mult" data-config type="number" min="0" step="0.05"></label>
+                      <label class="field">静止时倍率<input id="speed_adaptive_kp_static_mult" data-config type="number" min="0" step="0.05"></label>
+                      <label class="field">速度阈值 px/帧<input id="speed_adaptive_kp_threshold" data-config type="number" min="0" step="0.5"><span class="field-hint">平均位移超过它算「在动」。</span></label>
+                      <label class="field">窗口帧数<input id="speed_adaptive_kp_frames" data-config type="number" min="1" step="1"></label>
+                    </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>全局正弦扰动</strong>
+                    <label class="switch"><input id="global_wave_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">给最终输出叠一层很轻的正弦抖动，避免输出过于整齐。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">X 振幅 px<input id="global_wave_amp_x" data-config type="number" min="0" step="0.01"></label>
+                      <label class="field">Y 振幅 px<input id="global_wave_amp_y" data-config type="number" min="0" step="0.01"></label>
+                      <label class="field">频率 Hz<input id="global_wave_freq" data-config type="number" min="0" step="0.1"></label>
+                      <label class="field">平滑<input id="global_wave_smooth" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">0 为不平滑。</span></label>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="assist-section-selector" class="assist-section" data-assist-section hidden>
+              <div class="assist-grid control-group-grid">
+                <article class="module-tile">
+                  <div class="module-title"><strong>锁定与切换</strong></div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">三项都影响「已经锁上一个目标之后，什么时候换人」。默认值即为现在线上的行为。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">锁定保持 ms<input id="selector_lock_hold_ms" data-config type="number" min="0" step="50"><span class="field-hint">锁上之后这段时间内只刷新位置、不换目标；0 为关闭。</span></label>
+                      <label class="field">切换滞后比例<input id="selector_switch_hysteresis" data-config type="number" min="0" step="0.05"><span class="field-hint">新目标要比刚丢的那个明显更近才允许切；0.5 = 需近 50%。0 为关闭。</span></label>
+                      <label class="field">切换冷却 ms<input id="selector_switch_cooldown_ms" data-config type="number" min="0" step="10"><span class="field-hint">切过一次后这段时间内不再切，防来回拉锯。</span></label>
+                    </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>优先级打分</strong>
+                    <label class="switch"><input id="selector_priority_scoring" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">开启后不再只看谁最近，而是按「距离 + 尺寸 + 粘滞」综合打分选最高分。关闭时保持原来的最近优先。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">距离权重<input id="selector_weight_dist" data-config type="number" min="0" step="0.05"></label>
+                      <label class="field">尺寸权重<input id="selector_weight_size" data-config type="number" min="0" step="0.05"></label>
+                      <label class="field">粘滞权重<input id="selector_stickiness" data-config type="number" min="0" step="0.05"><span class="field-hint">当前目标离得近时额外加分，减少乱跳。</span></label>
+                      <label class="field">粘滞判定半径 px<input id="selector_switch_threshold_px" data-config type="number" min="0" step="5"></label>
+                    </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>头身稳定过滤</strong>
+                    <label class="switch"><input id="selector_head_body_stable" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">同一帧里同时出现身体框和头部框时，删掉头部框，只留身体，避免瞄准点被头框抢走。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">组合1 身体类<input id="selector_hb_body1" data-config type="number" min="0" step="1"></label>
+                      <label class="field">组合1 头类<input id="selector_hb_head1" data-config type="number" min="0" step="1"></label>
+                      <label class="field">组合2 身体类<input id="selector_hb_body2" data-config type="number" min="-1" step="1"><span class="field-hint">填 -1 表示该组不启用。</span></label>
+                      <label class="field">组合2 头类<input id="selector_hb_head2" data-config type="number" min="-1" step="1"><span class="field-hint">填 -1 表示该组不启用。</span></label>
+                    </div>
+                  </div>
+                </article>
+              </div>
             </section>
 
           </div>
@@ -5904,9 +6263,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
 const HOTKEYS = ["left", "right", "middle", "back", "forward", "auto"];
 const POINTER_HOTKEYS = ["left", "right", "middle", "back", "forward"];
 const OPTIONAL_POINTER_HOTKEYS = ["", ...POINTER_HOTKEYS];
-const AUTO_TRIGGER_HOTKEYS = ["auto", "right", "middle", "back", "forward"];
-const AUTO_TRIGGER_FIRE_MODES = ["tap", "spray"];
-const RAPID_FIRE_HOTKEYS = ["right", "middle", "back", "forward"];
 const HOTKEY_LABELS = {
   left: "左键",
   right: "右键",
@@ -5979,15 +6335,6 @@ const NUMERIC_RANGE_LIMITS = {
   controller_aim_reference_offset_x: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_aim_reference_offset_y: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_selector_lost_grace_ms: [0, 2000],
-  recoil_strength: [0, 300],
-  recoil_speed: [0.1, 3],
-  recoil_target_lost_release_ms: [0, 3000],
-  recoil_trigger_delay_ms: [0, 3000],
-  recoil_humanize_curve_strength: [0, 1],
-  recoil_humanize_jitter_px: [0, 2],
-  recoil_humanize_jitter_frequency: [0, 30],
-  rapid_fire_press_base_ms: [30, 300],
-  rapid_fire_interval_base_ms: [8, 120],
   hailo_pipeline_depth: [1, 4],
 };
 const OVERVIEW_DEFAULTS = {
@@ -6026,44 +6373,222 @@ const CONTROLLER_DEFAULTS = {
   aim_reference_offset_y: 0,
   selector_lost_grace_ms: 78,
 };
+// ---------------------------------------------------------------------------
+// BB 对标模块表（2026-09-24 面板收敛）
+// ★ 与 plugins/web/bin/ttbox-web.py 的 CTRL_BLOCKS / CTRL_RECOIL_BB_FIELDS /
+//   CTRL_SELECTOR_FIELDS **同源**：下面这张表由后端表机械生成（脚本 ttbox_bb_panel.py），
+//   字段名 / 类型 / Core 默认值逐项一致。改后端表必须同步重生成，
+//   否则「面板回填显示的值」会与「Core 实际值」对不上（首次打开的设备尤其明显）。
+// 每项 = [模块前缀, [[字段名, 类型, Core 默认值], ...]]
+//   元素 id = 提交键名 = 前缀 + "_" + 字段名（后端按同样的规则取 body.ai.controller）。
+//   类型：b = 勾选框，n = 小数，i = 整数，key = 按键字符串。
+// ---------------------------------------------------------------------------
+const BB_CTRL_MODULES = [
+  ["lead1", [
+    ["enabled", "b", false],
+    ["frames", "i", 10],
+    ["direction_ratio", "n", 70.0],
+    ["displacement_ratio", "n", 2.0],
+    ["strength", "n", 0.5],
+    ["smooth", "n", 0.5],
+    ["hold_ms", "n", 50.0],
+    ["activation_distance", "n", 40.0],
+    ["settle_ms", "n", 10.0],
+    ["displacement_min", "n", 10.0],
+    ["displacement_max", "n", 40.0],
+    ["dead_zone", "n", 5.0],
+    ["oscillation_cancel", "i", 3],
+    ["filter_base", "n", 0.3],
+    ["filter_box_mid", "n", 1000.0],
+    ["filter_min_ratio", "n", 0.3],
+    ["filter_max_ratio", "n", 3.0],
+  ]],
+  ["lead2", [
+    ["enabled", "b", false],
+    ["gain", "n", 0.05],
+    ["max_offset", "n", 25.0],
+    ["decay", "n", 0.95],
+    ["activation_distance", "n", 100.0],
+    ["dead_zone", "n", 1.0],
+    ["hold_ms", "n", 10.0],
+    ["cooldown_ms", "n", 250.0],
+    ["y_suppress_enabled", "b", true],
+    ["y_suppress_min", "n", 0.5],
+    ["y_suppress_max", "n", 2.0],
+  ]],
+  ["humanize", [
+    ["enabled", "b", false],
+    ["smooth_factor", "n", 0.0],
+    ["overshoot", "n", 0.0],
+    ["brake_distance", "n", 0.0],
+    ["noise_sigma", "n", 0.2],
+    ["delay_ms", "n", 0.0],
+    ["delay_random_ms", "n", 0.0],
+    ["speed_fluctuation_enabled", "b", false],
+    ["speed_fluctuation_start_speed", "n", 0.8],
+    ["speed_fluctuation_accel_ratio", "n", 0.2],
+    ["speed_fluctuation_decel_ratio", "n", 0.2],
+    ["speed_fluctuation_intensity", "n", 0.15],
+    ["accuracy_sim_enabled", "b", false],
+    ["accuracy_sim_perfect_rate", "n", 90.0],
+    ["accuracy_sim_offset_strength", "n", 0.5],
+    ["accuracy_sim_direction", "i", 0],
+  ]],
+  ["anti_overshoot", [
+    ["enabled", "b", false],
+    ["outer_distance", "n", 20.0],
+    ["outer_strength", "n", 50.0],
+    ["inner_distance", "n", 10.0],
+    ["inner_strength", "n", 90.0],
+    ["outer_frames", "i", 11],
+    ["inner_frames", "i", 6],
+    ["reset_cooldown_ms", "n", 500.0],
+  ]],
+  ["speed_adaptive_kp", [
+    ["enabled", "b", false],
+    ["move_mult", "n", 1.5],
+    ["static_mult", "n", 0.8],
+    ["threshold", "n", 3.0],
+    ["frames", "i", 5],
+  ]],
+  ["global_wave", [
+    ["enabled", "b", false],
+    ["amp_x", "n", 0.1],
+    ["amp_y", "n", 0.1],
+    ["freq", "n", 1.0],
+    ["smooth", "n", 0.5],
+  ]],
+  ["vc", [
+    ["enabled", "b", true],
+    ["no_target", "b", false],
+    ["strength", "n", 1.0],
+    ["horiz", "n", 0.0],
+    ["delay_ms", "n", 0.0],
+    ["max_down_distance", "n", 0.0],
+    ["y_suppress_enabled", "b", false],
+    ["y_suppress_strength", "n", 0.0],
+    ["ramp1_enabled", "b", false],
+    ["ramp1_duration_ms", "n", 1300.0],
+    ["ramp1_start", "n", 1.4],
+    ["ramp1_middle", "n", 1.6],
+    ["ramp1_end", "n", 0.01],
+    ["ramp2_enabled", "b", false],
+    ["ramp2_duration_ms", "n", 2000.0],
+    ["ramp2_start", "n", 1.0],
+    ["ramp2_middle", "n", 0.5],
+    ["ramp2_end", "n", 0.1],
+    ["ramp3_enabled", "b", false],
+    ["ramp3_duration_ms", "n", 2000.0],
+    ["ramp3_start", "n", 1.0],
+    ["ramp3_middle", "n", 0.5],
+    ["ramp3_end", "n", 0.1],
+  ]],
+  ["trigger", [
+    ["enabled", "b", false],
+    ["key1", "key", 4],
+    ["key2", "key", 0],
+    ["key3", "key", 0],
+    ["with_aim", "b", true],
+    ["aim_confidence", "n", 0.4],
+    ["confidence", "n", 0.4],
+    ["dist_threshold", "n", 50.0],
+    ["stability_frames", "i", 0],
+    ["crosshair_check", "b", false],
+    ["fire_delay", "n", 10.0],
+    ["fire_random", "n", 1.0],
+    ["first_delay_min", "n", 20.0],
+    ["first_delay_max", "n", 30.0],
+    ["rifle_mode", "b", true],
+    ["rifle_interval", "n", 50.0],
+    ["click_count", "i", 50],
+    ["click_key", "key", 1],
+    ["press_duration", "n", 50.0],
+    ["recoil_enabled", "b", true],
+    ["y_offset", "n", 0.8],
+    ["status_log", "b", false],
+  ]],
+  ["trigger2", [
+    ["enabled", "b", false],
+    ["key1", "key", 16],
+    ["key2", "key", 0],
+    ["fire_button", "key", 1],
+    ["with_aim", "b", true],
+    ["with_crosshair", "b", false],
+    ["with_simple_recoil", "b", false],
+    ["with_adv_recoil", "b", false],
+    ["confidence", "n", 0.5],
+    ["first_err", "n", 30.0],
+    ["first_delay", "n", 0.0],
+    ["fire_interval", "n", 1.0],
+    ["fire_random", "n", 0.0],
+    ["fire_count", "i", 1],
+    ["press_duration", "n", 50.0],
+    ["move_throttle_frames", "i", 2],
+    ["precision_enabled", "b", false],
+    ["precision_range", "n", 10.0],
+    ["precision_frames", "i", 5],
+    ["retarget_reset_ms", "n", 1000.0],
+    ["lite_mode", "b", false],
+    ["stop_detect_enabled", "b", false],
+    ["stop_detect_color_id", "i", 2],
+    ["stop_detect_tolerance", "n", 60.0],
+    ["stop_detect_range", "n", 80.0],
+    ["stop_detect_interval", "i", 10],
+  ]],
+  ["recoil_bb", [
+    ["preset", "i", 1],
+    ["global_vert", "n", 0.5],
+    ["global_horiz", "n", 0.5],
+    ["delay_ms", "n", 50.0],
+    ["smooth", "n", 0.9],
+    ["distance_limit", "n", 80.0],
+    ["no_target_always", "b", false],
+    ["drift_enabled", "b", false],
+    ["drift_amplitude", "n", 0.2],
+    ["drift_freq", "n", 1.0],
+    ["y_suppress_enabled", "b", false],
+    ["y_suppress_strength", "n", 0.0],
+    ["max_down_distance", "n", 0.0],
+    ["adv_mult", "n", 0.9],
+  ]],
+  ["selector", [
+    ["lock_hold_ms", "n", 0.0],
+    ["switch_hysteresis", "n", 0.5],
+    ["switch_cooldown_ms", "n", 600.0],
+    ["priority_scoring", "b", false],
+    ["weight_dist", "n", 1.0],
+    ["weight_size", "n", 0.3],
+    ["stickiness", "n", 1.0],
+    ["switch_threshold_px", "n", 60.0],
+    ["head_body_stable", "b", false],
+    ["hb_body1", "i", 0],
+    ["hb_head1", "i", 1],
+    ["hb_body2", "i", -1],
+    ["hb_head2", "i", -1],
+  ]],
+];
+
+// 每个分区管哪些模块（「恢复本页默认值」按这张表取值）。
+const BB_SECTION_MODULES = {
+  "assist-section-recoil": ["recoil_bb", "vc"],
+  "assist-section-trigger": ["trigger", "trigger2"],
+  "assist-section-lead": ["lead1", "lead2"],
+  "assist-section-humanize": ["humanize", "anti_overshoot", "speed_adaptive_kp", "global_wave"],
+  "assist-section-selector": ["selector"],
+};
+
 const MOVEMENT_CONTROL_DEFAULTS = {
   sens: 1,
   controller: CONTROLLER_DEFAULTS,
 };
 const RECOIL_DEFAULTS = {
+  // 压枪面板只剩「开关 + 触发键」这一组共用参数（算法换 BB 三段查表，
+  // 见 bb-port/06 与业主 2026-09-24 裁定）；老速率模型的 strength/speed/
+  // humanize_* 仍在 Core 与 JSON 里保留（已装机设备的旧值不丢），但面板不再暴露。
   enabled: false,
-  only_when_target_visible: true,
-  target_lost_release_ms: 200,
   hotkey: "left",
   hotkey2: "",
   hotkey_mode: "any",
-  trigger_delay_enabled: false,
-  trigger_delay_ms: 120,
-  strength: 0,
-  speed: 1,
-  humanize_enabled: true,
-  humanize_curve_strength: 0.45,
-  humanize_jitter_px: 0.25,
-  humanize_jitter_frequency: 8,
-};
-const AUTO_TRIGGER_DEFAULTS = {
-  enabled: false,
-  activation_hotkey: "auto",
-  profiles: [],
-  enter_delay_min_ms: 0,
-  enter_delay_max_ms: 0,
-  cooldown_min_ms: 120,
-  cooldown_max_ms: 220,
-  spray_release_delay_ms: 500,
-  fire_mode: "tap",
-  continuous_mode: false,
-  spray_recoil_assist: false,
-};
-const RAPID_FIRE_DEFAULTS = {
-  enabled: false,
-  hotkey: "forward",
-  press_base_ms: 170,
-  interval_base_ms: 13,
 };
 const HOTKEY_GUARD_DEFAULTS = {
   enabled: false,
@@ -6146,7 +6671,6 @@ const state = {
   modelPresetBindingOpenId: "",
   modelClassNamesEditModelId: "",
   aimClassRenderSignature: "",
-  autoTriggerClassRenderSignature: "",
   updatePlan: null,
   updateStatus: null,
   updateStatusTimer: null,
@@ -8487,414 +9011,6 @@ function collectAimProfiles() {
   return profiles;
 }
 
-function defaultAutoTriggerProfile() {
-  return {
-    hotkey: AUTO_TRIGGER_DEFAULTS.activation_hotkey,
-    class_filter_mask: currentModelClassMask(),
-    fire_mode: AUTO_TRIGGER_DEFAULTS.fire_mode,
-    enter_delay_min_ms: AUTO_TRIGGER_DEFAULTS.enter_delay_min_ms,
-    enter_delay_max_ms: AUTO_TRIGGER_DEFAULTS.enter_delay_max_ms,
-    cooldown_min_ms: AUTO_TRIGGER_DEFAULTS.cooldown_min_ms,
-    cooldown_max_ms: AUTO_TRIGGER_DEFAULTS.cooldown_max_ms,
-    spray_release_delay_ms: AUTO_TRIGGER_DEFAULTS.spray_release_delay_ms,
-    continuous_mode: AUTO_TRIGGER_DEFAULTS.continuous_mode,
-    spray_recoil_assist: AUTO_TRIGGER_DEFAULTS.spray_recoil_assist,
-  };
-}
-
-function autoTriggerProfileTimingValue(profile, key, fallback, min, max) {
-  const value = Number(profile && profile[key] !== undefined ? profile[key] : fallback);
-  return Math.round(clamp(Number.isFinite(value) ? value : fallback, min, max));
-}
-
-function normalizeAutoTriggerFireMode(mode) {
-  return AUTO_TRIGGER_FIRE_MODES.includes(mode) ? mode : AUTO_TRIGGER_DEFAULTS.fire_mode;
-}
-
-function autoTriggerProfilesFromConfig(autoTrigger) {
-  if (!autoTrigger) {
-    return [];
-  }
-  if (Object.prototype.hasOwnProperty.call(autoTrigger, "enabled") && autoTrigger.enabled !== true) {
-    return [];
-  }
-  if (Array.isArray(autoTrigger.profiles)) {
-    return autoTrigger.profiles.map((profile) => ({
-      ...defaultAutoTriggerProfile(),
-      enter_delay_min_ms: autoTrigger.enter_delay_min_ms ?? AUTO_TRIGGER_DEFAULTS.enter_delay_min_ms,
-      enter_delay_max_ms: autoTrigger.enter_delay_max_ms ?? AUTO_TRIGGER_DEFAULTS.enter_delay_max_ms,
-      cooldown_min_ms: autoTrigger.cooldown_min_ms ?? AUTO_TRIGGER_DEFAULTS.cooldown_min_ms,
-      cooldown_max_ms: autoTrigger.cooldown_max_ms ?? AUTO_TRIGGER_DEFAULTS.cooldown_max_ms,
-      spray_release_delay_ms:
-        autoTrigger.spray_release_delay_ms ?? AUTO_TRIGGER_DEFAULTS.spray_release_delay_ms,
-      fire_mode: autoTrigger.fire_mode ?? AUTO_TRIGGER_DEFAULTS.fire_mode,
-      continuous_mode: autoTrigger.continuous_mode ?? AUTO_TRIGGER_DEFAULTS.continuous_mode,
-      spray_recoil_assist: autoTrigger.spray_recoil_assist ?? AUTO_TRIGGER_DEFAULTS.spray_recoil_assist,
-      ...profile,
-    }));
-  }
-  const legacyHotkey = autoTrigger.activation_hotkey
-    ? autoTrigger.activation_hotkey
-    : AUTO_TRIGGER_DEFAULTS.activation_hotkey;
-  return [{
-    ...defaultAutoTriggerProfile(),
-    hotkey: AUTO_TRIGGER_HOTKEYS.includes(legacyHotkey) ? legacyHotkey : AUTO_TRIGGER_DEFAULTS.activation_hotkey,
-  }];
-}
-
-function autoTriggerProfileTemplate(profile, index) {
-  const classCount = currentModelClassCount();
-  const classNames = currentModelClassNames();
-  const mask = classMaskFromProfile(profile);
-  const enterDelayMin = autoTriggerProfileTimingValue(
-    profile,
-    "enter_delay_min_ms",
-    AUTO_TRIGGER_DEFAULTS.enter_delay_min_ms,
-    0,
-    500
-  );
-  const enterDelayMax = Math.max(
-    enterDelayMin,
-    autoTriggerProfileTimingValue(profile, "enter_delay_max_ms", AUTO_TRIGGER_DEFAULTS.enter_delay_max_ms, 0, 500)
-  );
-  const cooldownMin = autoTriggerProfileTimingValue(
-    profile,
-    "cooldown_min_ms",
-    AUTO_TRIGGER_DEFAULTS.cooldown_min_ms,
-    50,
-    3000
-  );
-  const cooldownMax = Math.max(
-    cooldownMin,
-    autoTriggerProfileTimingValue(profile, "cooldown_max_ms", AUTO_TRIGGER_DEFAULTS.cooldown_max_ms, 50, 3000)
-  );
-  const fireMode = normalizeAutoTriggerFireMode(profile && profile.fire_mode);
-  const sprayReleaseDelayMs = autoTriggerProfileTimingValue(
-    profile,
-    "spray_release_delay_ms",
-    AUTO_TRIGGER_DEFAULTS.spray_release_delay_ms,
-    0,
-    5000
-  );
-  const continuousChecked = profile && profile.continuous_mode ? "checked" : "";
-  const sprayRecoilAssistChecked = profile && profile.spray_recoil_assist ? "checked" : "";
-  const classPickers = Array.from({ length: classCount }, (_, classId) => {
-    const checked = mask & (1 << classId) ? "checked" : "";
-    const className = classDisplayName(classId, classNames);
-    const classLabel = `${classId} ${className}`;
-    return `
-      <label class="class-chip" title="${escapeAttr(classLabel)}">
-        <input class="aim-profile-class auto-trigger-profile-class" type="checkbox" data-class-id="${classId}" ${checked}>
-        <span class="class-chip-name">${escapeHtml(classLabel)}</span>
-      </label>
-    `;
-  }).join("");
-
-  return `
-    <div class="aim-profile-head auto-trigger-profile-head">
-      <strong>开火配置 ${index + 1}</strong>
-      <button class="mini-danger" type="button" data-remove-auto-trigger-profile>删除</button>
-    </div>
-    <div class="form-subgrid">
-      <label class="field">按住热键
-        <select class="auto-trigger-profile-hotkey"></select>
-      </label>
-      <label class="field">开火模式
-        <select class="auto-trigger-profile-fire-mode">
-          <option value="tap" ${fireMode === "tap" ? "selected" : ""}>点射</option>
-          <option value="spray" ${fireMode === "spray" ? "selected" : ""}>扫射</option>
-        </select>
-      </label>
-      <div class="class-picker span-all">
-        <div class="class-picker-head">
-          <span>目标类别 · ${classCount} 类</span>
-          <button class="mini-button" type="button" data-select-all-classes>全选</button>
-        </div>
-        <div class="class-chip-grid">
-          ${classPickers}
-        </div>
-      </div>
-      <div class="field-grid compact auto-trigger-profile-timing-grid span-all">
-        <div class="slider-field">
-          <div class="label-row">
-            <label>进入延迟下限</label>
-            <input class="auto-trigger-profile-enter-delay-min-ms value-input" type="number" min="0" max="500" step="1" autocomplete="off" value="${enterDelayMin}">
-          </div>
-          <input class="auto-trigger-profile-enter-delay-min-ms-range" type="range" min="0" max="500" step="1" value="${enterDelayMin}">
-          <span class="field-hint">准星进入触发范围后，最少等待多少毫秒再按左键。</span>
-        </div>
-        <div class="slider-field">
-          <div class="label-row">
-            <label>进入延迟上限</label>
-            <input class="auto-trigger-profile-enter-delay-max-ms value-input" type="number" min="0" max="500" step="1" autocomplete="off" value="${enterDelayMax}">
-          </div>
-          <input class="auto-trigger-profile-enter-delay-max-ms-range" type="range" min="0" max="500" step="1" value="${enterDelayMax}">
-          <span class="field-hint">准星进入触发范围后，最多随机等待多少毫秒再按左键。</span>
-        </div>
-        <div class="slider-field auto-trigger-profile-cooldown-field">
-          <div class="label-row">
-            <label>冷却下限</label>
-            <input class="auto-trigger-profile-cooldown-min-ms value-input" type="number" min="50" max="3000" step="1" autocomplete="off" value="${cooldownMin}">
-          </div>
-          <input class="auto-trigger-profile-cooldown-min-ms-range" type="range" min="50" max="3000" step="1" value="${cooldownMin}">
-          <span class="field-hint">两次自动开火之间的最短间隔，数值越低反应越快。</span>
-        </div>
-        <div class="slider-field auto-trigger-profile-cooldown-field">
-          <div class="label-row">
-            <label>冷却上限</label>
-            <input class="auto-trigger-profile-cooldown-max-ms value-input" type="number" min="50" max="3000" step="1" autocomplete="off" value="${cooldownMax}">
-          </div>
-          <input class="auto-trigger-profile-cooldown-max-ms-range" type="range" min="50" max="3000" step="1" value="${cooldownMax}">
-          <span class="field-hint">两次自动开火之间的最长随机间隔，数值越高越不固定。</span>
-        </div>
-      </div>
-      <div class="check-field span-all auto-trigger-profile-continuous-field">
-        <label class="check-line"><input class="auto-trigger-profile-continuous-mode" type="checkbox" ${continuousChecked}> 连续点射</label>
-        <span class="field-hint">目标持续在触发范围内时，会按本配置的冷却间隔重复开火。</span>
-      </div>
-      <div class="check-field span-all auto-trigger-profile-spray-recoil-field">
-        <label class="check-line"><input class="auto-trigger-profile-spray-recoil-assist" type="checkbox" ${sprayRecoilAssistChecked}> 自动扳机扫射带压枪</label>
-        <span class="field-hint">开启后，本配置扫射按住左键期间也会触发压枪。</span>
-      </div>
-      <div class="slider-field span-all auto-trigger-profile-spray-release-field">
-        <div class="label-row">
-          <label>扫射释放延迟</label>
-          <input class="auto-trigger-profile-spray-release-delay-ms value-input" type="number" min="0" max="5000" step="1" autocomplete="off" value="${sprayReleaseDelayMs}">
-        </div>
-        <input class="auto-trigger-profile-spray-release-delay-ms-range" type="range" min="0" max="5000" step="1" value="${sprayReleaseDelayMs}">
-        <span class="field-hint">扫射按住左键后，准星短暂离开目标时等待多久再松开。</span>
-      </div>
-    </div>
-  `;
-}
-
-function renumberAutoTriggerProfiles() {
-  document.querySelectorAll(".auto-trigger-profile-card").forEach((card, index) => {
-    const title = card.querySelector(".auto-trigger-profile-head strong");
-    if (title) {
-      title.textContent = `开火配置 ${index + 1}`;
-    }
-  });
-}
-
-function updateAutoTriggerProfileModeVisibility(card) {
-  const mode = normalizeAutoTriggerFireMode(card.querySelector(".auto-trigger-profile-fire-mode")?.value);
-  const tapMode = mode === "tap";
-  card.querySelectorAll(".auto-trigger-profile-cooldown-field").forEach((field) => {
-    field.hidden = !tapMode;
-  });
-  const continuousField = card.querySelector(".auto-trigger-profile-continuous-field");
-  if (continuousField) {
-    continuousField.hidden = !tapMode;
-  }
-  const sprayRecoilField = card.querySelector(".auto-trigger-profile-spray-recoil-field");
-  if (sprayRecoilField) {
-    sprayRecoilField.hidden = tapMode;
-  }
-  const sprayReleaseField = card.querySelector(".auto-trigger-profile-spray-release-field");
-  if (sprayReleaseField) {
-    sprayReleaseField.hidden = tapMode;
-  }
-}
-
-function bindAutoTriggerProfileCard(card, profile) {
-  const hotkeySelect = card.querySelector(".auto-trigger-profile-hotkey");
-  fillOptions(hotkeySelect, AUTO_TRIGGER_HOTKEYS);
-  hotkeySelect.value = profile && AUTO_TRIGGER_HOTKEYS.includes(profile.hotkey)
-    ? profile.hotkey
-    : AUTO_TRIGGER_DEFAULTS.activation_hotkey;
-  hotkeySelect.addEventListener("change", () => requestConfigApply(80));
-
-  const fireModeSelect = card.querySelector(".auto-trigger-profile-fire-mode");
-  if (fireModeSelect) {
-    fireModeSelect.value = normalizeAutoTriggerFireMode(profile && profile.fire_mode);
-    fireModeSelect.addEventListener("change", () => {
-      updateAutoTriggerProfileModeVisibility(card);
-      requestConfigApply(80);
-    });
-  }
-
-  bindProfileNumberRange(
-    card,
-    ".auto-trigger-profile-enter-delay-min-ms",
-    ".auto-trigger-profile-enter-delay-min-ms-range",
-    AUTO_TRIGGER_DEFAULTS.enter_delay_min_ms,
-    0,
-    500,
-    0
-  );
-  bindProfileNumberRange(
-    card,
-    ".auto-trigger-profile-enter-delay-max-ms",
-    ".auto-trigger-profile-enter-delay-max-ms-range",
-    AUTO_TRIGGER_DEFAULTS.enter_delay_max_ms,
-    0,
-    500,
-    0
-  );
-  bindProfileNumberRange(
-    card,
-    ".auto-trigger-profile-cooldown-min-ms",
-    ".auto-trigger-profile-cooldown-min-ms-range",
-    AUTO_TRIGGER_DEFAULTS.cooldown_min_ms,
-    50,
-    3000,
-    0
-  );
-  bindProfileNumberRange(
-    card,
-    ".auto-trigger-profile-cooldown-max-ms",
-    ".auto-trigger-profile-cooldown-max-ms-range",
-    AUTO_TRIGGER_DEFAULTS.cooldown_max_ms,
-    50,
-    3000,
-    0
-  );
-  bindProfileNumberRange(
-    card,
-    ".auto-trigger-profile-spray-release-delay-ms",
-    ".auto-trigger-profile-spray-release-delay-ms-range",
-    AUTO_TRIGGER_DEFAULTS.spray_release_delay_ms,
-    0,
-    5000,
-    0
-  );
-
-  card.querySelectorAll(".auto-trigger-profile-class").forEach((checkbox) => {
-    checkbox.addEventListener("change", () => {
-      updateClassToggleButton(card);
-      requestConfigApply(80);
-    });
-  });
-
-  card.querySelector("[data-remove-auto-trigger-profile]").addEventListener("click", () => {
-    card.remove();
-    renumberAutoTriggerProfiles();
-    requestConfigApply(80);
-  });
-
-  card.querySelector("[data-select-all-classes]").addEventListener("click", () => {
-    const checkboxes = Array.from(card.querySelectorAll(".auto-trigger-profile-class"));
-    const shouldCheck = !checkboxes.every((checkbox) => checkbox.checked);
-    checkboxes.forEach((checkbox) => {
-      checkbox.checked = shouldCheck;
-    });
-    updateClassToggleButton(card);
-    requestConfigApply(80);
-  });
-  const continuousMode = card.querySelector(".auto-trigger-profile-continuous-mode");
-  if (continuousMode) {
-    continuousMode.addEventListener("change", () => requestConfigApply(80));
-  }
-  const sprayRecoilAssist = card.querySelector(".auto-trigger-profile-spray-recoil-assist");
-  if (sprayRecoilAssist) {
-    sprayRecoilAssist.addEventListener("change", () => requestConfigApply(80));
-  }
-  updateAutoTriggerProfileModeVisibility(card);
-  updateClassToggleButton(card);
-}
-
-function addAutoTriggerProfileCard(profile = {}, emitChange = true) {
-  const editor = $("autoTriggerProfilesEditor");
-  if (!editor) {
-    return;
-  }
-  const index = editor.querySelectorAll(".auto-trigger-profile-card").length;
-  const card = document.createElement("div");
-  card.className = "aim-profile-card auto-trigger-profile-card";
-  card.innerHTML = autoTriggerProfileTemplate(profile, index);
-  editor.appendChild(card);
-  bindAutoTriggerProfileCard(card, profile);
-  if (emitChange && state.configReady) {
-    requestConfigApply(80);
-  }
-}
-
-function renderAutoTriggerProfiles(autoTrigger) {
-  const editor = $("autoTriggerProfilesEditor");
-  if (!editor) {
-    return;
-  }
-  editor.innerHTML = "";
-  autoTriggerProfilesFromConfig(autoTrigger).forEach((profile) => addAutoTriggerProfileCard(profile, false));
-  state.autoTriggerClassRenderSignature = currentModelClassRenderSignature();
-}
-
-function collectAutoTriggerProfileInt(card, selector, fallback, min, max) {
-  const field = card.querySelector(selector);
-  const value = Number(field ? field.value : fallback);
-  return Math.round(clamp(Number.isFinite(value) ? value : fallback, min, max));
-}
-
-function collectAutoTriggerProfiles() {
-  const editor = $("autoTriggerProfilesEditor");
-  if (!editor) {
-    return [];
-  }
-  return Array.from(editor.querySelectorAll(".auto-trigger-profile-card")).map((card) => {
-    let mask = 0;
-    card.querySelectorAll(".auto-trigger-profile-class").forEach((checkbox) => {
-      if (checkbox.checked) {
-        mask |= 1 << Number(checkbox.dataset.classId);
-      }
-    });
-    const enterDelayMin = collectAutoTriggerProfileInt(
-      card,
-      ".auto-trigger-profile-enter-delay-min-ms",
-      AUTO_TRIGGER_DEFAULTS.enter_delay_min_ms,
-      0,
-      500
-    );
-    const enterDelayMax = Math.max(
-      enterDelayMin,
-      collectAutoTriggerProfileInt(
-        card,
-        ".auto-trigger-profile-enter-delay-max-ms",
-        AUTO_TRIGGER_DEFAULTS.enter_delay_max_ms,
-        0,
-        500
-      )
-    );
-    const cooldownMin = collectAutoTriggerProfileInt(
-      card,
-      ".auto-trigger-profile-cooldown-min-ms",
-      AUTO_TRIGGER_DEFAULTS.cooldown_min_ms,
-      50,
-      3000
-    );
-    const cooldownMax = Math.max(
-      cooldownMin,
-      collectAutoTriggerProfileInt(
-        card,
-        ".auto-trigger-profile-cooldown-max-ms",
-        AUTO_TRIGGER_DEFAULTS.cooldown_max_ms,
-        50,
-        3000
-      )
-    );
-    const fireMode = normalizeAutoTriggerFireMode(card.querySelector(".auto-trigger-profile-fire-mode")?.value);
-    const sprayReleaseDelayMs = collectAutoTriggerProfileInt(
-      card,
-      ".auto-trigger-profile-spray-release-delay-ms",
-      AUTO_TRIGGER_DEFAULTS.spray_release_delay_ms,
-      0,
-      5000
-    );
-    return {
-      hotkey: card.querySelector(".auto-trigger-profile-hotkey").value || AUTO_TRIGGER_DEFAULTS.activation_hotkey,
-      class_filter_mask: mask & currentModelClassMask(),
-      fire_mode: fireMode,
-      enter_delay_min_ms: enterDelayMin,
-      enter_delay_max_ms: enterDelayMax,
-      cooldown_min_ms: cooldownMin,
-      cooldown_max_ms: cooldownMax,
-      spray_release_delay_ms: sprayReleaseDelayMs,
-      continuous_mode: Boolean(card.querySelector(".auto-trigger-profile-continuous-mode")?.checked),
-      spray_recoil_assist: Boolean(card.querySelector(".auto-trigger-profile-spray-recoil-assist")?.checked),
-    };
-  });
-}
-
 function renderFanControlStatus(fanControl) {
   const fan = fanControl || {};
   const controlAvailable = !!fan.control_available;
@@ -8928,6 +9044,147 @@ function renderFanControlStatus(fanControl) {
   setText("fanErrorValue", fan.last_error || "正常");
 }
 
+// ---------------------------------------------------------------------------
+// BB 模块读写（表驱动，见 BB_CTRL_MODULES）
+// 老规矩：setCheckbox / setValue / getCheckbox / getNumber 都有 if (el) 兜底，
+// 元素缺失时读回默认值、写入静默跳过 —— 所以表和界面短暂不同步不会炸页面。
+// ---------------------------------------------------------------------------
+function bbCtrlId(prefix, field) {
+  return `${prefix}_${field}`;
+}
+
+function bbModule(prefix) {
+  const found = BB_CTRL_MODULES.find(([name]) => name === prefix);
+  return found ? found[1] : [];
+}
+
+function bbReadField(prefix, field, kind, fallback) {
+  const id = bbCtrlId(prefix, field);
+  if (kind === "b") {
+    return getCheckbox(id);
+  }
+  if (kind === "key") {
+    return getString(id);
+  }
+  return getNumber(id, fallback);
+}
+
+function bbWriteField(prefix, field, kind, value) {
+  const id = bbCtrlId(prefix, field);
+  if (kind === "b") {
+    setCheckbox(id, value);
+  } else {
+    setValue(id, value);
+  }
+}
+
+// 回填：Core 子对象 → 面板（缺字段补 Core 默认值，保证首次打开显示的就是实际值）
+function populateControllerModules(controller) {
+  const src = controller || {};
+  BB_CTRL_MODULES.forEach(([prefix, fields]) => {
+    fields.forEach(([field, kind, dflt]) => {
+      const id = bbCtrlId(prefix, field);
+      const value = Object.prototype.hasOwnProperty.call(src, id) ? src[id] : dflt;
+      bbWriteField(prefix, field, kind, value);
+    });
+  });
+}
+
+// 提交：面板 → body.ai.controller 的扁平键（后端按前缀收成 mouse 下的子对象）
+function collectControllerModules() {
+  const out = {};
+  BB_CTRL_MODULES.forEach(([prefix, fields]) => {
+    fields.forEach(([field, kind, dflt]) => {
+      out[bbCtrlId(prefix, field)] = bbReadField(prefix, field, kind, dflt);
+    });
+  });
+  return out;
+}
+
+// ---- 压枪三段查表：三预设数据放在本地模型，面板只显示当前预设那一组 ----
+// Core 存的是完整数组（preset_total_time_ms[3] / preset_vert[3][3] / preset_horiz[3][3]），
+// 面板按裁定「换枪就换预设、切预设只换下面这组数值」呈现 ⇒ 切预设时先把输入框那组
+// 写回镜像，再渲染新的一组；提交时整体发三个数组，避免"切一下就丢另外两套"。
+const RECOIL_BB_SEG_DEFAULTS = {
+  total: [1500, 1500, 1500],
+  vert: [[1.5, 1.5, 1.5], [1.5, 1.5, 1.5], [1.0, 1.3, 1.6]],
+  horiz: [[0, 0, 0], [-2, -2, -2], [0, 0, 0]],
+};
+const recoilBbPresetState = {
+  total: RECOIL_BB_SEG_DEFAULTS.total.slice(),
+  vert: RECOIL_BB_SEG_DEFAULTS.vert.map((row) => row.slice()),
+  horiz: RECOIL_BB_SEG_DEFAULTS.horiz.map((row) => row.slice()),
+  activeIndex: 0,
+};
+
+function recoilBbPresetIndexFromPanel() {
+  const raw = Number(getNumber("recoil_bb_preset", 1));
+  const index = Math.round(Number.isFinite(raw) ? raw : 1) - 1;
+  return Math.min(2, Math.max(0, index));
+}
+
+function recoilBbNumber(id, fallback) {
+  const value = Number(getNumber(id, fallback));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function pushRecoilBbInputsToPresetState() {
+  const i = recoilBbPresetState.activeIndex;
+  recoilBbPresetState.total[i] = recoilBbNumber("recoil_bb_seg_total", RECOIL_BB_SEG_DEFAULTS.total[i]);
+  for (let seg = 0; seg < 3; seg += 1) {
+    recoilBbPresetState.vert[i][seg] = recoilBbNumber(
+      `recoil_bb_seg_v${seg + 1}`, RECOIL_BB_SEG_DEFAULTS.vert[i][seg]);
+    recoilBbPresetState.horiz[i][seg] = recoilBbNumber(
+      `recoil_bb_seg_h${seg + 1}`, RECOIL_BB_SEG_DEFAULTS.horiz[i][seg]);
+  }
+}
+
+function renderRecoilBbPresetInputs() {
+  const i = recoilBbPresetState.activeIndex;
+  setValue("recoil_bb_seg_total", recoilBbPresetState.total[i]);
+  for (let seg = 0; seg < 3; seg += 1) {
+    setValue(`recoil_bb_seg_v${seg + 1}`, recoilBbPresetState.vert[i][seg]);
+    setValue(`recoil_bb_seg_h${seg + 1}`, recoilBbPresetState.horiz[i][seg]);
+  }
+}
+
+function populateRecoilBbPresets(controller) {
+  const src = controller || {};
+  const readVec = (key, fallback) => {
+    const v = src[key];
+    if (!Array.isArray(v) || v.length !== fallback.length || !v.every((x) => Number.isFinite(Number(x)))) {
+      return fallback.slice();
+    }
+    return v.map((x) => Number(x));
+  };
+  const readTable = (key, fallback) => {
+    const v = src[key];
+    const shaped = Array.isArray(v) && v.length === 3
+      && v.every((row) => Array.isArray(row) && row.length === 3
+        && row.every((x) => Number.isFinite(Number(x))));
+    if (!shaped) {
+      return fallback.map((row) => row.slice());
+    }
+    return v.map((row) => row.map((x) => Number(x)));
+  };
+  recoilBbPresetState.total = readVec("recoil_bb_preset_total_time_ms", RECOIL_BB_SEG_DEFAULTS.total);
+  recoilBbPresetState.vert = readTable("recoil_bb_preset_vert", RECOIL_BB_SEG_DEFAULTS.vert);
+  recoilBbPresetState.horiz = readTable("recoil_bb_preset_horiz", RECOIL_BB_SEG_DEFAULTS.horiz);
+  recoilBbPresetState.activeIndex = recoilBbPresetIndexFromPanel();
+  renderRecoilBbPresetInputs();
+}
+
+// 提交三段查表：当前预设的输入框收进镜像，再整体发出三预设数组
+function collectRecoilBbPresets() {
+  recoilBbPresetState.activeIndex = recoilBbPresetIndexFromPanel();
+  pushRecoilBbInputsToPresetState();
+  return {
+    recoil_bb_preset_total_time_ms: recoilBbPresetState.total.slice(),
+    recoil_bb_preset_vert: recoilBbPresetState.vert.map((row) => row.slice()),
+    recoil_bb_preset_horiz: recoilBbPresetState.horiz.map((row) => row.slice()),
+  };
+}
+
 function populateForm(config) {
   if (!config) {
     return;
@@ -8939,8 +9196,6 @@ function populateForm(config) {
   const ai = config.ai || {};
   const controller = ai.controller || {};
   const recoil = config.recoil || {};
-  const autoTrigger = config.auto_trigger || {};
-  const rapidFire = config.rapid_fire || {};
   const hotkeyGuard = config.hotkey_guard || {};
   const mouseOutput = config.mouse_output || {};
   const latency = config.latency || {};
@@ -8979,27 +9234,15 @@ function populateForm(config) {
   updateDynamicOffsetControlLimits({ clampValues: true });
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms ?? CONTROLLER_DEFAULTS.selector_lost_grace_ms);
 
+  // 压枪：面板只留一套（「新版替老版」）—— 总开关同时驱动 BB 三段查表引擎，
+  // 其余参数归「三段查表 / 水平漂移 / 垂直修正」三张卡片，由 BB_CTRL_MODULES 表驱动。
   setCheckbox("recoil_enabled", recoil.enabled ?? RECOIL_DEFAULTS.enabled);
-  setCheckbox("recoil_only_when_target_visible", recoil.only_when_target_visible ?? RECOIL_DEFAULTS.only_when_target_visible);
-  setValue("recoil_target_lost_release_ms", recoil.target_lost_release_ms ?? RECOIL_DEFAULTS.target_lost_release_ms);
   setValue("recoil_hotkey", recoil.hotkey ?? RECOIL_DEFAULTS.hotkey);
   setValue("recoil_hotkey2", recoil.hotkey2 ?? RECOIL_DEFAULTS.hotkey2);
   setValue("recoil_hotkey_mode", recoil.hotkey_mode ?? RECOIL_DEFAULTS.hotkey_mode);
-  setCheckbox("recoil_trigger_delay_enabled", recoil.trigger_delay_enabled ?? RECOIL_DEFAULTS.trigger_delay_enabled);
-  setValue("recoil_trigger_delay_ms", recoil.trigger_delay_ms ?? RECOIL_DEFAULTS.trigger_delay_ms);
-  setValue("recoil_strength", recoil.strength ?? RECOIL_DEFAULTS.strength);
-  setValue("recoil_speed", recoil.speed ?? RECOIL_DEFAULTS.speed);
-  setCheckbox("recoil_humanize_enabled", recoil.humanize_enabled ?? RECOIL_DEFAULTS.humanize_enabled);
-  setValue("recoil_humanize_curve_strength", recoil.humanize_curve_strength ?? RECOIL_DEFAULTS.humanize_curve_strength);
-  setValue("recoil_humanize_jitter_px", recoil.humanize_jitter_px ?? RECOIL_DEFAULTS.humanize_jitter_px);
-  setValue("recoil_humanize_jitter_frequency", recoil.humanize_jitter_frequency ?? RECOIL_DEFAULTS.humanize_jitter_frequency);
 
-  renderAutoTriggerProfiles(autoTrigger);
-
-  setCheckbox("rapid_fire_enabled", rapidFire.enabled ?? RAPID_FIRE_DEFAULTS.enabled);
-  setValue("rapid_fire_hotkey", rapidFire.hotkey ?? RAPID_FIRE_DEFAULTS.hotkey);
-  setValue("rapid_fire_press_base_ms", rapidFire.press_base_ms ?? RAPID_FIRE_DEFAULTS.press_base_ms);
-  setValue("rapid_fire_interval_base_ms", rapidFire.interval_base_ms ?? RAPID_FIRE_DEFAULTS.interval_base_ms);
+  populateControllerModules(controller);
+  populateRecoilBbPresets(controller);
 
   setValue("hailo_pipeline_depth", latency.hailo_pipeline_depth ?? 3);
 
@@ -9043,6 +9286,25 @@ function syncRangeFieldsForIds(ids) {
   if (idSet.has("capture_crop_size")) {
     syncCropSizePresetRange(getCropSize());
   }
+}
+
+// 新分区的数值输入不带进 NUMERIC_RANGE_LIMITS 手写表（一百多项，写两遍必错）：
+// 统一按 HTML 上已经写好的 min/max 注册夹取范围，只要声明了任意一侧就生效。
+function registerNumericLimitsFromMarkup() {
+  document.querySelectorAll("[data-config][type='number']").forEach((el) => {
+    if (!el.id || NUMERIC_RANGE_LIMITS[el.id]) {
+      return;
+    }
+    const low = parseFloat(el.getAttribute("min"));
+    const high = parseFloat(el.getAttribute("max"));
+    if (!Number.isFinite(low) && !Number.isFinite(high)) {
+      return;
+    }
+    NUMERIC_RANGE_LIMITS[el.id] = [
+      Number.isFinite(low) ? low : -Number.MAX_SAFE_INTEGER,
+      Number.isFinite(high) ? high : Number.MAX_SAFE_INTEGER,
+    ];
+  });
 }
 
 function resetFieldDefaults(fieldDefaults) {
@@ -9099,40 +9361,40 @@ function resetCurrentMovementSectionDefaults() {
   showToast("当前移动控制子页面已恢复默认值");
 }
 
+// 分区里不属于 BB_CTRL_MODULES 的字段（压枪触发键、拉枪曲线）单独列。
+const ASSIST_SECTION_EXTRA_DEFAULTS = {
+  "assist-section-recoil": () => ({
+    recoil_enabled: RECOIL_DEFAULTS.enabled,
+    recoil_hotkey: RECOIL_DEFAULTS.hotkey,
+    recoil_hotkey2: RECOIL_DEFAULTS.hotkey2,
+    recoil_hotkey_mode: RECOIL_DEFAULTS.hotkey_mode,
+  }),
+  "assist-section-lead": () => ({
+    controller_pull_curve_enabled: CONTROLLER_DEFAULTS.pull_curve_enabled,
+    controller_pull_curve_strength: CONTROLLER_DEFAULTS.pull_curve_strength,
+    controller_pull_curve_jitter_px: CONTROLLER_DEFAULTS.pull_curve_jitter_px,
+    controller_pull_curve_min_distance: CONTROLLER_DEFAULTS.pull_curve_min_distance,
+  }),
+};
+
 function assistDefaultsForSection(sectionId) {
-  const defaultsBySection = {
-    "assist-section-recoil": {
-      recoil_enabled: RECOIL_DEFAULTS.enabled,
-      recoil_only_when_target_visible: RECOIL_DEFAULTS.only_when_target_visible,
-      recoil_target_lost_release_ms: RECOIL_DEFAULTS.target_lost_release_ms,
-      recoil_hotkey: RECOIL_DEFAULTS.hotkey,
-      recoil_hotkey2: RECOIL_DEFAULTS.hotkey2,
-      recoil_hotkey_mode: RECOIL_DEFAULTS.hotkey_mode,
-      recoil_trigger_delay_enabled: RECOIL_DEFAULTS.trigger_delay_enabled,
-      recoil_trigger_delay_ms: RECOIL_DEFAULTS.trigger_delay_ms,
-      recoil_strength: RECOIL_DEFAULTS.strength,
-      recoil_speed: RECOIL_DEFAULTS.speed,
-      recoil_humanize_enabled: RECOIL_DEFAULTS.humanize_enabled,
-      recoil_humanize_curve_strength: RECOIL_DEFAULTS.humanize_curve_strength,
-      recoil_humanize_jitter_px: RECOIL_DEFAULTS.humanize_jitter_px,
-      recoil_humanize_jitter_frequency: RECOIL_DEFAULTS.humanize_jitter_frequency,
-    },
-    "assist-section-trigger": {},
-    "assist-section-rapid": {
-      rapid_fire_enabled: RAPID_FIRE_DEFAULTS.enabled,
-      rapid_fire_hotkey: RAPID_FIRE_DEFAULTS.hotkey,
-      rapid_fire_press_base_ms: RAPID_FIRE_DEFAULTS.press_base_ms,
-      rapid_fire_interval_base_ms: RAPID_FIRE_DEFAULTS.interval_base_ms,
-    },
-  };
-  return defaultsBySection[sectionId] || defaultsBySection["assist-section-recoil"];
+  const out = {};
+  (BB_SECTION_MODULES[sectionId] || []).forEach((prefix) => {
+    bbModule(prefix).forEach(([field, , dflt]) => {
+      out[bbCtrlId(prefix, field)] = dflt;
+    });
+  });
+  const extra = ASSIST_SECTION_EXTRA_DEFAULTS[sectionId];
+  return extra ? { ...out, ...extra() } : out;
 }
 
 function assistSectionLabel(sectionId) {
   const labels = {
     "assist-section-recoil": "压枪",
     "assist-section-trigger": "自动开火",
-    "assist-section-rapid": "连点",
+    "assist-section-lead": "提前量",
+    "assist-section-humanize": "拟人化",
+    "assist-section-selector": "选靶",
   };
   return labels[sectionId] || "当前页";
 }
@@ -9141,8 +9403,9 @@ function resetCurrentAssistSectionDefaults() {
   state.isPopulating = true;
   const sectionId = state.activeAssistSectionId || "assist-section-recoil";
   resetFieldDefaults(assistDefaultsForSection(sectionId));
-  if (sectionId === "assist-section-trigger") {
-    renderAutoTriggerProfiles({ enabled: false, profiles: [] });
+  if (sectionId === "assist-section-recoil") {
+    // 三段查表的三个预设是本地镜像，DOM 复位不会自动带回去 ⇒ 显式重建
+    populateRecoilBbPresets({});
   }
   state.isPopulating = false;
   updateAssistModuleCollapseStates();
@@ -9156,8 +9419,6 @@ function collectConfig() {
   const selectedModel = (state.config && state.config.model_id) ||
     (state.data && state.data.config && state.data.config.model_id) ||
     "";
-  const autoTriggerProfiles = collectAutoTriggerProfiles();
-  const primaryAutoTriggerProfile = autoTriggerProfiles[0] || defaultAutoTriggerProfile();
   return {
     model_id: selectedModel,
     video_detection_confidence: getNumber("video_detection_confidence", 0.25),
@@ -9216,49 +9477,23 @@ function collectConfig() {
         aim_reference_offset_x: getNumberInRange("controller_aim_reference_offset_x", CONTROLLER_DEFAULTS.aim_reference_offset_x),
         aim_reference_offset_y: getNumberInRange("controller_aim_reference_offset_y", CONTROLLER_DEFAULTS.aim_reference_offset_y),
         selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
+        // BB 对标模块（表驱动，见 BB_CTRL_MODULES）+ 压枪三段查表三数组
+        ...collectControllerModules(),
+        ...collectRecoilBbPresets(),
       },
     },
     recoil: {
       enabled: getCheckbox("recoil_enabled"),
-      only_when_target_visible: getCheckbox("recoil_only_when_target_visible"),
-      target_lost_release_ms: getNumber("recoil_target_lost_release_ms", RECOIL_DEFAULTS.target_lost_release_ms),
       hotkey: getString("recoil_hotkey") || RECOIL_DEFAULTS.hotkey,
       hotkey2: getString("recoil_hotkey2"),
       hotkey_mode: getString("recoil_hotkey_mode") || RECOIL_DEFAULTS.hotkey_mode,
-      trigger_delay_enabled: getCheckbox("recoil_trigger_delay_enabled"),
-      trigger_delay_ms: getNumber("recoil_trigger_delay_ms", RECOIL_DEFAULTS.trigger_delay_ms),
-      strength: getNumber("recoil_strength", RECOIL_DEFAULTS.strength),
-      speed: getNumber("recoil_speed", RECOIL_DEFAULTS.speed),
-      humanize_enabled: getCheckbox("recoil_humanize_enabled"),
-      humanize_curve_strength: getNumber("recoil_humanize_curve_strength", RECOIL_DEFAULTS.humanize_curve_strength),
-      humanize_jitter_px: getNumber("recoil_humanize_jitter_px", RECOIL_DEFAULTS.humanize_jitter_px),
-      humanize_jitter_frequency: getNumber("recoil_humanize_jitter_frequency", RECOIL_DEFAULTS.humanize_jitter_frequency),
-    },
-    auto_trigger: {
-      enabled: autoTriggerProfiles.length > 0,
-      activation_hotkey: primaryAutoTriggerProfile.hotkey || AUTO_TRIGGER_DEFAULTS.activation_hotkey,
-      profiles: autoTriggerProfiles,
-      fire_mode: primaryAutoTriggerProfile.fire_mode || AUTO_TRIGGER_DEFAULTS.fire_mode,
-      enter_delay_min_ms: primaryAutoTriggerProfile.enter_delay_min_ms,
-      enter_delay_max_ms: primaryAutoTriggerProfile.enter_delay_max_ms,
-      cooldown_min_ms: primaryAutoTriggerProfile.cooldown_min_ms,
-      cooldown_max_ms: primaryAutoTriggerProfile.cooldown_max_ms,
-      spray_release_delay_ms: primaryAutoTriggerProfile.spray_release_delay_ms,
-      continuous_mode: Boolean(primaryAutoTriggerProfile.continuous_mode),
-      spray_recoil_assist: Boolean(primaryAutoTriggerProfile.spray_recoil_assist),
-    },
-    rapid_fire: {
-      enabled: getCheckbox("rapid_fire_enabled"),
-      hotkey: getString("rapid_fire_hotkey") || RAPID_FIRE_DEFAULTS.hotkey,
-      press_base_ms: getNumber("rapid_fire_press_base_ms", RAPID_FIRE_DEFAULTS.press_base_ms),
-      interval_base_ms: getNumber("rapid_fire_interval_base_ms", RAPID_FIRE_DEFAULTS.interval_base_ms),
     },
   };
 }
 
 function hasInvalidConfigInput() {
   const fields = Array.from(document.querySelectorAll(
-    "[data-config][type='number'], .aim-profile-offset-x, .aim-profile-offset-y, .aim-profile-class-offset-x, .aim-profile-class-offset-y, .aim-profile-sensitivity, .aim-profile-fov-scale, .auto-trigger-profile-enter-delay-min-ms, .auto-trigger-profile-enter-delay-max-ms, .auto-trigger-profile-cooldown-min-ms, .auto-trigger-profile-cooldown-max-ms, .auto-trigger-profile-spray-release-delay-ms"
+    "[data-config][type='number'], .aim-profile-offset-x, .aim-profile-offset-y, .aim-profile-class-offset-x, .aim-profile-class-offset-y, .aim-profile-sensitivity, .aim-profile-fov-scale"
   ));
   return fields.some((field) => {
     const value = field.value.trim();
@@ -10786,13 +11021,6 @@ function renderModels(payload, selectedModelId) {
   if (state.configReady && state.aimClassRenderSignature && state.aimClassRenderSignature !== nextClassSignature) {
     renderAimProfiles(collectAimProfiles());
   }
-  if (
-    state.configReady &&
-    state.autoTriggerClassRenderSignature &&
-    state.autoTriggerClassRenderSignature !== nextClassSignature
-  ) {
-    renderAutoTriggerProfiles({ profiles: collectAutoTriggerProfiles() });
-  }
   updatePresetCleanupButton();
 }
 
@@ -12285,7 +12513,6 @@ function refreshClassNameDependentViews() {
     return;
   }
   renderAimProfiles(collectAimProfiles());
-  renderAutoTriggerProfiles({ profiles: collectAutoTriggerProfiles() });
 }
 
 async function saveModelClassNames(modelId, classNames) {
@@ -12819,6 +13046,13 @@ function bindEvents() {
     });
   }
 
+  // 三段查表：换预设时先把手上的那组收进本地镜像，再切组渲染（三套数值互不覆盖）
+  on("recoil_bb_preset", "change", () => {
+    pushRecoilBbInputsToPresetState();
+    recoilBbPresetState.activeIndex = recoilBbPresetIndexFromPanel();
+    renderRecoilBbPresetInputs();
+  });
+
   on("savePresetButton", "click", () => runUiAction(async () => {
     const name = $("presetName").value.trim();
     if (!name) {
@@ -13023,9 +13257,6 @@ function bindEvents() {
     });
   });
 
-  on("addAutoTriggerProfileButton", "click", () => {
-    addAutoTriggerProfileCard(defaultAutoTriggerProfile());
-  });
 }
 
 function handleLivePollError(error) {
@@ -13075,8 +13306,16 @@ async function main() {
   initThemeControls();
   fillOptions($("recoil_hotkey"), POINTER_HOTKEYS);
   fillOptions($("recoil_hotkey2"), OPTIONAL_POINTER_HOTKEYS);
-  fillOptions($("rapid_fire_hotkey"), RAPID_FIRE_HOTKEYS);
   fillOptions($("hotkey_guard_toggle_hotkey"), POINTER_HOTKEYS);
+  // 自动开火 / 自动开火 2.0 的按键下拉（长按键必须有键；「不使用」只在可选位出现）
+  fillOptions($("trigger_key1"), POINTER_HOTKEYS);
+  fillOptions($("trigger_key2"), OPTIONAL_POINTER_HOTKEYS);
+  fillOptions($("trigger_key3"), OPTIONAL_POINTER_HOTKEYS);
+  fillOptions($("trigger_click_key"), POINTER_HOTKEYS);
+  fillOptions($("trigger2_key1"), POINTER_HOTKEYS);
+  fillOptions($("trigger2_key2"), OPTIONAL_POINTER_HOTKEYS);
+  fillOptions($("trigger2_fire_button"), POINTER_HOTKEYS);
+  registerNumericLimitsFromMarkup();
   initPageNavigation();
   initControlSectionNavigation();
   initAssistSectionNavigation();
