@@ -1258,18 +1258,6 @@ html[data-theme="light"] .control-section-tab.is-active span {
   grid-column: 2;
 }
 
-#control-section-pull-curve .assist-grid,
-#control-section-continuous-lead .assist-grid {
-  grid-template-columns: minmax(280px, 460px);
-  align-items: start;
-}
-
-#control-section-pull-curve .module-tile,
-#control-section-continuous-lead .module-tile {
-  gap: 20px;
-  padding: 20px;
-}
-
 #control-section-pid .pid-control-block .module-title {
   padding: 0 2px;
 }
@@ -5273,12 +5261,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             <button id="controlSectionTabPid" class="control-section-tab is-active" type="button" data-control-section-target="control-section-pid" aria-selected="true">
               <span>01</span>PID
             </button>
-            <button id="controlSectionTabPullCurve" class="control-section-tab" type="button" data-control-section-target="control-section-pull-curve" aria-selected="false">
-              <span>02</span>拉枪曲线
-            </button>
-            <button id="controlSectionTabContinuousLead" class="control-section-tab" type="button" data-control-section-target="control-section-continuous-lead" aria-selected="false">
-              <span>03</span>持续提前量
-            </button>
           </nav>
 
           <div class="control-section-stack">
@@ -5306,36 +5288,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                   <div class="module-title"><strong>目标锁定</strong></div>
                   <div class="field-grid compact">
                     <label class="field"><span class="field-label">丢失宽限 ms</span><input id="controller_selector_lost_grace_ms" data-config type="number" step="1"><span class="field-hint">目标短暂丢失后继续保持锁定的毫秒数；越大越不容易丢锁，过大可能粘住错误目标。</span></label>
-                  </div>
-                </article>
-              </div>
-            </section>
-
-            <section id="control-section-pull-curve" class="control-section" data-control-section hidden>
-              <div class="assist-grid control-group-grid pull-curve-grid">
-                <article class="module-tile pull-curve-card">
-                  <div class="module-title"><strong>拉枪曲线</strong></div>
-                  <label class="check-line"><input id="controller_pull_curve_enabled" data-config type="checkbox"> 启用拉枪曲线</label>
-                  <div class="field-grid compact">
-                    <label class="field"><span class="field-label">曲线强度</span><input id="controller_pull_curve_strength" data-config type="number" min="0" max="2" step="0.01"><span class="field-hint">只在新目标远距离拉枪时加入轻微弧线；0 为关闭，越高弧线越明显。</span></label>
-                    <label class="field"><span class="field-label">随机抖动 px</span><input id="controller_pull_curve_jitter_px" data-config type="number" min="0" max="12" step="0.1"><span class="field-hint">只在拉枪曲线期间加入，0 为关闭，越高随机感越明显。</span></label>
-                    <label class="field"><span class="field-label">启用距离 px</span><input id="controller_pull_curve_min_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">目标离准星超过该距离才启用；锁定后自动停止。</span></label>
-                  </div>
-                </article>
-              </div>
-            </section>
-
-            <section id="control-section-continuous-lead" class="control-section" data-control-section hidden>
-              <div class="assist-grid control-group-grid continuous-lead-grid">
-                <article class="module-tile continuous-lead-card">
-                  <div class="module-title"><strong>持续提前量</strong></div>
-                  <label class="check-line"><input id="controller_continuous_lead_enabled" data-config type="checkbox"> 启用持续提前量</label>
-                  <div class="field-grid compact">
-                    <label class="field"><span class="field-label">进入距离 px</span><input id="controller_continuous_lead_enter_distance" data-config type="number" min="0" max="1280" step="1"><span class="field-hint">AI输出在X轴持续同方向累计超过该距离后，开始给瞄准点加入提前偏置。</span></label>
-                    <label class="field"><span class="field-label">提前量系数</span><input id="controller_continuous_lead_scale" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">偏置大小为目标框宽度乘该系数；0 为不产生偏置。</span></label>
-                    <label class="field"><span class="field-label">渐入时间 ms</span><input id="controller_continuous_lead_fade_in_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">达到进入距离后，提前量从0过渡到目标值的时间（预留字段，当前算法未使用）。</span></label>
-                    <label class="field"><span class="field-label">渐出时间 ms</span><input id="controller_continuous_lead_fade_out_ms" data-config type="number" min="0" max="1000" step="10"><span class="field-hint">停止同方向移动或反向时，提前量回到0的时间（预留字段，当前算法未使用）。</span></label>
-                    <label class="field"><span class="field-label">近距离禁用占比</span><input id="controller_continuous_lead_near_disable_ratio" data-config type="number" min="0" max="1" step="0.01"><span class="field-hint">目标框宽度占裁剪宽度达到该比例时，持续提前量直接关闭（预留字段，当前算法未使用）。</span></label>
                   </div>
                 </article>
               </div>
@@ -6024,11 +5976,6 @@ const NUMERIC_RANGE_LIMITS = {
   controller_pull_curve_strength: [0, 2],
   controller_pull_curve_jitter_px: [0, 12],
   controller_pull_curve_min_distance: [0, 1280],
-  controller_continuous_lead_enter_distance: [0, 1280],
-  controller_continuous_lead_scale: [0, 1],
-  controller_continuous_lead_fade_in_ms: [0, 1000],
-  controller_continuous_lead_fade_out_ms: [0, 1000],
-  controller_continuous_lead_near_disable_ratio: [0, 1],
   controller_aim_reference_offset_x: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_aim_reference_offset_y: [-AIM_REFERENCE_OFFSET_MAX, AIM_REFERENCE_OFFSET_MAX],
   controller_selector_lost_grace_ms: [0, 2000],
@@ -6075,12 +6022,6 @@ const CONTROLLER_DEFAULTS = {
   pull_curve_strength: 0.8,
   pull_curve_jitter_px: 3,
   pull_curve_min_distance: 80,
-  continuous_lead_enabled: false,
-  continuous_lead_enter_distance: 150,
-  continuous_lead_scale: 0.5,
-  continuous_lead_fade_in_ms: 300,
-  continuous_lead_fade_out_ms: 300,
-  continuous_lead_near_disable_ratio: 0.66,
   aim_reference_offset_x: 0,
   aim_reference_offset_y: 0,
   selector_lost_grace_ms: 78,
@@ -9033,15 +8974,6 @@ function populateForm(config) {
   setValue("controller_pull_curve_strength", controller.pull_curve_strength ?? CONTROLLER_DEFAULTS.pull_curve_strength);
   setValue("controller_pull_curve_jitter_px", controller.pull_curve_jitter_px ?? CONTROLLER_DEFAULTS.pull_curve_jitter_px);
   setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance ?? CONTROLLER_DEFAULTS.pull_curve_min_distance);
-  setCheckbox("controller_continuous_lead_enabled", controller.continuous_lead_enabled ?? CONTROLLER_DEFAULTS.continuous_lead_enabled);
-  setValue("controller_continuous_lead_enter_distance", controller.continuous_lead_enter_distance ?? CONTROLLER_DEFAULTS.continuous_lead_enter_distance);
-  setValue("controller_continuous_lead_scale", controller.continuous_lead_scale ?? CONTROLLER_DEFAULTS.continuous_lead_scale);
-  setValue("controller_continuous_lead_fade_in_ms", controller.continuous_lead_fade_in_ms ?? CONTROLLER_DEFAULTS.continuous_lead_fade_in_ms);
-  setValue("controller_continuous_lead_fade_out_ms", controller.continuous_lead_fade_out_ms ?? CONTROLLER_DEFAULTS.continuous_lead_fade_out_ms);
-  setValue(
-    "controller_continuous_lead_near_disable_ratio",
-    controller.continuous_lead_near_disable_ratio ?? CONTROLLER_DEFAULTS.continuous_lead_near_disable_ratio
-  );
   setValue("controller_aim_reference_offset_x", controller.aim_reference_offset_x ?? CONTROLLER_DEFAULTS.aim_reference_offset_x);
   setValue("controller_aim_reference_offset_y", controller.aim_reference_offset_y ?? CONTROLLER_DEFAULTS.aim_reference_offset_y);
   updateDynamicOffsetControlLimits({ clampValues: true });
@@ -9091,12 +9023,6 @@ function setMovementControlDefaultsToForm() {
   setValue("controller_pull_curve_strength", controller.pull_curve_strength);
   setValue("controller_pull_curve_jitter_px", controller.pull_curve_jitter_px);
   setValue("controller_pull_curve_min_distance", controller.pull_curve_min_distance);
-  setCheckbox("controller_continuous_lead_enabled", controller.continuous_lead_enabled);
-  setValue("controller_continuous_lead_enter_distance", controller.continuous_lead_enter_distance);
-  setValue("controller_continuous_lead_scale", controller.continuous_lead_scale);
-  setValue("controller_continuous_lead_fade_in_ms", controller.continuous_lead_fade_in_ms);
-  setValue("controller_continuous_lead_fade_out_ms", controller.continuous_lead_fade_out_ms);
-  setValue("controller_continuous_lead_near_disable_ratio", controller.continuous_lead_near_disable_ratio);
   setValue("controller_selector_lost_grace_ms", controller.selector_lost_grace_ms);
 }
 
@@ -9159,20 +9085,6 @@ function movementDefaultsForSection(sectionId) {
       controller_smooth: controller.smooth,
       controller_output_deadzone: controller.output_deadzone,
       controller_selector_lost_grace_ms: controller.selector_lost_grace_ms,
-    },
-    "control-section-pull-curve": {
-      controller_pull_curve_enabled: controller.pull_curve_enabled,
-      controller_pull_curve_strength: controller.pull_curve_strength,
-      controller_pull_curve_jitter_px: controller.pull_curve_jitter_px,
-      controller_pull_curve_min_distance: controller.pull_curve_min_distance,
-    },
-    "control-section-continuous-lead": {
-      controller_continuous_lead_enabled: controller.continuous_lead_enabled,
-      controller_continuous_lead_enter_distance: controller.continuous_lead_enter_distance,
-      controller_continuous_lead_scale: controller.continuous_lead_scale,
-      controller_continuous_lead_fade_in_ms: controller.continuous_lead_fade_in_ms,
-      controller_continuous_lead_fade_out_ms: controller.continuous_lead_fade_out_ms,
-      controller_continuous_lead_near_disable_ratio: controller.continuous_lead_near_disable_ratio,
     },
   };
   return defaultsBySection[sectionId] || defaultsBySection["control-section-pid"];
@@ -9301,15 +9213,6 @@ function collectConfig() {
         pull_curve_strength: getNumber("controller_pull_curve_strength", CONTROLLER_DEFAULTS.pull_curve_strength),
         pull_curve_jitter_px: getNumber("controller_pull_curve_jitter_px", CONTROLLER_DEFAULTS.pull_curve_jitter_px),
         pull_curve_min_distance: getNumber("controller_pull_curve_min_distance", CONTROLLER_DEFAULTS.pull_curve_min_distance),
-        continuous_lead_enabled: getCheckbox("controller_continuous_lead_enabled"),
-        continuous_lead_enter_distance: getNumber("controller_continuous_lead_enter_distance", CONTROLLER_DEFAULTS.continuous_lead_enter_distance),
-        continuous_lead_scale: getNumber("controller_continuous_lead_scale", CONTROLLER_DEFAULTS.continuous_lead_scale),
-        continuous_lead_fade_in_ms: getNumber("controller_continuous_lead_fade_in_ms", CONTROLLER_DEFAULTS.continuous_lead_fade_in_ms),
-        continuous_lead_fade_out_ms: getNumber("controller_continuous_lead_fade_out_ms", CONTROLLER_DEFAULTS.continuous_lead_fade_out_ms),
-        continuous_lead_near_disable_ratio: getNumber(
-          "controller_continuous_lead_near_disable_ratio",
-          CONTROLLER_DEFAULTS.continuous_lead_near_disable_ratio
-        ),
         aim_reference_offset_x: getNumberInRange("controller_aim_reference_offset_x", CONTROLLER_DEFAULTS.aim_reference_offset_x),
         aim_reference_offset_y: getNumberInRange("controller_aim_reference_offset_y", CONTROLLER_DEFAULTS.aim_reference_offset_y),
         selector_lost_grace_ms: getNumber("controller_selector_lost_grace_ms", CONTROLLER_DEFAULTS.selector_lost_grace_ms),
