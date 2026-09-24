@@ -21,6 +21,12 @@
 #include "mouse/ContinuousLead.hpp"
 #include "mouse/PersonalTrajectoryShader.hpp"
 #include "mouse/RecoilController.hpp"
+// BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 抗过冲 / 速度自适应 Kp / 全局正弦
+#include "mouse/LeadPredictor.hpp"
+#include "mouse/HumanizeShaper.hpp"
+#include "mouse/AntiOvershoot.hpp"
+#include "mouse/SpeedAdaptiveKp.hpp"
+#include "mouse/GlobalWave.hpp"
 namespace ttbox::core::aim {
 class AimThread {
 public:
@@ -126,6 +132,17 @@ private:
     ContinuousLead continuous_lead_;  // 持续提前量：AI 输出持续同向后附加 X 偏置（pull_curve 后、recoil 前注入 scaled_x）
     PersonalTrajectoryShader personal_shader_;  // 拟人化整形引擎：Fitts 时长+包络+垂直抖动（Gate 前生效）
     RecoilController recoil_;       // 压枪引擎：开火期间下压（pull_curve 后、deadzone 前注入 scaled_y）
+    // ---- BB 对标第二批（2026-09-24）----
+    // 全部构件默认 enabled=false ⇒ 不跑即零输出，输出链与本批加入前逐字节一致。
+    LeadPredictor lead_pred_;       // 两代提前量：X 轴偏移叠加进控制误差 control_x
+    HumanizeShaper humanize_shaper_; // BB 拟人化链（humanize.enabled 时替掉旧 personal_shader_）
+    AntiOvershoot anti_overshoot_;  // 抗过冲：recoil 后、deadzone 前对位移分段衰减
+    SpeedAdaptiveKp speed_kp_;      // 速度自适应 Kp：每帧 PID 前临时乘 kp
+    GlobalWave global_wave_;        // 全局正弦扰动：deadzone 前叠加
+    float lead_last_move_y_ = 0.0f; // 上一帧纵向输出（PID 域），供二代提前量的 Y 轴抑制
+    // 热键边沿（对齐 BB「按下 shuwuResetPid、松开完全重置」）。
+    // 下降沿 = 本帧未放行（含 mouse.enabled=false / 热键松开 / 挂起）。
+    bool last_injection_allowed_ = false;
     // 热键保护：toggle_hotkey 的**上升沿**翻转挂起状态。用上一周期的原始位图判边沿，
     // 与瞄准热键的"按住才生效"语义区分开（这里是按一下切换一次，按住不会连续翻转）。
     uint16_t last_raw_buttons_ = 0;         // 上一周期采样到的原始物理按键位图

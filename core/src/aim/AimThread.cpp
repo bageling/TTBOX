@@ -36,6 +36,14 @@ void AimThread::reset_runtime_state() {
     continuous_lead_.reset();  // 持续提前量累计/方向/渐入电平清零（destroy→init 重建一致）
     personal_shader_.reset();
     recoil_.reset();
+    // BB 对标第二批（2026-09-24）：新模块状态同样必须随世代清零，禁止 A 模型状态漏到 B
+    lead_pred_.reset();
+    humanize_shaper_.reset();
+    anti_overshoot_.reset();
+    speed_kp_.reset();
+    global_wave_.reset();
+    lead_last_move_y_ = 0.0f;
+    last_injection_allowed_ = false;
     display_smooth_x1_.reset();
     display_smooth_y1_.reset();
     display_smooth_x2_.reset();
@@ -89,6 +97,15 @@ void AimThread::loop() {
             ContinuousLeadConfig lead_cfg;  // 持续提前量配置（默认 enabled=false ⇒ 不动输出）
             PersonalTrajectoryConfig personal_traj_cfg;  // 拟人化整形引擎配置（默认 enabled=false，保持现有行为）
             RecoilConfig recoil_cfg;  // 压枪配置（默认 enabled=false，保持现有行为）
+            // ---- BB 对标第二批（2026-09-24）：默认全关 ⇒ 不跑即零输出，行为零变化 ----
+            RecoilBbConfig recoil_bb_cfg;           // 三段查表压枪引擎（默认关）
+            VerticalCorrectionConfig vc_cfg;        // 垂直修正 + 力度渐变
+            Lead1Config lead1_cfg;                  // 提前量一代（帧窗口投票）
+            Lead2Config lead2_cfg;                  // 提前量二代（积分累积）
+            HumanizeShaperConfig humanize_cfg;      // BB 拟人化整形链
+            AntiOvershootConfig anti_over_cfg;      // 抗过冲
+            SpeedAdaptiveKpConfig speed_kp_cfg;     // 速度自适应 Kp
+            GlobalWaveConfig global_wave_cfg;       // 全局正弦扰动
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
             LockConfirmConfig lock_confirm_cfg;  // 目标锁定确认（ENTER/HOLD，第2项）
@@ -122,6 +139,15 @@ void AimThread::loop() {
                 personal_traj_cfg = frame_profile->mouse.personal_trajectory;
                 lock_confirm_cfg = frame_profile->mouse.lock_confirm;
                 recoil_cfg = frame_profile->mouse.recoil;
+                // BB 对标第二批：每周期重读（改配置即时生效，无需重启）
+                recoil_bb_cfg = frame_profile->mouse.recoil_bb;
+                vc_cfg = frame_profile->mouse.vertical_correction;
+                lead1_cfg = frame_profile->mouse.lead1;
+                lead2_cfg = frame_profile->mouse.lead2;
+                humanize_cfg = frame_profile->mouse.humanize;
+                anti_over_cfg = frame_profile->mouse.anti_overshoot;
+                speed_kp_cfg = frame_profile->mouse.speed_adaptive_kp;
+                global_wave_cfg = frame_profile->mouse.global_wave;
                 pid_x_.configure(kp_x, kd_x, frame_profile->mouse.predict_x,
                                  frame_profile->mouse.rate_x, frame_profile->mouse.smooth_x);
                 pid_y_.configure(kp_y, kd_y, frame_profile->mouse.predict_y,
@@ -129,6 +155,22 @@ void AimThread::loop() {
             }
             const auto selected = selector_.select(task.detections, scfg,
                 static_cast<uint32_t>(task.timestamp_us / 1000ULL));
+            const uint32_t now_ms32 = static_cast<uint32_t>(task.timestamp_us / 1000ULL);
+            // ---- BB 速度自适应 Kp：动目标加大 Kp、静目标减小（默认关 ⇒ 乘子恒 1.0）----
+            // 放在 select 之后（需要本帧目标位置），且用 frame_profile 里的**原始 kp** 重算，
+            // 避免乘子逐帧自我叠乘（pid_x_.configure 只赋值，不累积）。
+            if (frame_profile && speed_kp_cfg.enabled) {
+                const float skp_mult = speed_kp_.multiplier(
+                    speed_kp_cfg, selected.valid,
+                    selected.valid ? (selected.box.x1 + selected.box.x2) * 0.5f : 0.0f,
+                    selected.valid ? (selected.box.y1 + selected.box.y2) * 0.5f : 0.0f);
+                if (skp_mult != 1.0f) {
+                    pid_x_.configure(kp_x * skp_mult, kd_x, frame_profile->mouse.predict_x,
+                                     frame_profile->mouse.rate_x, frame_profile->mouse.smooth_x);
+                    pid_y_.configure(kp_y * skp_mult, kd_y, frame_profile->mouse.predict_y,
+                                     frame_profile->mouse.rate_y, frame_profile->mouse.smooth_y);
+                }
+            }
             // ---- Hotkey Gate 输入解析（每周期独立计算，AI 链路照常运行）----
             // any 模式：主键或副键任一按下即触发；all 模式：两者同时按下。
             const uint16_t raw_buttons =
@@ -164,6 +206,28 @@ void AimThread::loop() {
                                     (frame_profile->mouse.enabled &&
                                     (frame_profile->mouse.aim_hotkey_mode == 1 ? (a && b) : (a || b)));
             }
+            // ---- BB 热键边沿（对齐「按下 shuwuResetPid、松开完全重置」）----
+            // 上升沿：热键刚按下 → 清 PID 在途量，本次瞄准从零起算（BB 的原生行为）。
+            // 下降沿：热键松开 → 连提前量/拟人化/抗过冲/速度Kp 一并复位，
+            //   下次按下是全新一轮（否则上一轮的收帧窗/积分/衰减帧数会带过来）。
+            if (injection_allowed && !last_injection_allowed_) {
+                pid_x_.reset();
+                pid_y_.reset();
+                remainder_x_ = 0.0f;
+                remainder_y_ = 0.0f;
+            } else if (!injection_allowed && last_injection_allowed_) {
+                pid_x_.reset();
+                pid_y_.reset();
+                remainder_x_ = 0.0f;
+                remainder_y_ = 0.0f;
+                lead_pred_.reset();
+                humanize_shaper_.reset();
+                anti_overshoot_.reset();
+                speed_kp_.reset();
+                global_wave_.reset();
+                lead_last_move_y_ = 0.0f;
+            }
+            last_injection_allowed_ = injection_allowed;
             AimStateEvent event; event.has_target = selected.valid;
             event.hotkey_active = injection_allowed;
             event.now_ms = task.timestamp_us / 1000ULL;
@@ -227,6 +291,10 @@ void AimThread::loop() {
                     continuous_lead_.reset();  // 持续提前量累计清零（新目标重新累计"同向距离"）
                     personal_shader_.reset();  // 拟人化整形重置（新目标重新整形）
                     recoil_.reset();  // 压枪计时/残差清零（新目标重新压枪）
+                    lead_pred_.reset();       // BB 提前量：新目标重新收帧/清零积分
+                    anti_overshoot_.reset();  // 抗过冲：新目标重新计算衰减帧数
+                    humanize_shaper_.reset(); // 拟人化链：历史低通值属于旧目标，必须清
+                    global_wave_.reset();
                 }
                 last_target_id_ = selected.target_id;
                 // AIBOX 对标：不做位置外推；误差直接来自本帧检测结果。
@@ -241,6 +309,23 @@ void AimThread::loop() {
                 pred_ey = pred_ty - ref_y;
                 float control_x = (prediction_time_s_ > 0.0f) ? pred_ex : (smooth_tx - ref_x);
                 float control_y = (prediction_time_s_ > 0.0f) ? pred_ey : (smooth_ty - ref_y);
+                // ---- BB 提前量（两代，只改 X 轴）----
+                // ★ 叠加在**控制误差**上、而不是塞进 tracker 之前的瞄准点：
+                //   BB 原版是 `at.x += offset` 后立刻算 `fx = at.x - chX` —— 偏移不经任何滤波
+                //   直接进 PID。若加在 tracker 之前，会被 One-Euro 低通吃掉大半，等于没效果。
+                // ★ 一代天然滞后一帧（本帧投票 → 下帧用），二代同帧生效；两代默认都关。
+                const float dtt_px = std::hypot(ex, ey);
+                const float box_cx = (selected.box.x1 + selected.box.x2) * 0.5f;
+                const float box_cy = (selected.box.y1 + selected.box.y2) * 0.5f;
+                const float box_w = selected.box.x2 - selected.box.x1;
+                const float box_h = selected.box.y2 - selected.box.y1;
+                if (lead1_cfg.enabled || lead2_cfg.enabled) {
+                    const float lead_dx = lead_pred_.prepare_x_offset(
+                        ref_x, ref_y, tx, ty, lead_last_move_y_, now_ms32, lead1_cfg, lead2_cfg);
+                    if (lead_dx != 0.0f) control_x += lead_dx;
+                } else if (lead_pred_.lead1_offset() != 0.0f) {
+                    lead_pred_.reset();  // 关掉后清掉残留偏移，保证零输出
+                }
                 if (frame_profile) {
                     // 自动标定偏置进入同一控制误差域，复用正式 PID/输出链测量响应。
                     if (frame_profile->mouse.calibrating) {
@@ -276,6 +361,16 @@ void AimThread::loop() {
                 }
                 // 输出链：P_PID 输出 × sens（全局灵敏度） × output_scale。
                 // rate_x/y 已在 Pid1 内部作为 kp_gain_rate 消费，此处不再重复。
+                // ---- BB 提前量反馈环：把本帧横向输出喂给一代做"帧窗口投票"，
+                //      产出的 offset 供**下一帧**的 control_x 使用（一代天生滞后一帧）。
+                //      喂的是 aibox_x（PID 域），与 continuous_lead 的量纲约定一致：
+                //      阈值必须与用户灵敏度解耦，不能喂 scaled_x。
+                if (lead1_cfg.enabled) {
+                    lead_pred_.feed_move_x(aibox_x, dtt_px, now_ms32, true, box_cx, box_cy,
+                                           box_w, box_h, lead1_cfg);
+                }
+                // 二代提前量的 Y 轴抑制读"上一帧纵向输出"，此处记下本帧值供下一帧用。
+                lead_last_move_y_ = aibox_y;
                 const float out_gain = out_sensitivity * out_scale;
                 scaled_x = aibox_x * out_gain;
                 scaled_y = aibox_y * out_gain;
@@ -308,10 +403,30 @@ void AimThread::loop() {
                 // 压枪量（count 域）与 PID 输出融合，之后统一走 deadzone → remainder →
                 // int16 → 拟人化整形 → 热键安全门；Gate 关闭时最终输出仍被归零。
                 {
-                    const auto rd = recoil_.update(hotkey_bits, selected.valid, recoil_cfg, dt_ms,
-                                                   recoil_px_per_count);
-                    scaled_y += rd.y;  // 下压为正（目标偏下方向）
-                    scaled_x += rd.x;  // 拟人 X 微动（可正可负）
+                    if (recoil_bb_cfg.enabled) {
+                        // BB 三段查表引擎（含垂直修正 + 力度渐变）。
+                        // adv/simple 倍率由 BB 扳机（trigger2）决定；扳机没跑时恒 1.0。
+                        const auto bbo = recoil_.update_bb(
+                            hotkey_bits, selected.valid, dtt_px, ty, ref_y,
+                            recoil_cfg, recoil_bb_cfg, vc_cfg, dt_ms, recoil_px_per_count,
+                            1.0f, 1.0f);
+                        scaled_y += bbo.recoil_y + bbo.vert_y;
+                        scaled_x += bbo.recoil_x + bbo.vert_x;
+                    } else {
+                        const auto rd = recoil_.update(hotkey_bits, selected.valid, recoil_cfg, dt_ms,
+                                                       recoil_px_per_count);
+                        scaled_y += rd.y;  // 下压为正（目标偏下方向）
+                        scaled_x += rd.x;  // 拟人 X 微动（可正可负）
+                    }
+                }
+                // ---- BB 抗过冲（recoil 之后、deadzone 之前）----
+                // 靠近目标时按内/外圈强度分段衰减位移；各圈"最多衰减 N 帧"，跑满即本轮停手。
+                if (anti_over_cfg.enabled) {
+                    anti_overshoot_.apply(&scaled_x, &scaled_y, dtt_px, now_ms32, anti_over_cfg);
+                }
+                // ---- BB 全局正弦扰动（deadzone 之前）----
+                if (global_wave_cfg.enabled) {
+                    global_wave_.apply(&scaled_x, &scaled_y, now_ms32, global_wave_cfg);
                 }
                 // output_deadzone（自适应死区基准）：低于死区的输出归零（防微抖）。
                 if (std::abs(scaled_x) < out_deadzone) scaled_x = 0.0f;
@@ -335,7 +450,22 @@ void AimThread::loop() {
                 // ---- 拟人化整形引擎（第 1 项落地）：对 move_x/move_y 做 Fitts 时长+速度包络+垂直抖动 ----
                 // 只作用于热键 Gate 之前；Gate 关闭时输出仍被归零（安全边界不变）。
                 // 输入：已量化 count(dx,dy) + 控制误差 px(ex,ey)；按需激活（新目标首次有效帧）。
-                if (personal_traj_cfg.enabled && injection_allowed) {
+                // ---- BB 拟人化链（humanize.enabled 时替掉旧 personal_shader_）----
+                // 顺序固定：低通 → 反应延迟 → 过冲 → 制动 → 高斯噪声。
+                // 注入点与旧引擎相同（int16 量化之后、热键 Gate 之前）⇒ 安全边界不变。
+                // ★ speed_fluctuation / accuracy_sim 两个"附加项"本期只提供模块与配置键、
+                //   **未接线**（默认关 ⇒ 无影响）；等面板那批确认取值口径后再接。
+                if (humanize_cfg.enabled) {
+                    float hx = static_cast<float>(move_x);
+                    float hy = static_cast<float>(move_y);
+                    HumanizeShaper::Context hctx;
+                    hctx.dtt = dtt_px;
+                    hctx.now_ms = now_ms32;
+                    hctx.aiming = true;
+                    humanize_shaper_.apply(&hx, &hy, humanize_cfg, hctx);
+                    move_x = static_cast<int16_t>(std::clamp(hx, kHidMin, kHidMax));
+                    move_y = static_cast<int16_t>(std::clamp(hy, kHidMin, kHidMax));
+                } else if (personal_traj_cfg.enabled && injection_allowed) {
                     if (!personal_shader_.active()) {
                         // 激活一次移动：用当前控制误差距离作为本次移动目标距离
                         personal_shader_.activate(std::hypot(control_x, control_y), personal_traj_cfg);

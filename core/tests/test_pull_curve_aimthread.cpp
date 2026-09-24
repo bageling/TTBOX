@@ -1,13 +1,18 @@
-// test_pull_curve_aimthread.cpp — 拉枪曲线注入 AimThread 输出链验证。
+// test_pull_curve_aimthread.cpp — AimThread 输出链注入点验证（拉枪曲线 + BB 对标第二批）。
 //
 // 覆盖验收场景：
 //   Case1 热键ON + 远距离目标 + 拉枪启用  -> move_y 出现弧线附加量（区别于无拉枪基线）
 //   Case2 距离 < min_distance             -> 无弧线附加
 //   Case3 拉枪 disabled                  -> 无弧线附加
 //   Case4 热键OFF + 拉枪激活             -> 最终输出仍被安全门吃成 {0,0}
+//   Case5 BB 拟人化链（humanize）开启     -> 近距离基线为 0 时被噪声顶成非零（接线生效）
+//   Case6 BB 三段查表压枪开启             -> 误差≈0 时仍出现纯下压量（接线生效）
 //
-// 说明：PullCurve 算法本身的单测在 test_mouse.cpp（mouse_pull_curve_*），
-// 本文件只验证 AimThread 输出链注入点位置正确、与死区/安全门的先后关系正确。
+// 说明：PullCurve / HumanizeShaper / RecoilController 算法本身的单测在
+// test_mouse.cpp 与 test_bb_second_batch.cpp；本文件只验证 AimThread 输出链
+// **注入点位置**正确、与死区/安全门的先后关系正确。
+// Case5/Case6 是"接线了没有"的哨兵：这两个模块默认关，若 AimThread 忘了调用它们，
+// 断言会红（而不是静默通过）。
 #include <chrono>
 #include <cstdio>
 #include <memory>
@@ -97,6 +102,9 @@ struct TestCtx {
     bool start() {
         return thread.start(&mailbox, output, 2000, &config, &buttons);
     }
+
+    // 改完 profile 后重新发布快照（AimThread 每周期重读 ⇒ 无需重启线程）
+    void reapply() { config.update(profile); }
 
     void feed(uint64_t frame, uint64_t ts_us, const ttbox::core::DetectionBox& box) {
         AimTargetTask t;
@@ -204,6 +212,56 @@ int main() {
         bool all_zero = true;
         for (const auto& a : acts) if (a.move_x != 0 || a.move_y != 0) all_zero = false;
         check(thread_ran && all_zero && !acts.empty(), "Case4 热键OFF+拉枪激活 -> 安全门优先，输出仍 0");
+    }
+
+    // Case5: BB 拟人化链（humanize）接线生效。
+    // 判据：近距离目标的基线输出恒为 {0,0}（见 Case2），只有把高斯噪声接到输出链上，
+    // 才会出现非零位移 —— 若 AimThread 忘了调 humanize_shaper_，本用例必红。
+    {
+        TestCtx ctx(false);
+        ctx.profile->mouse.humanize.enabled = true;
+        ctx.profile->mouse.humanize.smooth_factor = 0.0f;   // 关低通，只留噪声，判据更干净
+        ctx.profile->mouse.humanize.noise_sigma = 5.0f;     // 放大到能被 int16 截断看见
+        ctx.reapply();
+        if (!ctx.start()) { std::printf("[FAIL] start\n"); return 1; }
+        ctx.buttons.store(0x02);
+        ctx.feed(1, 1000, make_near_box());
+        const bool got_move = wait_until(ctx, [](const std::vector<Action>& acts) {
+            return !acts.empty() && any_move(acts);
+        });
+        ctx.thread.stop();
+        check(got_move, "Case5 humanize 开启 -> 近距离也出现非零输出（接线生效）");
+    }
+
+    // Case6: BB 三段查表压枪接线生效。
+    // 判据：近距离目标 PID 误差≈0（基线输出 0），压枪量只可能来自 recoil_bb 引擎；
+    // 预设1 段1 vert=1.5px、global_vert=1 ⇒ 约 2 count 的纯下压。
+    {
+        TestCtx ctx(false);
+        auto& m = ctx.profile->mouse;
+        m.recoil.enabled = true;
+        m.recoil.hotkey = 0x01;          // 左键作压枪热键
+        m.recoil.hotkey2 = 0x00;
+        m.recoil.hotkey_mode = 1;        // any
+        m.recoil_bb.enabled = true;
+        m.recoil_bb.preset = 1;
+        m.recoil_bb.global_vert = 1.0f;
+        m.recoil_bb.global_horiz = 0.0f;
+        m.recoil_bb.smooth = 0.0f;       // 关平滑，输出确定
+        m.recoil_bb.delay_ms = 0.0f;
+        m.recoil_bb.distance_limit = 0.0f;
+        m.recoil_bb.drift_enabled = false;
+        m.vertical_correction.enabled = false;  // 只看压枪本体
+        ctx.reapply();
+        if (!ctx.start()) { std::printf("[FAIL] start\n"); return 1; }
+        ctx.buttons.store(0x03);         // 左键(压枪) + 右键(瞄准)
+        ctx.feed(1, 1000, make_near_box());
+        const bool got_pull = wait_until(ctx, [](const std::vector<Action>& acts) {
+            for (const auto& a : acts) if (a.move_y > 0) return true;
+            return false;
+        });
+        ctx.thread.stop();
+        check(got_pull, "Case6 BB 三段查表压枪开启 -> 误差≈0 仍出现向下压枪量（接线生效）");
     }
 
     if (fails == 0) std::printf("test_pull_curve_aimthread: ALL PASS\n");
