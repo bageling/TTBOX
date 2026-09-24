@@ -800,6 +800,193 @@ CONTROLLER_BOOLS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# BB 对标新模块（2026-09-24）：面板扁平键 ↔ Core mouse 子对象
+#
+# 命名约定（与既有 pull_curve_* / continuous_lead_* 完全一致，别另立一套）：
+#   面板元素 id = "controller_" + <数据键>；数据键放在 body['ai']['controller'] 这一层。
+#   于是前端 collectConfig / populate 只跟扁平键打交道，后端负责折叠成 Core 的嵌套对象。
+#
+# 表项：(前缀, Core 子对象名, [(字段, 类型, Core 默认值), ...])
+#   类型：'n'=浮点 'i'=整数 'b'=布尔 'key'=键位（'left'/'right'/'' ↔ 位掩码）
+# ★ 默认值必须与 core/src/mouse/MouseTypes.hpp 的结构体默认值一字不差 ——
+#   面板首次回填显示的就是它，对不上会让"没存过配置"的设备显示成另一套参数。
+# ★ 本表只做搬运，不做校验；越界值由 Core 的 RuntimeProfile::validate 拦。
+CTRL_BLOCKS = [
+    ('lead1', 'lead1', [
+        ('enabled', 'b', False), ('frames', 'i', 10), ('direction_ratio', 'n', 70.0),
+        ('displacement_ratio', 'n', 2.0), ('strength', 'n', 0.5), ('smooth', 'n', 0.5),
+        ('hold_ms', 'n', 50.0), ('activation_distance', 'n', 40.0), ('settle_ms', 'n', 10.0),
+        ('displacement_min', 'n', 10.0), ('displacement_max', 'n', 40.0),
+        ('dead_zone', 'n', 5.0), ('oscillation_cancel', 'i', 3), ('filter_base', 'n', 0.3),
+        ('filter_box_mid', 'n', 1000.0), ('filter_min_ratio', 'n', 0.3),
+        ('filter_max_ratio', 'n', 3.0),
+    ]),
+    ('lead2', 'lead2', [
+        ('enabled', 'b', False), ('gain', 'n', 0.05), ('max_offset', 'n', 25.0),
+        ('decay', 'n', 0.95), ('activation_distance', 'n', 100.0), ('dead_zone', 'n', 1.0),
+        ('hold_ms', 'n', 10.0), ('cooldown_ms', 'n', 250.0),
+        ('y_suppress_enabled', 'b', True), ('y_suppress_min', 'n', 0.5),
+        ('y_suppress_max', 'n', 2.0),
+    ]),
+    ('humanize', 'humanize', [
+        ('enabled', 'b', False), ('smooth_factor', 'n', 0.0), ('overshoot', 'n', 0.0),
+        ('brake_distance', 'n', 0.0), ('noise_sigma', 'n', 0.2), ('delay_ms', 'n', 0.0),
+        ('delay_random_ms', 'n', 0.0),
+        ('speed_fluctuation_enabled', 'b', False), ('speed_fluctuation_start_speed', 'n', 0.80),
+        ('speed_fluctuation_accel_ratio', 'n', 0.20),
+        ('speed_fluctuation_decel_ratio', 'n', 0.20),
+        ('speed_fluctuation_intensity', 'n', 0.15),
+        ('accuracy_sim_enabled', 'b', False), ('accuracy_sim_perfect_rate', 'n', 90.0),
+        ('accuracy_sim_offset_strength', 'n', 0.50), ('accuracy_sim_direction', 'i', 0),
+    ]),
+    ('anti_overshoot', 'anti_overshoot', [
+        ('enabled', 'b', False), ('outer_distance', 'n', 20.0), ('outer_strength', 'n', 50.0),
+        ('inner_distance', 'n', 10.0), ('inner_strength', 'n', 90.0),
+        ('outer_frames', 'i', 11), ('inner_frames', 'i', 6),
+        ('reset_cooldown_ms', 'n', 500.0),
+    ]),
+    ('speed_adaptive_kp', 'speed_adaptive_kp', [
+        ('enabled', 'b', False), ('move_mult', 'n', 1.5), ('static_mult', 'n', 0.8),
+        ('threshold', 'n', 3.0), ('frames', 'i', 5),
+    ]),
+    ('global_wave', 'global_wave', [
+        ('enabled', 'b', False), ('amp_x', 'n', 0.10), ('amp_y', 'n', 0.10),
+        ('freq', 'n', 1.0), ('smooth', 'n', 0.50),
+    ]),
+    ('vc', 'vertical_correction', [
+        ('enabled', 'b', True), ('no_target', 'b', False), ('strength', 'n', 1.0),
+        ('horiz', 'n', 0.0), ('delay_ms', 'n', 0.0), ('max_down_distance', 'n', 0.0),
+        ('y_suppress_enabled', 'b', False), ('y_suppress_strength', 'n', 0.0),
+        ('ramp1_enabled', 'b', False), ('ramp1_duration_ms', 'n', 1300.0),
+        ('ramp1_start', 'n', 1.4), ('ramp1_middle', 'n', 1.6), ('ramp1_end', 'n', 0.01),
+        ('ramp2_enabled', 'b', False), ('ramp2_duration_ms', 'n', 2000.0),
+        ('ramp2_start', 'n', 1.0), ('ramp2_middle', 'n', 0.5), ('ramp2_end', 'n', 0.1),
+        ('ramp3_enabled', 'b', False), ('ramp3_duration_ms', 'n', 2000.0),
+        ('ramp3_start', 'n', 1.0), ('ramp3_middle', 'n', 0.5), ('ramp3_end', 'n', 0.1),
+    ]),
+    # 自动扳机 v7.26（key1/key2 长按组合 + key3 点按激活）
+    ('trigger', 'trigger', [
+        ('enabled', 'b', False), ('key1', 'key', 4), ('key2', 'key', 0), ('key3', 'key', 0),
+        ('with_aim', 'b', True), ('aim_confidence', 'n', 0.40), ('confidence', 'n', 0.40),
+        ('dist_threshold', 'n', 50.0), ('stability_frames', 'i', 0),
+        ('crosshair_check', 'b', False), ('fire_delay', 'n', 10.0), ('fire_random', 'n', 1.0),
+        ('first_delay_min', 'n', 20.0), ('first_delay_max', 'n', 30.0),
+        ('rifle_mode', 'b', True), ('rifle_interval', 'n', 50.0), ('click_count', 'i', 50),
+        ('click_key', 'key', 1), ('press_duration', 'n', 50.0),
+        ('recoil_enabled', 'b', True), ('y_offset', 'n', 0.8), ('status_log', 'b', False),
+    ]),
+    # BB 扳机 2.0
+    ('trigger2', 'trigger2', [
+        ('enabled', 'b', False), ('key1', 'key', 16), ('key2', 'key', 0),
+        ('fire_button', 'key', 1), ('with_aim', 'b', True), ('with_crosshair', 'b', False),
+        ('with_simple_recoil', 'b', False), ('with_adv_recoil', 'b', False),
+        ('confidence', 'n', 0.5), ('first_err', 'n', 30.0), ('first_delay', 'n', 0.0),
+        ('fire_interval', 'n', 1.0), ('fire_random', 'n', 0.0), ('fire_count', 'i', 1),
+        ('press_duration', 'n', 50.0), ('move_throttle_frames', 'i', 2),
+        ('precision_enabled', 'b', False), ('precision_range', 'n', 10.0),
+        ('precision_frames', 'i', 5), ('retarget_reset_ms', 'n', 1000.0),
+        ('lite_mode', 'b', False), ('stop_detect_enabled', 'b', False),
+        ('stop_detect_color_id', 'i', 2), ('stop_detect_tolerance', 'n', 60.0),
+        ('stop_detect_range', 'n', 80.0), ('stop_detect_interval', 'i', 10),
+    ]),
+]
+
+# 压枪三段查表：标量走 CTRL_BLOCKS 的写法，三个数组单独搬运
+# （Core 侧 from_json 直接读 JSON 嵌套数组，见 RuntimeProfile.cpp read_table3x3）。
+CTRL_RECOIL_BB_FIELDS = [
+    ('enabled', 'b', False), ('preset', 'i', 1), ('global_vert', 'n', 0.5),
+    ('global_horiz', 'n', 0.5), ('delay_ms', 'n', 50.0), ('smooth', 'n', 0.90),
+    ('distance_limit', 'n', 80.0), ('no_target_always', 'b', False),
+    ('drift_enabled', 'b', False), ('drift_amplitude', 'n', 0.20), ('drift_freq', 'n', 1.0),
+    ('y_suppress_enabled', 'b', False), ('y_suppress_strength', 'n', 0.0),
+    ('max_down_distance', 'n', 0.0), ('adv_mult', 'n', 0.9),
+]
+RECOIL_BB_PRESET_DEFAULT_VERT = [[1.5, 1.5, 1.5], [1.5, 1.5, 1.5], [1.0, 1.3, 1.6]]
+RECOIL_BB_PRESET_DEFAULT_HORIZ = [[0.0, 0.0, 0.0], [-2.0, -2.0, -2.0], [0.0, 0.0, 0.0]]
+
+# 选靶四项机制：Core 侧是 mouse 顶层扁平键（不是子对象），面板键统一加 selector_ 前缀区分
+CTRL_SELECTOR_FIELDS = [
+    ('selector_lock_hold_ms', 'lock_hold_ms', 'n', 0.0),
+    ('selector_priority_scoring', 'priority_scoring', 'b', False),
+    ('selector_weight_dist', 'weight_dist', 'n', 1.0),
+    ('selector_weight_size', 'weight_size', 'n', 0.3),
+    ('selector_stickiness', 'stickiness', 'n', 1.0),
+    ('selector_switch_threshold_px', 'switch_threshold_px', 'n', 60.0),
+    ('selector_head_body_stable', 'head_body_stable', 'b', False),
+    ('selector_hb_body1', 'hb_body1', 'i', 0),
+    ('selector_hb_head1', 'hb_head1', 'i', 1),
+    ('selector_hb_body2', 'hb_body2', 'i', -1),
+    ('selector_hb_head2', 'hb_head2', 'i', -1),
+]
+
+
+def _coerce_ctrl_value(v, kind):
+    """面板值 → Core 侧类型。非法值返回 None（跳过该字段，不把配置写坏）。"""
+    if kind == 'b':
+        return bool(v)
+    if kind == 'key':
+        return _hotkey_to_bits(v, 0)
+    try:
+        return int(v) if kind == 'i' else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ctrl_read_block(ctrl: dict, prefix: str, fields) -> dict:
+    """面板扁平键 → Core 子对象（只收面板真的传了的字段）。"""
+    blk = {}
+    for field, kind, _dflt in fields:
+        v = ctrl.get(prefix + '_' + field)
+        if v is None:
+            continue
+        cv = _coerce_ctrl_value(v, kind)
+        if cv is not None:
+            blk[field] = cv
+    return blk
+
+
+def _ctrl_write_block(ctrl: dict, prefix: str, fields, blk) -> None:
+    """Core 子对象 → 面板扁平键（缺字段补 Core 默认值，保证首次回填正确）。"""
+    blk = blk if isinstance(blk, dict) else {}
+    for field, kind, dflt in fields:
+        v = blk.get(field, dflt)
+        ctrl[prefix + '_' + field] = (_bits_to_hotkey(v) if kind == 'key' else v)
+
+
+def _ctrl_read_vec(ctrl: dict, key: str, n: int):
+    """一维数组透传（长度不符返回 None，整套跳过）。"""
+    v = ctrl.get(key)
+    if not isinstance(v, list) or len(v) != n:
+        return None
+    out = []
+    for item in v:
+        cv = _coerce_ctrl_value(item, 'n')
+        if cv is None:
+            return None
+        out.append(cv)
+    return out
+
+
+def _ctrl_read_table(ctrl: dict, key: str, rows: int, cols: int):
+    """二维数组透传（形状不符返回 None，整套跳过）。"""
+    v = ctrl.get(key)
+    if not isinstance(v, list) or len(v) != rows:
+        return None
+    out = []
+    for row in v:
+        if not isinstance(row, list) or len(row) != cols:
+            return None
+        crow = []
+        for item in row:
+            cv = _coerce_ctrl_value(item, 'n')
+            if cv is None:
+                return None
+            crow.append(cv)
+        out.append(crow)
+    return out
+
+
 # ---- capture 截取尺寸：Core 合法域 = {0（全帧）} ∪ [64, 3840] ----
 # Core 侧校验见 core/src/app/Application.cpp（RuntimeProfile::validate）：
 #   "capture.width 非法（0=全帧，或需在 64~3840 之间）"
@@ -953,6 +1140,35 @@ def web_body_to_profile(body: dict) -> dict:
             recoil[tk] = rk[yk]
     if recoil:
         mouse['recoil'] = recoil
+
+    # ---- BB 对标新模块（2026-09-24）----
+    # 表驱动搬运：CTRL_BLOCKS 每个 (前缀, 子对象) 收成 mouse[子对象]。
+    # 面板只传它渲染出来的字段 ⇒ 这里"见键就收"，不补默认值（补默认是 Core from_json 的职责）。
+    for prefix, obj_key, fields in CTRL_BLOCKS:
+        blk = _ctrl_read_block(ctrl, prefix, fields)
+        if blk:
+            mouse[obj_key] = blk
+
+    # 压枪三段查表：标量 + 三个数组（数组形状不对就整套不传，由 Core 保留原值）
+    rb = _ctrl_read_block(ctrl, 'recoil_bb', CTRL_RECOIL_BB_FIELDS)
+    vec = _ctrl_read_vec(ctrl, 'recoil_bb_preset_total_time_ms', 3)
+    if vec is not None:
+        rb['preset_total_time_ms'] = vec
+    for tkey in ('preset_vert', 'preset_horiz'):
+        tbl = _ctrl_read_table(ctrl, 'recoil_bb_' + tkey, 3, 3)
+        if tbl is not None:
+            rb[tkey] = tbl
+    if rb:
+        mouse['recoil_bb'] = rb
+
+    # 选靶四项机制：Core 侧是 mouse 顶层扁平键
+    for web_key, core_key, kind, _dflt in CTRL_SELECTOR_FIELDS:
+        v = ctrl.get(web_key)
+        if v is None:
+            continue
+        cv = _coerce_ctrl_value(v, kind)
+        if cv is not None:
+            mouse[core_key] = cv
 
     # 热键保护（hotkey_guard）—— mouse.hotkey_guard.*
     # 语义：按一次 toggle_hotkey 在「热键生效 / 全部挂起」之间切换。挂起状态是 Core
@@ -1165,6 +1381,23 @@ def profile_to_web(prof: dict) -> dict:
         'personal_motion_reaction_blend': personal_motion.get('reaction_blend', 0.7),
         'personal_motion_max_reaction_delay_ms': personal_motion.get('max_reaction_delay_ms', 250),
     }
+    # ---- BB 对标新模块（2026-09-24）：Core 子对象 → 面板扁平键 ----
+    # 缺字段补 Core 结构体默认值（表里的第三列），保证面板首次打开显示的就是 Core 的实际值。
+    for prefix, obj_key, fields in CTRL_BLOCKS:
+        _ctrl_write_block(ctrl, prefix, fields, mouse.get(obj_key))
+    rb_web = mouse.get('recoil_bb') or {}
+    _ctrl_write_block(ctrl, 'recoil_bb', CTRL_RECOIL_BB_FIELDS, rb_web)
+    ctrl['recoil_bb_preset_total_time_ms'] = list(
+        rb_web.get('preset_total_time_ms') or [1500.0, 1500.0, 1500.0])
+    for tkey, dflt in (('preset_vert', RECOIL_BB_PRESET_DEFAULT_VERT),
+                       ('preset_horiz', RECOIL_BB_PRESET_DEFAULT_HORIZ)):
+        tbl = rb_web.get(tkey)
+        if not (isinstance(tbl, list) and len(tbl) == 3
+                and all(isinstance(r, list) and len(r) == 3 for r in tbl)):
+            tbl = dflt
+        ctrl['recoil_bb_' + tkey] = [list(r) for r in tbl]
+    for web_key, core_key, _kind, dflt in CTRL_SELECTOR_FIELDS:
+        ctrl[web_key] = mouse.get(core_key, dflt)
 
     lat = {}
     if prev_p.get('fps') not in (None, 0):
