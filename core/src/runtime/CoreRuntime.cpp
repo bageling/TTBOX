@@ -524,6 +524,10 @@ void CoreRuntime::collect_metrics(PipelineMetrics* out) const {
         out->last_mouse_control_wheel = health.last_wheel;
         out->last_mouse_control_timestamp_us = health.last_timestamp_us;
     }
+    // 标定分母真源：来自 AimThread 的请求投递计数（不是 socket 侧计数）。
+    // 与 mouse_control_socket_write_ok 配对看：后者不涨说明发送失败 ⇒ 本计数不可用于算 gain。
+    out->aim_out_counts_x = aim_status.out_counts_x;
+    out->aim_out_counts_y = aim_status.out_counts_y;
 }
 
 }  // namespace ttbox::core

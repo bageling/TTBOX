@@ -87,6 +87,11 @@ struct PipelineMetrics {
     double scheduler_input_y = 0.0;
     double aim_pos_x = 0.0;    // 目标中心 X（crop 系 px，AimThread 实时；标定/诊断用）
     double aim_pos_y = 0.0;    // 目标中心 Y
+    // 累计请求投递的 HID count（有符号和，自 AimThread::start 起单调累加）。
+    // **自动标定的分母真源**：gain(px/count) = Δ目标位移px / Δ本计数。
+    // 标定脚本必须取两次读数之差；绝对值为累计量，跨标定不清零（避免与"重置"语义混淆）。
+    int64_t aim_out_counts_x = 0;
+    int64_t aim_out_counts_y = 0;
     bool aim_has_target = false; // 当前帧是否检测到目标（标定状态机用）
     int32_t aim_target_id = -1;   // 当前选择目标的稳定 ID
     int32_t aim_target_class_id = -1;

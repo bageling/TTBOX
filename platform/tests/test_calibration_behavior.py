@@ -114,3 +114,103 @@ def test_derive_pid_params_rejects_zero_gain():
 
     with _p.raises(ValueError):
         derive_pid_params(0.0, 0.65, 30)
+
+
+# ===========================================================================
+# 分母口径：injected_count 必须是**真实注入 count**，不能是偏置的 px
+#
+# 闭环恒等式（与 PID 参数、与游戏灵敏度无关，对任意时间窗成立）：
+#     目标在画面里的位移(px) ≡ gain(px/count) × Σ注入count
+# ⇒ gain = Δpx / ΔΣcounts。
+# 旧实现把"偏置的 px"当分母（量纲 px/px）⇒ 比值恒 ≈1.0 ⇒ 标定即使成功，
+# 由这个假 gain 推出的 kp 也只由它决定（实测恒为 15），与真实手感无关。
+# 下面两条用例把"对的会算出什么"和"错的会算出什么"都钉住。
+# ===========================================================================
+
+# 面板实际用的幅度表：正负交替 + 分量程（见 ttbox-web.py::CALIB_AMPLITUDES）
+ALTERNATING_AMPLITUDES_PX = (8.0, -8.0, 16.0, -16.0, 24.0, -24.0, 32.0, -32.0)
+
+
+def counts_observations(axis, gain_px_per_count, amplitudes=ALTERNATING_AMPLITUDES_PX,
+                        overshoot=0.0, delay_ms=12.0, target_id="track-1"):
+    """按真实物理关系造观测：闭环为 offset 走了 |amp| 的位移，付出的 count = |amp|/gain。
+
+    overshoot 用来模拟"慢环冲过头再拉回"：净位移与净 count 同步增大，
+    比值不变 —— 这正是用**有符号净量**配对的好处（路径无关）。
+    """
+    items = []
+    for amp in amplitudes:
+        net_px = abs(amp) * (1.0 + overshoot)
+        net_counts = net_px / gain_px_per_count
+        items.append(CalibrationObservation(
+            axis=axis,
+            injected_count=net_counts,
+            measured_delta_px=net_px,
+            response_delay_ms=delay_ms,
+            target_id=target_id,
+            valid=True,
+        ))
+    return items
+
+
+def test_fit_axis_recovers_true_gain_from_real_injected_counts():
+    result = fit_axis_measurements(
+        CalibrationAxis.X,
+        counts_observations(CalibrationAxis.X, 0.65),
+    )
+    assert result.converged is True
+    assert result.sample_count == 8
+    assert result.gain_px_per_count == pytest.approx(0.65, abs=1e-6)
+    # 一致性应接近满分：增益是物理常数，不该随幅度变化
+    assert result.consistency > 0.99
+
+
+def test_fit_axis_is_robust_to_overshoot_when_pairing_net_quantities():
+    """冲过头再拉回：净位移与净 count 同增同减，gain 不变（用有符号净量配对的原因）。"""
+    clean = fit_axis_measurements(
+        CalibrationAxis.Y, counts_observations(CalibrationAxis.Y, 0.42))
+    overshot = fit_axis_measurements(
+        CalibrationAxis.Y, counts_observations(CalibrationAxis.Y, 0.42, overshoot=0.35))
+    assert clean.converged is True and overshot.converged is True
+    assert overshot.gain_px_per_count == pytest.approx(clean.gain_px_per_count, abs=1e-6)
+
+
+def _fit_with_px_denominator(axis):
+    """复现修复前的算法：分母用"偏置的 px"（稳态位移恰好等于偏置 px）。"""
+    return fit_axis_measurements(
+        axis,
+        [CalibrationObservation(axis=axis,
+                                injected_count=abs(amp),      # ← 错：px 当 count
+                                measured_delta_px=abs(amp),   # 稳态位移就等于偏置 px
+                                response_delay_ms=12.0,
+                                target_id="track-1", valid=True)
+         for amp in ALTERNATING_AMPLITUDES_PX],
+    )
+
+
+def test_px_denominator_yields_gain_one_for_every_game():
+    """★ 反向锁：分母退回 px 时，**无论真实游戏灵敏度是多少，拟合出的 gain 都是 1.0**。
+
+    gain=1.0 又会让 derive_pid_params 恒返回 kp=15（= 0.15 / ((10000-9900)/10000)），
+    也就是"标定成功"却写下一个与任何游戏都无关的常数 —— 自动调参整个失效。
+    这条用例存在的意义：谁把分母改回 px，它就会红。
+    """
+    for _ in (0.25, 0.4, 0.65, 1.2, 2.0):            # 五种差异极大的游戏灵敏度
+        fake = _fit_with_px_denominator(CalibrationAxis.X)
+        assert fake.converged is True                 # 它会"成功"，这才是最坑的地方
+        assert fake.gain_px_per_count == pytest.approx(1.0)
+        assert derive_pid_params(fake.gain_px_per_count, fake.gain_px_per_count, 12.0)["kp"] \
+            == pytest.approx(15.0)
+
+
+def test_real_counts_denominator_makes_kp_track_the_actual_game():
+    """对照：分母用真实 count 时，kp 随真实 gain 变化 ⇒ 自动调参才真的在调参。"""
+    kps = {}
+    for g in (0.25, 0.4, 0.65, 1.2, 2.0):
+        fit = fit_axis_measurements(CalibrationAxis.X, counts_observations(CalibrationAxis.X, g))
+        assert fit.gain_px_per_count == pytest.approx(g, rel=1e-9)
+        kps[g] = derive_pid_params(fit.gain_px_per_count, fit.gain_px_per_count, 12.0)["kp"]
+    assert len(set(kps.values())) == len(kps)          # 五个不同的游戏 → 五个不同的 kp
+    # derive_pid_params 把 kp 保留 2 位小数，故用绝对容差
+    assert kps[0.65] == pytest.approx(15.0 / 0.65, abs=0.005)
+    assert kps[0.65] != pytest.approx(15.0)            # 不再是那个与游戏无关的常数

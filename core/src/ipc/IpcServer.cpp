@@ -1046,6 +1046,9 @@ JsonValue system_status_to_json(const SystemStatus& status) {
     // 目标中心（标定状态机的真实目标位移数据源）
     m.set("aim_pos_x", JsonValue::number(status.metrics.aim_pos_x));
     m.set("aim_pos_y", JsonValue::number(status.metrics.aim_pos_y));
+    // 累计请求投递 count（自动标定的分母真源）：标定侧取两次读数之差算 gain = Δpx/Δcounts。
+    m.set("aim_out_counts_x", JsonValue::number(static_cast<double>(status.metrics.aim_out_counts_x)));
+    m.set("aim_out_counts_y", JsonValue::number(static_cast<double>(status.metrics.aim_out_counts_y)));
     m.set("aim_has_target", JsonValue::boolean(status.metrics.aim_has_target));
     m.set("aim_target_id", JsonValue::number(static_cast<double>(status.metrics.aim_target_id)));
     m.set("aim_target_class_id", JsonValue::number(static_cast<double>(status.metrics.aim_target_class_id)));

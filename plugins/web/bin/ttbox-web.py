@@ -3594,6 +3594,15 @@ def export_preset(name: str):
 # 运动注入走 mouse.calibrating 标定模式（AimThread/OutputBackend 在 calibrating 期间无视热键放行 AI 移动）。
 # 标定结果写 /opt/ttbox/config/calibration.json，并把 kp 换算写回 RuntimeProfile（Core 热更新）。
 CALIBRATION_FILE = '/opt/ttbox/config/calibration.json'
+# 标定幅度表（单位 px 的参考点偏置）：**正负交替 + 分量程**。
+# 为什么不是旧的全正 [8,16,24,32,40]：慢环下位移逐轮累加（轮间只清 bias、不等瞄点归位）
+# ⇒ 比值散开 ⇒ 必挂 fit 的一致性门（MAD/|中位| > 0.35）。交替后相邻两步互相抵消，
+# 同时每个幅度都覆盖到，够撑满 fit 的 min_samples=5。
+CALIB_AMPLITUDES = (8.0, -8.0, 16.0, -16.0, 24.0, -24.0, 32.0, -32.0)
+# 单个样本的最低信号门槛：count 太少 ⇒ 分母接近 0，比值被噪声主导；
+# 位移太少 ⇒ 被检测噪声（实测静止抖动 ±0.05px）淹没。
+CALIB_MIN_COUNTS = 6
+CALIB_MIN_DELTA_PX = 0.5
 ACTIVE_MODEL_FILE = '/opt/ttbox/models/active_model.txt'
 _cal = {
     'phase': 'idle',
@@ -3601,7 +3610,7 @@ _cal = {
     'state': 'idle',        # TTBOX CalibrationState 对外镜像
     'ready': False,
     'reason': 'not_running',  # 保持 Web 契约：未运行时 reason=not_running
-    'total_rounds': 10,
+    'total_rounds': 8,   # 每轴步数（= len(CALIB_AMPLITUDES)），两轴共 16 步
     'round': 0,
     'progress': 0.0,
     'current_axis': '',
@@ -3619,7 +3628,11 @@ _cal = {
     'size_variation': 0.0,
     'thread': None,
     'elapsed_ms': 0,
-    'amplitude_counts': 0,
+    'amplitude_counts': 0,   # 旧键名：单位现为 px 偏置（下游无人消费，保留防契约断裂）
+    'amplitude_px': 0.0,     # 本轮参考点偏置（px）
+    'settle_ms': 0,          # 轮间等瞄点静止耗时
+    'settled': False,        # 是否等到静止（未静止不判失败，交给 MAD 门过滤）
+    'dropped_sample_count': 0,  # 被门槛丢掉的样本数（同目标/位移/count/落设备）
 }
 _cal_lock = threading.Lock()
 
@@ -3712,6 +3725,94 @@ def _calib_sample_center(n: int = 3):
     )
 
 
+def _calib_out_counts() -> tuple[int, int] | None:
+    """读 core 累计**请求投递**的 HID count（auto 标定的分母真源）。
+
+    没有这个字段的旧 core 返回 None —— 调用方必须**明确失败**而不是退回用 px 当分母：
+    那正是修复前的老毛病（量纲 px/px ⇒ 比值恒 ≈1.0 ⇒ 标定结果与真实手感无关）。
+    """
+    st = _get_status()
+    m = st.get('metrics', {}) if isinstance(st, dict) else {}
+    # 两条轴都必须在：只到一半说明 Core 是中间态/被改坏，此时把缺的那轴当 0
+    # 会让那条轴的 gain 直接错（分母恒 0），宁可整体判"读不到"。
+    if 'aim_out_counts_x' not in m or 'aim_out_counts_y' not in m:
+        return None
+    try:
+        return int(m['aim_out_counts_x']), int(m['aim_out_counts_y'])
+    except (TypeError, ValueError):
+        return None
+
+
+def _calib_write_ok() -> int:
+    """usbproxy 侧成功写出的包数。与 count 增量配对：不涨 = 注入没落到设备，本样本作废。"""
+    st = _get_status()
+    m = st.get('metrics', {}) if isinstance(st, dict) else {}
+    try:
+        return int(m.get('mouse_control_socket_write_ok') or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _calib_apply_bias(axis, value: float) -> bool:
+    """把参考点偏置写到指定轴（另一轴显式归零），并保持 calibrating=true。
+
+    偏置进的是**控制误差域**（AimThread.cpp:360），所以它是一个"让闭环把瞄点拉到
+    参考点 ±value px"的命令；闭环为此付出的 count 才是我们要测的分母。
+    """
+    prof = _get_runtime_profile()
+    mo = prof.setdefault('mouse', {})
+    mo['calibration_bias_x'] = float(value) if axis is CalibrationAxis.X else 0.0
+    mo['calibration_bias_y'] = float(value) if axis is CalibrationAxis.Y else 0.0
+    mo['calibrating'] = True
+    return ipc_request('SET_CONFIG', {'profile': prof}).get('status') == 0
+
+
+def _calib_sample_pair(axis, n: int = 3):
+    """尽量"同时"采一对 (目标位移参考, 累计count 在本轴的读数)。
+
+    Δpx 与 Δcounts 必须取自同一时间窗：闭环每秒会走若干 count，两次读数相隔太久
+    会把窗口外的运动算进来（gain 直接偏）。这里交替读、取中位，把时刻偏差压到毫秒级。
+    """
+    pairs = []
+    for _ in range(n):
+        c = _calib_out_counts()
+        t = _calib_target()
+        if t is not None and c is not None:
+            pairs.append((t['x'] if axis is CalibrationAxis.X else t['y'],
+                          c[0] if axis is CalibrationAxis.X else c[1], t))
+        time.sleep(0.004)
+    if not pairs:
+        return None
+    # 按 px 排序后取中位**那一对**（px/count/目标 必须同源同时刻；
+    # 分别取中位会拼出三个不同时刻的值，反而引入伪位移）
+    mid = sorted(pairs, key=lambda p: p[0])[len(pairs) // 2]
+    return {'px': mid[0], 'counts': mid[1], 'target': mid[2]}
+
+
+def _calib_wait_settled(axis, deadline_s: float = 0.8, quiet_px: float = 0.5,
+                        quiet_n: int = 3) -> tuple[bool, float]:
+    """清掉偏置后等瞄点静止（连续 quiet_n 个样本之间位移 < quiet_px）。
+
+    为什么要等：上一轮的余速会把"本轮之外的位移"算进 Δpx（旧实现只清 bias 不回零，
+    慢环下位移逐轮累加 ⇒ 比值散开 ⇒ fit 的一致性门必挂）。
+    沉不下来不判失败 —— 恒等式对任意窗口成立，只是样本会脏一点，交给 MAD 门过滤。
+    """
+    t0 = time.time()
+    win = []
+    while time.time() - t0 < deadline_s:
+        pair = _calib_sample_pair(axis, 1)
+        if pair is None:
+            time.sleep(0.02)
+            continue
+        win.append(pair['px'])
+        if len(win) > quiet_n:
+            win.pop(0)
+        if len(win) >= quiet_n and (max(win) - min(win)) < quiet_px:
+            return True, (time.time() - t0) * 1000.0
+        time.sleep(0.02)
+    return False, (time.time() - t0) * 1000.0
+
+
 def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
     """标定结果写回 RuntimeProfile。
 
@@ -3787,7 +3888,9 @@ def _calib_worker() -> None:
     try:
         _calib_set(state='preparing', status='running', phase='preparing', reason='准备标定环境',
                    round=0, progress=0.0, round_gains=[], candidate_count=0,
-                   stable_frames=0, stable_ms=0, valid_sample_count=0, axis_fits={})
+                   stable_frames=0, stable_ms=0, valid_sample_count=0, axis_fits={},
+                   amplitude_px=0.0, amplitude_counts=0, settle_ms=0, settled=False,
+                   dropped_sample_count=0)
         # 1) stabilize：同一目标/类别/尺寸稳定，中心抖动 <1px、尺寸变化 <5%，持续 800ms
         _calib_set(state='stabilize_x', phase='stabilize_x', current_axis='x')
         win, stable_start = [], None
@@ -3843,9 +3946,23 @@ def _calib_worker() -> None:
         else:
             _calib_set(state='failed', status='failed', phase='error', reason='目标稳定检测超时', ready=False)
             return
-        # 2) X/Y 分轴采样：每轴使用固定幅度，记录真实目标位移/延迟，最后交给 Median/MAD 拟合。
-        amplitudes = [8, 16, 24, 32, 40]
+        # 2) X/Y 分轴采样：注入**正负交替**的参考点偏置，用**真实注入 count** 当分母测 gain。
+        #
+        # 物理依据（本次修复的核心）：闭环里相机位移由 count 积分而来，于是恒有
+        #     目标在画面里的位移(px) ≡ gain(px/count) × Σ注入count
+        # 该恒等式与 PID 参数、与游戏灵敏度都无关，且对**任意时间窗**成立（不必等稳态）。
+        # ⇒ gain = Δpx / ΔΣcounts。分母必须是真实 count（core 的 aim_out_counts_*）。
+        # 旧实现拿"偏置的 px"当分母（量纲 px/px）⇒ 比值恒 ≈1.0 ⇒ 标定即使成功，
+        # 写出的 kp 也只由那个假 gain 推出（实测恒为 15），与真实手感无关。
+        if _calib_out_counts() is None:
+            _calib_set(state='failed', status='failed', phase='error', ready=False,
+                       reason='当前 Core 不提供 aim_out_counts_*（需 1.5.51 及以上）：'
+                              '拿不到真实注入 count，无法测出物理 gain')
+            return
+        amplitudes = CALIB_AMPLITUDES
         axis_observations = {CalibrationAxis.X: [], CalibrationAxis.Y: []}
+        dropped = {CalibrationAxis.X: 0, CalibrationAxis.Y: 0}
+        no_write = False
         for axis in (CalibrationAxis.X, CalibrationAxis.Y):
             _calib_set(
                 state=f'stabilize_{axis.value}',
@@ -3859,77 +3976,101 @@ def _calib_worker() -> None:
                 if _cal['status'] != 'running':
                     _calib_set(state='cancelled', phase='cancelled', reason='cancelled')
                     return
-                base_samples = _calib_sample_observations(3)
-                if not base_samples:
-                    _calib_set(state='failed', status='failed', phase='error', reason='no_target', ready=False)
+                # 轮间回零：先把偏置清掉并**等瞄点静止**，否则上一轮的余速会算进本轮 Δpx。
+                if not _calib_apply_bias(axis, 0.0):
+                    _calib_set(state='failed', status='failed', phase='error',
+                               reason='Core 配置应用失败', ready=False)
                     return
-                base = base_samples[-1]
+                settled, settle_ms = _calib_wait_settled(axis)
                 _calib_set(
                     state=f'sampling_{axis.value}',
                     phase=f'measure_{axis.value}_response',
                     current_axis=axis.value,
                     round=index + 1,
-                    amplitude_counts=amp,
-                    progress=(index + (0 if axis is CalibrationAxis.X else 5)) / 10.0,
+                    amplitude_px=amp,
+                    amplitude_counts=amp,   # 旧键名兼容：单位现为 px 偏置（下游无人消费）
+                    settle_ms=int(settle_ms),
+                    settled=settled,
+                    progress=(index + (0 if axis is CalibrationAxis.X else 8)) / 16.0,
                 )
-                bias = {'calibration_bias_x': float(amp) if axis is CalibrationAxis.X else 0.0,
-                        'calibration_bias_y': float(amp) if axis is CalibrationAxis.Y else 0.0}
-                prof = _get_runtime_profile()
-                mo = prof.setdefault('mouse', {})
-                mo.update(bias)
-                mo['calibrating'] = True
-                if ipc_request('SET_CONFIG', {'profile': prof}).get('status') != 0:
-                    _calib_set(state='failed', status='failed', phase='error', reason='Core 配置应用失败', ready=False)
+                start = _calib_sample_pair(axis)
+                if start is None:
+                    _calib_set(state='failed', status='failed', phase='error',
+                               reason='no_target', ready=False)
                     return
+                write0 = _calib_write_ok()
+                if not _calib_apply_bias(axis, amp):
+                    _calib_set(state='failed', status='failed', phase='error',
+                               reason='Core 配置应用失败', ready=False)
+                    return
+                # 采样窗：位移够了就收工（恒等式对任意窗口成立），或到窗口上限。
+                # 同时测**真实响应延迟**（施加偏置 → 位移首次 ≥0.3px），它要喂给 PID 推导，
+                # 不能用上面等静止的 settle_ms（那是几百 ms 量级，会被 fit 的 ≤50ms 直接拒）。
                 injected_at = time.monotonic()
-                samples = []
+                target_px = amp * 0.6
                 first_response_ms = None
-                for _ in range(60):
+                deadline = injected_at + 0.8
+                while time.monotonic() < deadline:
+                    if _cal['status'] != 'running':
+                        _calib_apply_bias(axis, 0.0)
+                        _calib_set(state='cancelled', phase='cancelled', reason='cancelled')
+                        return
                     time.sleep(0.008)
-                    target = _calib_target()
-                    if target is None:
+                    cur = _calib_target()
+                    if cur is None or cur['target_id'] != start['target']['target_id']:
                         continue
-                    if target['target_id'] != base['target_id'] or target['class_id'] != base['class_id']:
-                        continue
-                    delta = (target['x'] - base['x']) if axis is CalibrationAxis.X else (target['y'] - base['y'])
-                    now_ms = (time.monotonic() - injected_at) * 1000.0
-                    if first_response_ms is None and abs(delta) >= 0.3:
-                        first_response_ms = now_ms
-                    samples.append(CalibrationObservation(
-                        axis=axis,
-                        injected_count=float(amp),
-                        measured_delta_px=abs(delta),
-                        response_delay_ms=first_response_ms if first_response_ms is not None else now_ms,
-                        target_id=f"{target['target_id']}:{target['class_id']}",
-                        valid=abs(delta) >= 0.3,
-                    ))
-                    if len(samples) >= 20 and first_response_ms is not None:
+                    moved = abs((cur['x'] if axis is CalibrationAxis.X else cur['y']) - start['px'])
+                    if first_response_ms is None and moved >= 0.3:
+                        first_response_ms = (time.monotonic() - injected_at) * 1000.0
+                    if moved >= abs(target_px):
                         break
-                # 清除本轮偏置，避免下一轮叠加；仍保持标定模式直到 finally。
-                prof = _get_runtime_profile()
-                mo = prof.setdefault('mouse', {})
-                mo['calibration_bias_x'] = 0.0
-                mo['calibration_bias_y'] = 0.0
-                ipc_request('SET_CONFIG', {'profile': prof})
-                if samples:
-                    # 同一轮取中位数观测，作为一个轴向测量点。
-                    delta = sorted(item.measured_delta_px for item in samples)[len(samples) // 2]
-                    delay = sorted(item.response_delay_ms for item in samples)[len(samples) // 2]
+                end = _calib_sample_pair(axis)
+                # 本轮结束立即回零（下一轮开头还会再清一次并等静止）。
+                _calib_apply_bias(axis, 0.0)
+                _calib_set(valid_sample_count=sum(len(v) for v in axis_observations.values()))
+                if end is None:
+                    continue
+                d_px = abs(end['px'] - start['px'])
+                d_counts = abs(end['counts'] - start['counts'])
+                same_target = (end['target']['target_id'] == start['target']['target_id'] and
+                               end['target']['class_id'] == start['target']['class_id'])
+                # 本窗口内 usbproxy 是否真的写出过包：写了 count 却没写出包 = 注入没生效，
+                # 此时画面里即使有位移也不是我们造成的 ⇒ 本样本必须作废。
+                wrote = (_calib_write_ok() - write0) > 0
+                if same_target and d_px >= CALIB_MIN_DELTA_PX and d_counts >= CALIB_MIN_COUNTS and wrote:
                     axis_observations[axis].append(CalibrationObservation(
                         axis=axis,
-                        injected_count=float(amp),
-                        measured_delta_px=delta,
-                        response_delay_ms=max(0.0, delay),
-                        target_id=samples[0].target_id,
+                        injected_count=float(d_counts),
+                        measured_delta_px=d_px,
+                        response_delay_ms=float(first_response_ms if first_response_ms is not None
+                                                else (time.monotonic() - injected_at) * 1000.0),
+                        target_id=f"{start['target']['target_id']}:{start['target']['class_id']}",
                         valid=True,
                     ))
-                _calib_set(valid_sample_count=sum(len(v) for v in axis_observations.values()))
-
+                else:
+                    dropped[axis] += 1
+                    if d_counts >= CALIB_MIN_COUNTS and not wrote:
+                        no_write = True
+                _calib_set(dropped_sample_count=sum(dropped.values()))
+            if not axis_observations[axis]:
+                # 整轴一个样本都没过门槛：与其让 fit 报一句笼统的"有效样本不足"，
+                # 不如把卡在哪说清（位移够不够 / 闭环有没有真的动 / 目标是不是被甩出画面）。
+                _calib_set(
+                    state='failed', status='failed', phase='error', ready=False,
+                    reason=f'{axis.value}轴无有效样本（{len(amplitudes)} 轮全部低于门槛：'
+                           f'位移需 ≥{CALIB_MIN_DELTA_PX}px 且 count 需 ≥{CALIB_MIN_COUNTS}'
+                           f'，或目标在采样中被甩出画面）',
+                )
+                return
             _calib_set(
                 state=f'analyzing_{axis.value}',
                 phase=f'measure_{axis.value}_settle',
                 current_axis=axis.value,
             )
+        if no_write:
+            _calib_set(state='failed', status='failed', phase='error', ready=False,
+                       reason='注入的 count 没有落到 usbproxy（检查输出后端与连线）')
+            return
         _calib_set(state='validating', phase='validating', current_axis='', progress=0.9)
         fits = {
             axis: fit_axis_measurements(axis, values)
@@ -3994,9 +4135,14 @@ def _calib_worker() -> None:
     finally:
         try:
             prof = _get_runtime_profile()
-            prof.setdefault('mouse', {})['calibrating'] = False
+            mo = prof.setdefault('mouse', {})
+            mo['calibrating'] = False
+            # ★ 偏置必须一起归零：中途取消/失败时若留着 calibration_bias_*，
+            #   参考点会被永久顶偏（表现为"标定失败之后自瞄一直瞄偏"），只能靠重启清掉。
+            mo['calibration_bias_x'] = 0.0
+            mo['calibration_bias_y'] = 0.0
             if not was_enabled:
-                prof['mouse']['enabled'] = False
+                mo['enabled'] = False
             ipc_request('SET_CONFIG', {'profile': prof})
         except Exception:
             pass
@@ -4033,6 +4179,10 @@ def _calibration_payload() -> dict:
             'size_variation': _cal['size_variation'],
             'elapsed_ms': _cal['elapsed_ms'],
             'amplitude_counts': _cal['amplitude_counts'],
+            'amplitude_px': _cal['amplitude_px'],
+            'settle_ms': _cal['settle_ms'],
+            'settled': _cal['settled'],
+            'dropped_sample_count': _cal['dropped_sample_count'],
             'error': '' if _cal['status'] != 'failed' else _cal['reason'],
         }
     calib = _read_calibration()

@@ -71,6 +71,17 @@ public:
         int16_t max_move_x = 0;
         int16_t min_move_y = 0;
         int16_t max_move_y = 0;
+        // 累计**请求投递**的 HID count（有符号和，自 start() 起累加，不随 consumed 重置）。
+        // 为什么需要：自动标定要的是「每 count 对应多少 px」的物理增益，而闭环里有恒等式
+        //   画面上目标的位移(px) = gain(px/count) × Σcounts
+        // （相机位移由 count 积分而来，与控制器参数无关）⇒ gain = Δpx / ΔΣcounts。
+        // 旧实现拿 bias 的 px 当分母，量纲就不对（px/px）⇒ 比值恒 ≈1.0、与游戏灵敏度无关，
+        // 标定"成功"也只能写出与真实无关的参数。
+        // 口径：Gate 之后的最终 move_x/y（未放行的帧上面已归零 ⇒ 天然不进累计）。
+        // 与真正落到 usbproxy 的 count 一致的前提是发送不失败；标定时应同时核对
+        // mouse_control_socket_write_ok 是否在涨（见 CoreRuntime 的遥测映射）。
+        int64_t out_counts_x = 0;
+        int64_t out_counts_y = 0;
         uint64_t clipped_frames = 0;
         uint64_t gated_frames = 0;      // Hotkey Gate 拦截的周期数（热键未按）
         uint16_t last_hotkey_bits = 0;  // 最近一次采样的物理按键位图（遥测）

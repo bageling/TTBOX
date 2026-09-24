@@ -686,6 +686,10 @@ void AimThread::loop() {
             status_.smith_dy = trace_smith_dy;
             status_.move_x = move_x;
             status_.move_y = move_y;
+            // 累计请求投递的 count（自动标定的分母真源，见 AimStatus::out_counts_x 的说明）。
+            // 位置：Gate 之后（未放行的帧 move 已归零），与下面 min/max 统计同一份 move 值。
+            status_.out_counts_x += move_x;
+            status_.out_counts_y += move_y;
             if (status_.consumed == 0) {
                 status_.min_move_x = status_.max_move_x = move_x;
                 status_.min_move_y = status_.max_move_y = move_y;

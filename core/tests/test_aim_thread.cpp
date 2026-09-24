@@ -13,11 +13,147 @@
 #include "test_util.hpp"
 #include "aim/AimThread.hpp"
 #include "output/IHidOutput.hpp"
+#include <atomic>
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 using namespace ttbox::core::aim;
+
+namespace {
+
+// 记录每帧实际发出的 move，并累加出"真正交给输出链的 count 总和"。
+// 用来把 AimStatus::out_counts_* 这个**标定分母**与逐帧输出对账。
+class CountingHidOutput final : public ttbox::core::output::IHidOutput {
+public:
+    bool send(const ttbox::core::output::OutputAction& a) override {
+        std::lock_guard<std::mutex> lk(mu_);
+        sum_x_ += a.move_x;
+        sum_y_ += a.move_y;
+        ++frames_;
+        return true;
+    }
+    int64_t sum_x() { std::lock_guard<std::mutex> lk(mu_); return sum_x_; }
+    int64_t sum_y() { std::lock_guard<std::mutex> lk(mu_); return sum_y_; }
+    uint64_t frames() { std::lock_guard<std::mutex> lk(mu_); return frames_; }
+private:
+    std::mutex mu_;
+    int64_t sum_x_ = 0;
+    int64_t sum_y_ = 0;
+    uint64_t frames_ = 0;
+};
+
+ttbox::core::DetectionBox calib_box() {
+    ttbox::core::DetectionBox b;
+    b.x1 = 560.0f; b.y1 = 180.0f; b.x2 = 640.0f; b.y2 = 300.0f;
+    b.score = 0.9f;
+    b.class_id = 0;
+    return b;
+}
+
+}  // namespace
+
+// 自动标定的**分母真源**：累计请求投递的 HID count 必须与逐帧实际发出的 move 逐位一致。
+//
+// 为什么单独锁这一条：标定要算的是物理增益 gain(px/count) = Δ目标位移px / ΔΣcounts。
+// 旧实现把「偏置的 px」当分母（px/px），量纲就不对 ⇒ 比值恒 ≈1.0、与游戏灵敏度无关，
+// 标定"成功"也只能写出与真实手感无关的 kp。分母换成 Σcounts 之后，这个累计量
+// 一旦与真实输出错一位，全部标定结论都错 ⇒ 必须有用例钉住，不能靠肉眼。
+TEST(aim_thread_out_counts_match_sent_moves) {
+    AimTargetMailbox mailbox(1);
+    auto output = std::make_shared<CountingHidOutput>();
+    auto profile = std::make_shared<ttbox::core::RuntimeProfile>();
+    ttbox::core::RuntimeConfig config;
+    std::atomic<uint16_t> buttons{0};
+
+    profile->mouse.enabled = true;
+    profile->mouse.calibrating = true;          // 标定期无视物理热键强制放行注入
+    profile->mouse.calibration_bias_x = 20.0f;  // 参考点像素偏置（控制误差域）
+    profile->mouse.aim_hotkey = 0x02;
+    profile->mouse.kp_x = 1.0f;
+    profile->mouse.kp_y = 1.0f;
+    profile->mouse.kd_x = 0.0f;
+    profile->mouse.kd_y = 0.0f;
+    // smooth 是**削弱倍率**（outputScale = 10000 - smooth，只削 Kp/Kd）：
+    // 默认 9900 会把 Kp 砍到 1/100，配合 output_deadzone 默认 1.0 ⇒ 本用例可能全帧零输出，
+    // 断言就退化成 0 == 0。这里显式关掉削弱与死区，保证确实产生非零输出。
+    profile->mouse.smooth_x = 0.0f;
+    profile->mouse.smooth_y = 0.0f;
+    profile->mouse.output_deadzone = 0.0f;
+    config.update(profile);
+
+    AimThread thread;
+    CHECK(thread.start(&mailbox, output, 1000, &config, &buttons));
+
+    for (uint64_t f = 1; f <= 40; ++f) {
+        AimTargetTask t;
+        t.frame_number = f;
+        t.timestamp_us = 1000ULL * f;
+        t.frame_width = 1280;
+        t.frame_height = 720;
+        t.has_target = true;
+        t.target = calib_box();
+        t.aim_point = {600.0f, 240.0f};
+        t.detections.push_back(calib_box());
+        mailbox.offer(0, t);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    thread.stop();  // join 后不再有新的 send，读数与累计量稳定
+
+    const auto st = thread.status();
+    CHECK(output->frames() > 0);
+    // 核心不变式：累计量 == 逐帧实际发出量之和（两条轴各自成立）
+    CHECK_EQ(st.out_counts_x, output->sum_x());
+    CHECK_EQ(st.out_counts_y, output->sum_y());
+    // 防止"全帧零输出 ⇒ 0 == 0 的弱断言"：本场景必然有非零输出
+    CHECK(st.out_counts_x != 0);
+}
+
+// Gate 关（未按热键且不在标定）时输出被归零 ⇒ 累计量不得增长。
+// 若漏在 Gate 之前累计，标定期间会把"被拦掉的帧"也算进分母 ⇒ gain 偏小。
+TEST(aim_thread_out_counts_ignore_gated_frames) {
+    AimTargetMailbox mailbox(1);
+    auto output = std::make_shared<CountingHidOutput>();
+    auto profile = std::make_shared<ttbox::core::RuntimeProfile>();
+    ttbox::core::RuntimeConfig config;
+    std::atomic<uint16_t> buttons{0};
+
+    profile->mouse.enabled = true;
+    profile->mouse.calibrating = false;
+    profile->mouse.aim_hotkey = 0x02;
+    profile->mouse.kp_x = 1.0f;
+    profile->mouse.kp_y = 1.0f;
+    profile->mouse.smooth_x = 0.0f;
+    profile->mouse.smooth_y = 0.0f;
+    profile->mouse.output_deadzone = 0.0f;
+    config.update(profile);
+
+    AimThread thread;
+    CHECK(thread.start(&mailbox, output, 1000, &config, &buttons));
+
+    for (uint64_t f = 1; f <= 20; ++f) {  // buttons 恒 0 ⇒ 热键未按
+        AimTargetTask t;
+        t.frame_number = f;
+        t.timestamp_us = 1000ULL * f;
+        t.frame_width = 1280;
+        t.frame_height = 720;
+        t.has_target = true;
+        t.target = calib_box();
+        t.aim_point = {600.0f, 240.0f};
+        t.detections.push_back(calib_box());
+        mailbox.offer(0, t);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    thread.stop();
+
+    const auto st = thread.status();
+    CHECK(output->frames() > 0);          // 帧照常走完输出链（Gate 在末端归零）
+    CHECK_EQ(st.out_counts_x, 0);
+    CHECK_EQ(st.out_counts_y, 0);
+    CHECK_EQ(output->sum_x(), 0);
+    CHECK(st.gated_frames > 0);
+}
 
 // 生命周期：start → offer(frame=7) → status 反映最新任务 → 无目标时位移归零。
 TEST(aim_thread_lifecycle_consumes_latest_task) {
