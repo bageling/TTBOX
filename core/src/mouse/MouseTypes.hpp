@@ -281,6 +281,185 @@ struct Trigger2Config {
     int stop_detect_interval = 10;   // 检测周期（帧）
 };
 
+// ===========================================================================
+// BB 对标第二批（2026-09-24）：压枪升级 / 两代提前量 / 拟人化链 / 三个小件
+//   提取来源：bb-port/02-压枪与小件.md、03-提前量与拟人化.md（只取结构与标定值，
+//   实现全部 C++ 自写）。
+//   ★ 统一约定：全部 enabled 默认 false。不开时 AimThread 不跑该模块，
+//     输出链与本批加入前**逐字节一致**（照 ContinuousLeadConfig 的先例）。
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// 压枪三段查表引擎（BB `recoil_presets` / `getRecoilMove`，见 02 号 §1、§2.3）
+//
+// 与原有 RecoilConfig 的关系：
+//   · RecoilConfig 是 TTBOX 原有的「速率模型」：下压速率 = strength × speed（px/s）× dt。
+//   · RecoilBbConfig 是 BB 的「三段查表模型」：开火时长按 total_time 三等分，
+//     每段查一组 (vert, horiz) **相对像素/帧**，再乘全局倍率，末尾叠漂移正弦与一阶平滑。
+//   · 两者以 RecoilBbConfig::enabled 互斥：false（默认）⇒ 完全走原速率模型，行为零变化。
+// ---------------------------------------------------------------------------
+struct RecoilBbConfig {
+    bool enabled = false;            // 三段查表引擎开关（false ⇒ 走原速率模型）
+    int preset = 1;                  // 当前预设编号 1..3
+    float preset_total_time_ms[3] = {1500.0f, 1500.0f, 1500.0f};  // 各预设总时长（ms）
+    // 每预设 3 段的垂直/水平量（px/帧，vert 正=向下压，horiz 正=向右修正）。
+    // 段序号按开火时长三等分：1=[0,t/3) 2=[t/3,2t/3) 3=[2t/3,∞)。
+    float preset_vert[3][3] = {{1.5f, 1.5f, 1.5f}, {1.5f, 1.5f, 1.5f}, {1.0f, 1.3f, 1.6f}};
+    float preset_horiz[3][3] = {{0.0f, 0.0f, 0.0f}, {-2.0f, -2.0f, -2.0f}, {0.0f, 0.0f, 0.0f}};
+    float global_vert = 0.5f;        // 垂直全局倍率
+    float global_horiz = 0.5f;       // 水平全局倍率
+    float delay_ms = 50.0f;          // 开火后延迟多久开始压（ms）
+    float smooth = 0.90f;            // 一阶平滑系数 s（0 = 不平滑）
+    float distance_limit = 80.0f;    // 目标距中心超过它不压（px，≤0 = 不限）
+    bool no_target_always = false;   // 无目标时也压
+    bool drift_enabled = false;      // 水平漂移正弦开关
+    float drift_amplitude = 0.20f;   // 漂移幅度（px）
+    float drift_freq = 1.0f;         // 漂移频率（Hz）
+    bool y_suppress_enabled = false; // 垂直修正 Y 路屏蔽（进阶压枪）
+    float y_suppress_strength = 0.0f; // 屏蔽乘子（0 = 全屏蔽）
+    float max_down_distance = 0.0f;  // 最大下压距离（px，0 = 不限）
+    float adv_mult = 0.9f;           // BB 扳机开火后整体压枪倍率（默认 0.9）
+};
+
+// ---------------------------------------------------------------------------
+// 垂直修正 + 力度渐变（BB `getVerticalCorrection`，见 02 号 §3.3）
+// 输出是**直接叠加**进最终位移的像素量（不是乘子），可与压枪同时生效。
+// ---------------------------------------------------------------------------
+struct VerticalCorrectionConfig {
+    bool enabled = true;             // 垂直修正开关（BB 默认 true；但外层 RecoilBbConfig.enabled 未开则整段不跑）
+    bool no_target = false;          // 无目标也修正
+    float strength = 1.0f;           // 垂直修正基准强度（px/帧）
+    float horiz = 0.0f;              // 水平修正量（px/帧）
+    float delay_ms = 0.0f;           // 起始延迟（ms，从热键按下起算）
+    float max_down_distance = 0.0f;  // 最大下压距离（px，0 = 不限）
+    bool y_suppress_enabled = false; // Y 路屏蔽开关（BB `auto_recoil_y_suppress_*`）
+    float y_suppress_strength = 0.0f; // Y 路屏蔽乘子（0 = 全屏蔽）
+    // 三档渐变互斥（都开则顺序靠前者生效）
+    bool ramp1_enabled = false;      // 渐变 1
+    float ramp1_duration_ms = 1300.0f;
+    float ramp1_start = 1.4f, ramp1_middle = 1.6f, ramp1_end = 0.01f;
+    bool ramp2_enabled = false;      // 渐变 2
+    float ramp2_duration_ms = 2000.0f;
+    float ramp2_start = 1.0f, ramp2_middle = 0.5f, ramp2_end = 0.1f;
+    bool ramp3_enabled = false;      // 渐变 3
+    float ramp3_duration_ms = 2000.0f;
+    float ramp3_start = 1.0f, ramp3_middle = 0.5f, ramp3_end = 0.1f;
+};
+
+// ---------------------------------------------------------------------------
+// 提前量一代：帧窗口投票法（BB `lead_prediction_*`，见 03 号 §1）
+// 只作用于 X 轴（横向）。输入是「本帧自瞄横向输出 mx」，输出是叠加到瞄准点 at.x
+// 的偏移量（下一帧生效 —— 脚本本身也有一帧延迟）。
+// ★ filter_box_* 用**像素面积**判定远处小目标，允许更小的单帧位移参与投票。
+// ---------------------------------------------------------------------------
+struct Lead1Config {
+    bool enabled = false;            // 总开关
+    int frames = 10;                 // 投票窗口帧数 N
+    float direction_ratio = 70.0f;   // 主导方向占比阈值（%）
+    float displacement_ratio = 2.0f; // 主导位移 ≥ 反向位移 × 该倍率
+    float strength = 0.5f;           // 提前量强度（偏移 = 平滑速度 × 强度 × 方向）
+    float smooth = 0.5f;             // 速度指数平滑系数（0~1，越大越滞后）
+    float hold_ms = 50.0f;           // 激活后保持偏移时长（ms）
+    float activation_distance = 40.0f; // 准星到目标距离超它不触发（px）
+    float settle_ms = 10.0f;         // 进入激活距离后的冷却（ms）
+    float displacement_min = 10.0f;  // 主导位移下限（px）
+    float displacement_max = 40.0f;  // 主导位移上限（px）
+    float dead_zone = 5.0f;          // 目标框中心移动小于它不收帧（px）
+    int oscillation_cancel = 3;      // 连续几次激活方向相反即熔断
+    float filter_base = 0.3f;        // 单帧位移过滤基数（px）
+    float filter_box_mid = 1000.0f;  // 动态过滤的框面积中值（px²）
+    float filter_min_ratio = 0.3f;   // 小目标过滤下限比例
+    float filter_max_ratio = 3.0f;   // 大目标过滤上限比例
+};
+
+// ---------------------------------------------------------------------------
+// 提前量二代：积分累积法（BB `lead2_*`，见 03 号 §2）
+// integral += errorX × gain × yScale²（注意是平方）；死区内乘 decay 衰减；
+// Y 轴抑制由「上一帧纵向输出」驱动（纵向输出越大，横向提前量越小 → 防斜拉抛物线）。
+// ---------------------------------------------------------------------------
+struct Lead2Config {
+    bool enabled = false;            // 总开关
+    float gain = 0.05f;              // 积分增益（1/帧）
+    float max_offset = 25.0f;        // 偏移上限（±px）
+    float decay = 0.95f;             // 死区内积分衰减系数（每帧 ×该值）
+    float activation_distance = 100.0f; // 激活距离（px）
+    float dead_zone = 1.0f;          // 误差死区（px）
+    float hold_ms = 10.0f;           // 保持窗（ms）
+    float cooldown_ms = 250.0f;      // 进入距离后的冷却（ms）
+    bool y_suppress_enabled = true;  // Y 轴抑制开关
+    float y_suppress_min = 0.5f;     // 纵向输出小于它不抑制（px/帧）
+    float y_suppress_max = 2.0f;     // 纵向输出大于它完全抑制（px/帧）
+};
+
+// ---------------------------------------------------------------------------
+// BB 拟人化整形链（BB `applyHumanize`，见 03 号 §3）
+// 顺序固定：一阶低通 → 反应延迟 → 过冲 → 制动 → 高斯噪声。
+// ★ smooth_factor 在 BB 里「无开关、>0 即生效」，本实现把默认改成 0.0f
+//   （=关闭），保证"默认零变化"这条底线；要用再把值调上去。
+// ★ human_rest_* 是 BB 的死功能（无人读取），按文档要求**不实现**。
+// ---------------------------------------------------------------------------
+struct HumanizeShaperConfig {
+    bool enabled = false;            // 总开关（低通/延迟/过冲/制动/噪声全部受它控）
+    float smooth_factor = 0.0f;      // 一阶低通系数（0~0.99，0 = 关闭）
+    float overshoot = 0.0f;          // 过冲强度（factor = 1 + overshoot×min(1, dtt/200)）
+    float brake_distance = 0.0f;     // 制动触发距离（px，0 = 关闭）
+    float noise_sigma = 0.2f;        // 高斯噪声标准差（px）
+    float delay_ms = 0.0f;           // 反应延迟基准（ms）
+    float delay_random_ms = 0.0f;    // 反应延迟随机幅度（±ms）
+    // 速度波动（可选附加项，见 03 号 §3.4）
+    bool speed_fluctuation_enabled = false;
+    float speed_fluctuation_start_speed = 0.80f;
+    float speed_fluctuation_accel_ratio = 0.20f;
+    float speed_fluctuation_decel_ratio = 0.20f;
+    float speed_fluctuation_intensity = 0.15f;
+    // 精度模拟（可选附加项，见 03 号 §3.6）：把瞄准点推到目标框边缘/四角
+    bool accuracy_sim_enabled = false;
+    float accuracy_sim_perfect_rate = 90.0f;   // "完美命中"概率（%）
+    float accuracy_sim_offset_strength = 0.50f; // 偏移强度（占框半径比例）
+    int accuracy_sim_direction = 0;            // 0=四角优先 1=边缘随机 2=随机
+};
+
+// ---------------------------------------------------------------------------
+// 抗过冲（BB `applyAntiOvershoot`，见 02 号 §5）
+// 靠近中心时按百分比衰减位移；内/外圈各自"最多衰减 N 帧"，跑满即本轮不再干预；
+// 准星飘到外圈以外并持续超 reset_cooldown 则整轮复位（可再来一次）。
+// ---------------------------------------------------------------------------
+struct AntiOvershootConfig {
+    bool enabled = false;            // 总开关
+    float outer_distance = 20.0f;    // 外圈半径（px）
+    float outer_strength = 50.0f;    // 外圈每帧衰减强度（%）
+    float inner_distance = 10.0f;    // 内圈半径（px）
+    float inner_strength = 90.0f;    // 内圈每帧衰减强度（%）
+    int outer_frames = 11;           // 外圈最多衰减帧数
+    int inner_frames = 6;            // 内圈最多衰减帧数
+    float reset_cooldown_ms = 500.0f; // 持续越界复位冷却（ms）
+};
+
+// ---------------------------------------------------------------------------
+// 速度自适应 Kp（BB `getSpeedAdaptiveKpMultiplier`，见 02 号 §6）
+// 滑动窗口估平均帧间位移：动目标加大 Kp（跟得紧），静目标减小 Kp（防抖）。
+// ★ 输出是**乘子**，由 AimThread 在每帧 PID 计算前临时乘到 kp 上、算完还原。
+// ---------------------------------------------------------------------------
+struct SpeedAdaptiveKpConfig {
+    bool enabled = false;            // 总开关
+    float move_mult = 1.5f;          // 移动时 Kp 乘子
+    float static_mult = 0.8f;        // 静止时 Kp 乘子
+    float threshold = 3.0f;          // 平均速度阈值（px/帧）
+    int frames = 5;                  // 滑动窗口帧数
+};
+
+// ---------------------------------------------------------------------------
+// 全局正弦扰动（BB `applyGlobalWave`，见 02 号 §4）
+// 同一相位驱动 X/Y，各自乘振幅并做一阶平滑，叠加到每帧最终位移上。
+// ---------------------------------------------------------------------------
+struct GlobalWaveConfig {
+    bool enabled = false;            // 总开关
+    float amp_x = 0.10f;             // X 振幅（px）
+    float amp_y = 0.10f;             // Y 振幅（px）
+    float freq = 1.0f;               // 频率（Hz）
+    float smooth = 0.50f;            // 一阶平滑系数（0 = 不平滑）
+};
+
 // 热键保护（hotkey_guard）：按一次 toggle_hotkey 在「热键生效 / 全部挂起」之间切换。
 //
 // 挂起的实现方式是**把物理按键位图在本控制周期内清零**（AimThread 里做），
@@ -363,6 +542,16 @@ struct MouseProfile {
         // **本结构体缺该成员、AimThread 从未调用** ⇒ 签名/面板都无从配置（M2 补齐）。
         ContinuousLeadConfig continuous_lead;
     RecoilConfig recoil;                    // 压枪（输出链 pull_curve 后、deadzone 前注入 scaled_y）
+    // ---- BB 对标第二批（2026-09-24）----
+    // 全部默认 false ⇒ 不开时 AimThread 不跑这些模块，输出链与本批加入前逐字节一致。
+    RecoilBbConfig recoil_bb;               // 压枪三段查表引擎（recoil.enabled 且 recoil_bb.enabled 才走）
+    VerticalCorrectionConfig vertical_correction;  // 垂直修正 + 力度渐变（叠加进最终位移）
+    Lead1Config lead1;                      // 提前量一代（帧窗口投票，X 轴）
+    Lead2Config lead2;                      // 提前量二代（积分累积，X 轴）
+    HumanizeShaperConfig humanize;          // BB 拟人化整形链（替换 personal_shader 调用点）
+    AntiOvershootConfig anti_overshoot;     // 抗过冲状态机
+    SpeedAdaptiveKpConfig speed_adaptive_kp; // 速度自适应 Kp（临时乘子）
+    GlobalWaveConfig global_wave;           // 全局正弦扰动
     // ---- 自动扳机（BB 对标，2026-09-24 移植）----
     // 两套状态机互相独立，可分别开启；都只产出"要开火"的决策（TriggerCmd），
     // 真正的点击由 AimThread 拿到决策后调 output->mouse_click 注入 —— 决策与注入分离。

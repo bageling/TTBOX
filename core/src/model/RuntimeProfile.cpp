@@ -197,6 +197,84 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "trigger 置信度/偏移比例超出 [0,1]";
         return false;
     }
+    // ---- BB 对标第二批（2026-09-24）：压枪三段查表 / 提前量 / 拟人化 / 三个小件 ----
+    // 规则：ms 与 px 类参数 <0 拒绝；比例/系数类越界拒绝。
+    if (mouse.recoil_bb.preset_total_time_ms[0] < 0.0f ||
+        mouse.recoil_bb.preset_total_time_ms[1] < 0.0f ||
+        mouse.recoil_bb.preset_total_time_ms[2] < 0.0f ||
+        mouse.recoil_bb.delay_ms < 0.0f || mouse.recoil_bb.drift_amplitude < 0.0f ||
+        mouse.recoil_bb.drift_freq < 0.0f || mouse.recoil_bb.max_down_distance < 0.0f ||
+        mouse.recoil_bb.adv_mult < 0.0f ||
+        mouse.vertical_correction.delay_ms < 0.0f ||
+        mouse.vertical_correction.max_down_distance < 0.0f ||
+        mouse.vertical_correction.ramp1_duration_ms < 0.0f ||
+        mouse.vertical_correction.ramp2_duration_ms < 0.0f ||
+        mouse.vertical_correction.ramp3_duration_ms < 0.0f) {
+        if (error) *error = "recoil_bb/vertical_correction 时长与距离不能为负";
+        return false;
+    }
+    if (mouse.recoil_bb.smooth < 0.0f || mouse.recoil_bb.smooth > 1.0f ||
+        mouse.recoil_bb.y_suppress_strength < 0.0f || mouse.recoil_bb.y_suppress_strength > 1.0f ||
+        mouse.vertical_correction.y_suppress_strength < 0.0f ||
+        mouse.vertical_correction.y_suppress_strength > 1.0f) {
+        if (error) *error = "recoil_bb.smooth / y_suppress_strength 超出 [0,1]";
+        return false;
+    }
+    if (mouse.lead1.frames < 1 || mouse.lead1.oscillation_cancel < 1 ||
+        mouse.lead1.activation_distance < 0.0f || mouse.lead1.settle_ms < 0.0f ||
+        mouse.lead1.hold_ms < 0.0f || mouse.lead1.dead_zone < 0.0f ||
+        mouse.lead1.filter_base < 0.0f || mouse.lead1.filter_box_mid < 0.0f ||
+        mouse.lead1.displacement_ratio < 0.0f ||
+        mouse.lead2.gain < 0.0f || mouse.lead2.max_offset < 0.0f ||
+        mouse.lead2.activation_distance < 0.0f || mouse.lead2.dead_zone < 0.0f ||
+        mouse.lead2.hold_ms < 0.0f || mouse.lead2.cooldown_ms < 0.0f ||
+        mouse.lead2.y_suppress_min < 0.0f || mouse.lead2.y_suppress_max < 0.0f) {
+        if (error) *error = "lead1/lead2 帧数、时长、距离不能为负";
+        return false;
+    }
+    if (mouse.lead1.smooth < 0.0f || mouse.lead1.smooth > 1.0f ||
+        mouse.lead1.strength < 0.0f || mouse.lead1.direction_ratio < 0.0f ||
+        mouse.lead1.direction_ratio > 100.0f || mouse.lead1.filter_min_ratio < 0.0f ||
+        mouse.lead1.filter_max_ratio < 0.0f || mouse.lead2.decay < 0.0f ||
+        mouse.lead2.decay > 1.0f) {
+        if (error) *error = "lead1/lead2 平滑系数或比例越界";
+        return false;
+    }
+    if (mouse.humanize.smooth_factor < 0.0f || mouse.humanize.smooth_factor > 0.99f ||
+        mouse.humanize.overshoot < 0.0f || mouse.humanize.brake_distance < 0.0f ||
+        mouse.humanize.noise_sigma < 0.0f || mouse.humanize.delay_ms < 0.0f ||
+        mouse.humanize.delay_random_ms < 0.0f ||
+        mouse.humanize.speed_fluctuation_accel_ratio < 0.0f ||
+        mouse.humanize.speed_fluctuation_accel_ratio > 1.0f ||
+        mouse.humanize.speed_fluctuation_decel_ratio < 0.0f ||
+        mouse.humanize.speed_fluctuation_decel_ratio > 1.0f ||
+        mouse.humanize.speed_fluctuation_intensity < 0.0f ||
+        mouse.humanize.speed_fluctuation_intensity > 1.0f ||
+        mouse.humanize.accuracy_sim_perfect_rate < 0.0f ||
+        mouse.humanize.accuracy_sim_perfect_rate > 100.0f ||
+        mouse.humanize.accuracy_sim_offset_strength < 0.0f) {
+        if (error) *error = "humanize 系数/时长/概率越界";
+        return false;
+    }
+    if (mouse.anti_overshoot.outer_distance < 0.0f || mouse.anti_overshoot.inner_distance < 0.0f ||
+        mouse.anti_overshoot.outer_strength < 0.0f || mouse.anti_overshoot.outer_strength > 100.0f ||
+        mouse.anti_overshoot.inner_strength < 0.0f || mouse.anti_overshoot.inner_strength > 100.0f ||
+        mouse.anti_overshoot.outer_frames < 0 || mouse.anti_overshoot.inner_frames < 0 ||
+        mouse.anti_overshoot.reset_cooldown_ms < 0.0f) {
+        if (error) *error = "anti_overshoot 距离/强度/帧数不能为负（强度 ≤100）";
+        return false;
+    }
+    if (mouse.speed_adaptive_kp.move_mult < 0.0f || mouse.speed_adaptive_kp.static_mult < 0.0f ||
+        mouse.speed_adaptive_kp.threshold < 0.0f || mouse.speed_adaptive_kp.frames < 1) {
+        if (error) *error = "speed_adaptive_kp 乘子/阈值不能为负、窗口至少 1 帧";
+        return false;
+    }
+    if (mouse.global_wave.amp_x < 0.0f || mouse.global_wave.amp_y < 0.0f ||
+        mouse.global_wave.freq < 0.0f || mouse.global_wave.smooth < 0.0f ||
+        mouse.global_wave.smooth > 1.0f) {
+        if (error) *error = "global_wave 振幅/频率不能为负，smooth 须在 [0,1]";
+        return false;
+    }
     if (mouse.trigger2.first_err < 0.0f || mouse.trigger2.first_delay < 0.0f ||
         mouse.trigger2.fire_interval < 0.0f || mouse.trigger2.fire_random < 0.0f ||
         mouse.trigger2.press_duration < 0.0f || mouse.trigger2.precision_range < 0.0f ||
@@ -412,6 +490,152 @@ JsonValue RuntimeProfile::to_json() const {
     rc.set("humanize_jitter_px", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_px)));
     rc.set("humanize_jitter_frequency", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_frequency)));
     m.set("recoil", std::move(rc));
+    // ---- BB 对标第二批（2026-09-24）：压枪三段查表 / 两代提前量 / 拟人化链 / 三个小件 ----
+    // 全部默认 enabled=false ⇒ 未显式开启时 AimThread 不跑这些模块，输出链逐字节不变。
+    {
+        JsonValue rb = JsonValue::object();
+        rb.set("enabled", JsonValue::boolean(mouse.recoil_bb.enabled));
+        rb.set("preset", JsonValue::number(static_cast<double>(mouse.recoil_bb.preset)));
+        JsonValue tt = JsonValue::array();
+        for (int i = 0; i < 3; ++i) {
+            tt.push_back(JsonValue::number(static_cast<double>(mouse.recoil_bb.preset_total_time_ms[i])));
+        }
+        rb.set("preset_total_time_ms", std::move(tt));
+        JsonValue pv = JsonValue::array();
+        JsonValue ph = JsonValue::array();
+        for (int i = 0; i < 3; ++i) {
+            JsonValue rv = JsonValue::array();
+            JsonValue rh = JsonValue::array();
+            for (int j = 0; j < 3; ++j) {
+                rv.push_back(JsonValue::number(static_cast<double>(mouse.recoil_bb.preset_vert[i][j])));
+                rh.push_back(JsonValue::number(static_cast<double>(mouse.recoil_bb.preset_horiz[i][j])));
+            }
+            pv.push_back(std::move(rv));
+            ph.push_back(std::move(rh));
+        }
+        rb.set("preset_vert", std::move(pv));
+        rb.set("preset_horiz", std::move(ph));
+        rb.set("global_vert", JsonValue::number(static_cast<double>(mouse.recoil_bb.global_vert)));
+        rb.set("global_horiz", JsonValue::number(static_cast<double>(mouse.recoil_bb.global_horiz)));
+        rb.set("delay_ms", JsonValue::number(static_cast<double>(mouse.recoil_bb.delay_ms)));
+        rb.set("smooth", JsonValue::number(static_cast<double>(mouse.recoil_bb.smooth)));
+        rb.set("distance_limit", JsonValue::number(static_cast<double>(mouse.recoil_bb.distance_limit)));
+        rb.set("no_target_always", JsonValue::boolean(mouse.recoil_bb.no_target_always));
+        rb.set("drift_enabled", JsonValue::boolean(mouse.recoil_bb.drift_enabled));
+        rb.set("drift_amplitude", JsonValue::number(static_cast<double>(mouse.recoil_bb.drift_amplitude)));
+        rb.set("drift_freq", JsonValue::number(static_cast<double>(mouse.recoil_bb.drift_freq)));
+        rb.set("y_suppress_enabled", JsonValue::boolean(mouse.recoil_bb.y_suppress_enabled));
+        rb.set("y_suppress_strength", JsonValue::number(static_cast<double>(mouse.recoil_bb.y_suppress_strength)));
+        rb.set("max_down_distance", JsonValue::number(static_cast<double>(mouse.recoil_bb.max_down_distance)));
+        rb.set("adv_mult", JsonValue::number(static_cast<double>(mouse.recoil_bb.adv_mult)));
+        m.set("recoil_bb", std::move(rb));
+
+        JsonValue vc = JsonValue::object();
+        vc.set("enabled", JsonValue::boolean(mouse.vertical_correction.enabled));
+        vc.set("no_target", JsonValue::boolean(mouse.vertical_correction.no_target));
+        vc.set("strength", JsonValue::number(static_cast<double>(mouse.vertical_correction.strength)));
+        vc.set("horiz", JsonValue::number(static_cast<double>(mouse.vertical_correction.horiz)));
+        vc.set("delay_ms", JsonValue::number(static_cast<double>(mouse.vertical_correction.delay_ms)));
+        vc.set("max_down_distance", JsonValue::number(static_cast<double>(mouse.vertical_correction.max_down_distance)));
+        vc.set("y_suppress_enabled", JsonValue::boolean(mouse.vertical_correction.y_suppress_enabled));
+        vc.set("y_suppress_strength", JsonValue::number(static_cast<double>(mouse.vertical_correction.y_suppress_strength)));
+        vc.set("ramp1_enabled", JsonValue::boolean(mouse.vertical_correction.ramp1_enabled));
+        vc.set("ramp1_duration_ms", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp1_duration_ms)));
+        vc.set("ramp1_start", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp1_start)));
+        vc.set("ramp1_middle", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp1_middle)));
+        vc.set("ramp1_end", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp1_end)));
+        vc.set("ramp2_enabled", JsonValue::boolean(mouse.vertical_correction.ramp2_enabled));
+        vc.set("ramp2_duration_ms", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp2_duration_ms)));
+        vc.set("ramp2_start", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp2_start)));
+        vc.set("ramp2_middle", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp2_middle)));
+        vc.set("ramp2_end", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp2_end)));
+        vc.set("ramp3_enabled", JsonValue::boolean(mouse.vertical_correction.ramp3_enabled));
+        vc.set("ramp3_duration_ms", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_duration_ms)));
+        vc.set("ramp3_start", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_start)));
+        vc.set("ramp3_middle", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_middle)));
+        vc.set("ramp3_end", JsonValue::number(static_cast<double>(mouse.vertical_correction.ramp3_end)));
+        m.set("vertical_correction", std::move(vc));
+
+        JsonValue l1 = JsonValue::object();
+        l1.set("enabled", JsonValue::boolean(mouse.lead1.enabled));
+        l1.set("frames", JsonValue::number(static_cast<double>(mouse.lead1.frames)));
+        l1.set("direction_ratio", JsonValue::number(static_cast<double>(mouse.lead1.direction_ratio)));
+        l1.set("displacement_ratio", JsonValue::number(static_cast<double>(mouse.lead1.displacement_ratio)));
+        l1.set("strength", JsonValue::number(static_cast<double>(mouse.lead1.strength)));
+        l1.set("smooth", JsonValue::number(static_cast<double>(mouse.lead1.smooth)));
+        l1.set("hold_ms", JsonValue::number(static_cast<double>(mouse.lead1.hold_ms)));
+        l1.set("activation_distance", JsonValue::number(static_cast<double>(mouse.lead1.activation_distance)));
+        l1.set("settle_ms", JsonValue::number(static_cast<double>(mouse.lead1.settle_ms)));
+        l1.set("displacement_min", JsonValue::number(static_cast<double>(mouse.lead1.displacement_min)));
+        l1.set("displacement_max", JsonValue::number(static_cast<double>(mouse.lead1.displacement_max)));
+        l1.set("dead_zone", JsonValue::number(static_cast<double>(mouse.lead1.dead_zone)));
+        l1.set("oscillation_cancel", JsonValue::number(static_cast<double>(mouse.lead1.oscillation_cancel)));
+        l1.set("filter_base", JsonValue::number(static_cast<double>(mouse.lead1.filter_base)));
+        l1.set("filter_box_mid", JsonValue::number(static_cast<double>(mouse.lead1.filter_box_mid)));
+        l1.set("filter_min_ratio", JsonValue::number(static_cast<double>(mouse.lead1.filter_min_ratio)));
+        l1.set("filter_max_ratio", JsonValue::number(static_cast<double>(mouse.lead1.filter_max_ratio)));
+        m.set("lead1", std::move(l1));
+
+        JsonValue l2 = JsonValue::object();
+        l2.set("enabled", JsonValue::boolean(mouse.lead2.enabled));
+        l2.set("gain", JsonValue::number(static_cast<double>(mouse.lead2.gain)));
+        l2.set("max_offset", JsonValue::number(static_cast<double>(mouse.lead2.max_offset)));
+        l2.set("decay", JsonValue::number(static_cast<double>(mouse.lead2.decay)));
+        l2.set("activation_distance", JsonValue::number(static_cast<double>(mouse.lead2.activation_distance)));
+        l2.set("dead_zone", JsonValue::number(static_cast<double>(mouse.lead2.dead_zone)));
+        l2.set("hold_ms", JsonValue::number(static_cast<double>(mouse.lead2.hold_ms)));
+        l2.set("cooldown_ms", JsonValue::number(static_cast<double>(mouse.lead2.cooldown_ms)));
+        l2.set("y_suppress_enabled", JsonValue::boolean(mouse.lead2.y_suppress_enabled));
+        l2.set("y_suppress_min", JsonValue::number(static_cast<double>(mouse.lead2.y_suppress_min)));
+        l2.set("y_suppress_max", JsonValue::number(static_cast<double>(mouse.lead2.y_suppress_max)));
+        m.set("lead2", std::move(l2));
+
+        JsonValue hu = JsonValue::object();
+        hu.set("enabled", JsonValue::boolean(mouse.humanize.enabled));
+        hu.set("smooth_factor", JsonValue::number(static_cast<double>(mouse.humanize.smooth_factor)));
+        hu.set("overshoot", JsonValue::number(static_cast<double>(mouse.humanize.overshoot)));
+        hu.set("brake_distance", JsonValue::number(static_cast<double>(mouse.humanize.brake_distance)));
+        hu.set("noise_sigma", JsonValue::number(static_cast<double>(mouse.humanize.noise_sigma)));
+        hu.set("delay_ms", JsonValue::number(static_cast<double>(mouse.humanize.delay_ms)));
+        hu.set("delay_random_ms", JsonValue::number(static_cast<double>(mouse.humanize.delay_random_ms)));
+        hu.set("speed_fluctuation_enabled", JsonValue::boolean(mouse.humanize.speed_fluctuation_enabled));
+        hu.set("speed_fluctuation_start_speed", JsonValue::number(static_cast<double>(mouse.humanize.speed_fluctuation_start_speed)));
+        hu.set("speed_fluctuation_accel_ratio", JsonValue::number(static_cast<double>(mouse.humanize.speed_fluctuation_accel_ratio)));
+        hu.set("speed_fluctuation_decel_ratio", JsonValue::number(static_cast<double>(mouse.humanize.speed_fluctuation_decel_ratio)));
+        hu.set("speed_fluctuation_intensity", JsonValue::number(static_cast<double>(mouse.humanize.speed_fluctuation_intensity)));
+        hu.set("accuracy_sim_enabled", JsonValue::boolean(mouse.humanize.accuracy_sim_enabled));
+        hu.set("accuracy_sim_perfect_rate", JsonValue::number(static_cast<double>(mouse.humanize.accuracy_sim_perfect_rate)));
+        hu.set("accuracy_sim_offset_strength", JsonValue::number(static_cast<double>(mouse.humanize.accuracy_sim_offset_strength)));
+        hu.set("accuracy_sim_direction", JsonValue::number(static_cast<double>(mouse.humanize.accuracy_sim_direction)));
+        m.set("humanize", std::move(hu));
+
+        JsonValue ao = JsonValue::object();
+        ao.set("enabled", JsonValue::boolean(mouse.anti_overshoot.enabled));
+        ao.set("outer_distance", JsonValue::number(static_cast<double>(mouse.anti_overshoot.outer_distance)));
+        ao.set("outer_strength", JsonValue::number(static_cast<double>(mouse.anti_overshoot.outer_strength)));
+        ao.set("inner_distance", JsonValue::number(static_cast<double>(mouse.anti_overshoot.inner_distance)));
+        ao.set("inner_strength", JsonValue::number(static_cast<double>(mouse.anti_overshoot.inner_strength)));
+        ao.set("outer_frames", JsonValue::number(static_cast<double>(mouse.anti_overshoot.outer_frames)));
+        ao.set("inner_frames", JsonValue::number(static_cast<double>(mouse.anti_overshoot.inner_frames)));
+        ao.set("reset_cooldown_ms", JsonValue::number(static_cast<double>(mouse.anti_overshoot.reset_cooldown_ms)));
+        m.set("anti_overshoot", std::move(ao));
+
+        JsonValue sk = JsonValue::object();
+        sk.set("enabled", JsonValue::boolean(mouse.speed_adaptive_kp.enabled));
+        sk.set("move_mult", JsonValue::number(static_cast<double>(mouse.speed_adaptive_kp.move_mult)));
+        sk.set("static_mult", JsonValue::number(static_cast<double>(mouse.speed_adaptive_kp.static_mult)));
+        sk.set("threshold", JsonValue::number(static_cast<double>(mouse.speed_adaptive_kp.threshold)));
+        sk.set("frames", JsonValue::number(static_cast<double>(mouse.speed_adaptive_kp.frames)));
+        m.set("speed_adaptive_kp", std::move(sk));
+
+        JsonValue gw = JsonValue::object();
+        gw.set("enabled", JsonValue::boolean(mouse.global_wave.enabled));
+        gw.set("amp_x", JsonValue::number(static_cast<double>(mouse.global_wave.amp_x)));
+        gw.set("amp_y", JsonValue::number(static_cast<double>(mouse.global_wave.amp_y)));
+        gw.set("freq", JsonValue::number(static_cast<double>(mouse.global_wave.freq)));
+        gw.set("smooth", JsonValue::number(static_cast<double>(mouse.global_wave.smooth)));
+        m.set("global_wave", std::move(gw));
+    }
     // 自动扳机（BB 对标，2026-09-24）：两套独立状态机，默认全关。
     // 运行时状态（激活态 / 发数 / 计时器）不落盘，这里只持久化配置。
     JsonValue tg = JsonValue::object();
@@ -670,6 +894,153 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.recoil.humanize_curve_strength = static_cast<float>(obj_num(*rk, "humanize_curve_strength", 0.45));
             p.mouse.recoil.humanize_jitter_px = static_cast<float>(obj_num(*rk, "humanize_jitter_px", 0.25));
             p.mouse.recoil.humanize_jitter_frequency = static_cast<float>(obj_num(*rk, "humanize_jitter_frequency", 8.0));
+        }
+        // ---- BB 对标第二批（2026-09-24）解析：缺字段一律取默认（enabled=false ⇒ 行为零变化）----
+        if (const JsonValue* rb = m->find("recoil_bb"); rb && rb->is_object()) {
+            p.mouse.recoil_bb.enabled = obj_bool(*rb, "enabled", false);
+            p.mouse.recoil_bb.preset = static_cast<int>(obj_int(*rb, "preset", 1));
+            if (const JsonValue* a = rb->find("preset_total_time_ms"); a && a->is_array()) {
+                const auto& arr = a->as_array();
+                for (size_t i = 0; i < 3 && i < arr.size(); ++i) {
+                    if (arr[i].is_number()) {
+                        p.mouse.recoil_bb.preset_total_time_ms[i] =
+                            static_cast<float>(arr[i].as_number(1500.0));
+                    }
+                }
+            }
+            auto read_table3x3 = [&](const char* key, float dst[3][3]) {
+                const JsonValue* a = rb->find(key);
+                if (!a || !a->is_array()) return;
+                const auto& rows = a->as_array();
+                for (size_t i = 0; i < 3 && i < rows.size(); ++i) {
+                    if (!rows[i].is_array()) continue;
+                    const auto& cols = rows[i].as_array();
+                    for (size_t j = 0; j < 3 && j < cols.size(); ++j) {
+                        if (cols[j].is_number()) dst[i][j] = static_cast<float>(cols[j].as_number(0.0));
+                    }
+                }
+            };
+            read_table3x3("preset_vert", p.mouse.recoil_bb.preset_vert);
+            read_table3x3("preset_horiz", p.mouse.recoil_bb.preset_horiz);
+            p.mouse.recoil_bb.global_vert = static_cast<float>(obj_num(*rb, "global_vert", 0.5));
+            p.mouse.recoil_bb.global_horiz = static_cast<float>(obj_num(*rb, "global_horiz", 0.5));
+            p.mouse.recoil_bb.delay_ms = static_cast<float>(obj_num(*rb, "delay_ms", 50.0));
+            p.mouse.recoil_bb.smooth = static_cast<float>(obj_num(*rb, "smooth", 0.90));
+            p.mouse.recoil_bb.distance_limit = static_cast<float>(obj_num(*rb, "distance_limit", 80.0));
+            p.mouse.recoil_bb.no_target_always = obj_bool(*rb, "no_target_always", false);
+            p.mouse.recoil_bb.drift_enabled = obj_bool(*rb, "drift_enabled", false);
+            p.mouse.recoil_bb.drift_amplitude = static_cast<float>(obj_num(*rb, "drift_amplitude", 0.20));
+            p.mouse.recoil_bb.drift_freq = static_cast<float>(obj_num(*rb, "drift_freq", 1.0));
+            p.mouse.recoil_bb.y_suppress_enabled = obj_bool(*rb, "y_suppress_enabled", false);
+            p.mouse.recoil_bb.y_suppress_strength = static_cast<float>(obj_num(*rb, "y_suppress_strength", 0.0));
+            p.mouse.recoil_bb.max_down_distance = static_cast<float>(obj_num(*rb, "max_down_distance", 0.0));
+            p.mouse.recoil_bb.adv_mult = static_cast<float>(obj_num(*rb, "adv_mult", 0.9));
+        }
+        if (const JsonValue* vc = m->find("vertical_correction"); vc && vc->is_object()) {
+            auto& v = p.mouse.vertical_correction;
+            v.enabled = obj_bool(*vc, "enabled", true);
+            v.no_target = obj_bool(*vc, "no_target", false);
+            v.strength = static_cast<float>(obj_num(*vc, "strength", 1.0));
+            v.horiz = static_cast<float>(obj_num(*vc, "horiz", 0.0));
+            v.delay_ms = static_cast<float>(obj_num(*vc, "delay_ms", 0.0));
+            v.max_down_distance = static_cast<float>(obj_num(*vc, "max_down_distance", 0.0));
+            v.y_suppress_enabled = obj_bool(*vc, "y_suppress_enabled", false);
+            v.y_suppress_strength = static_cast<float>(obj_num(*vc, "y_suppress_strength", 0.0));
+            v.ramp1_enabled = obj_bool(*vc, "ramp1_enabled", false);
+            v.ramp1_duration_ms = static_cast<float>(obj_num(*vc, "ramp1_duration_ms", 1300.0));
+            v.ramp1_start = static_cast<float>(obj_num(*vc, "ramp1_start", 1.4));
+            v.ramp1_middle = static_cast<float>(obj_num(*vc, "ramp1_middle", 1.6));
+            v.ramp1_end = static_cast<float>(obj_num(*vc, "ramp1_end", 0.01));
+            v.ramp2_enabled = obj_bool(*vc, "ramp2_enabled", false);
+            v.ramp2_duration_ms = static_cast<float>(obj_num(*vc, "ramp2_duration_ms", 2000.0));
+            v.ramp2_start = static_cast<float>(obj_num(*vc, "ramp2_start", 1.0));
+            v.ramp2_middle = static_cast<float>(obj_num(*vc, "ramp2_middle", 0.5));
+            v.ramp2_end = static_cast<float>(obj_num(*vc, "ramp2_end", 0.1));
+            v.ramp3_enabled = obj_bool(*vc, "ramp3_enabled", false);
+            v.ramp3_duration_ms = static_cast<float>(obj_num(*vc, "ramp3_duration_ms", 2000.0));
+            v.ramp3_start = static_cast<float>(obj_num(*vc, "ramp3_start", 1.0));
+            v.ramp3_middle = static_cast<float>(obj_num(*vc, "ramp3_middle", 0.5));
+            v.ramp3_end = static_cast<float>(obj_num(*vc, "ramp3_end", 0.1));
+        }
+        if (const JsonValue* l1 = m->find("lead1"); l1 && l1->is_object()) {
+            auto& c = p.mouse.lead1;
+            c.enabled = obj_bool(*l1, "enabled", false);
+            c.frames = static_cast<int>(obj_int(*l1, "frames", 10));
+            c.direction_ratio = static_cast<float>(obj_num(*l1, "direction_ratio", 70.0));
+            c.displacement_ratio = static_cast<float>(obj_num(*l1, "displacement_ratio", 2.0));
+            c.strength = static_cast<float>(obj_num(*l1, "strength", 0.5));
+            c.smooth = static_cast<float>(obj_num(*l1, "smooth", 0.5));
+            c.hold_ms = static_cast<float>(obj_num(*l1, "hold_ms", 50.0));
+            c.activation_distance = static_cast<float>(obj_num(*l1, "activation_distance", 40.0));
+            c.settle_ms = static_cast<float>(obj_num(*l1, "settle_ms", 10.0));
+            c.displacement_min = static_cast<float>(obj_num(*l1, "displacement_min", 10.0));
+            c.displacement_max = static_cast<float>(obj_num(*l1, "displacement_max", 40.0));
+            c.dead_zone = static_cast<float>(obj_num(*l1, "dead_zone", 5.0));
+            c.oscillation_cancel = static_cast<int>(obj_int(*l1, "oscillation_cancel", 3));
+            c.filter_base = static_cast<float>(obj_num(*l1, "filter_base", 0.3));
+            c.filter_box_mid = static_cast<float>(obj_num(*l1, "filter_box_mid", 1000.0));
+            c.filter_min_ratio = static_cast<float>(obj_num(*l1, "filter_min_ratio", 0.3));
+            c.filter_max_ratio = static_cast<float>(obj_num(*l1, "filter_max_ratio", 3.0));
+        }
+        if (const JsonValue* l2 = m->find("lead2"); l2 && l2->is_object()) {
+            auto& c = p.mouse.lead2;
+            c.enabled = obj_bool(*l2, "enabled", false);
+            c.gain = static_cast<float>(obj_num(*l2, "gain", 0.05));
+            c.max_offset = static_cast<float>(obj_num(*l2, "max_offset", 25.0));
+            c.decay = static_cast<float>(obj_num(*l2, "decay", 0.95));
+            c.activation_distance = static_cast<float>(obj_num(*l2, "activation_distance", 100.0));
+            c.dead_zone = static_cast<float>(obj_num(*l2, "dead_zone", 1.0));
+            c.hold_ms = static_cast<float>(obj_num(*l2, "hold_ms", 10.0));
+            c.cooldown_ms = static_cast<float>(obj_num(*l2, "cooldown_ms", 250.0));
+            c.y_suppress_enabled = obj_bool(*l2, "y_suppress_enabled", true);
+            c.y_suppress_min = static_cast<float>(obj_num(*l2, "y_suppress_min", 0.5));
+            c.y_suppress_max = static_cast<float>(obj_num(*l2, "y_suppress_max", 2.0));
+        }
+        if (const JsonValue* hu = m->find("humanize"); hu && hu->is_object()) {
+            auto& c = p.mouse.humanize;
+            c.enabled = obj_bool(*hu, "enabled", false);
+            c.smooth_factor = static_cast<float>(obj_num(*hu, "smooth_factor", 0.0));
+            c.overshoot = static_cast<float>(obj_num(*hu, "overshoot", 0.0));
+            c.brake_distance = static_cast<float>(obj_num(*hu, "brake_distance", 0.0));
+            c.noise_sigma = static_cast<float>(obj_num(*hu, "noise_sigma", 0.2));
+            c.delay_ms = static_cast<float>(obj_num(*hu, "delay_ms", 0.0));
+            c.delay_random_ms = static_cast<float>(obj_num(*hu, "delay_random_ms", 0.0));
+            c.speed_fluctuation_enabled = obj_bool(*hu, "speed_fluctuation_enabled", false);
+            c.speed_fluctuation_start_speed = static_cast<float>(obj_num(*hu, "speed_fluctuation_start_speed", 0.80));
+            c.speed_fluctuation_accel_ratio = static_cast<float>(obj_num(*hu, "speed_fluctuation_accel_ratio", 0.20));
+            c.speed_fluctuation_decel_ratio = static_cast<float>(obj_num(*hu, "speed_fluctuation_decel_ratio", 0.20));
+            c.speed_fluctuation_intensity = static_cast<float>(obj_num(*hu, "speed_fluctuation_intensity", 0.15));
+            c.accuracy_sim_enabled = obj_bool(*hu, "accuracy_sim_enabled", false);
+            c.accuracy_sim_perfect_rate = static_cast<float>(obj_num(*hu, "accuracy_sim_perfect_rate", 90.0));
+            c.accuracy_sim_offset_strength = static_cast<float>(obj_num(*hu, "accuracy_sim_offset_strength", 0.50));
+            c.accuracy_sim_direction = static_cast<int>(obj_int(*hu, "accuracy_sim_direction", 0));
+        }
+        if (const JsonValue* ao = m->find("anti_overshoot"); ao && ao->is_object()) {
+            auto& c = p.mouse.anti_overshoot;
+            c.enabled = obj_bool(*ao, "enabled", false);
+            c.outer_distance = static_cast<float>(obj_num(*ao, "outer_distance", 20.0));
+            c.outer_strength = static_cast<float>(obj_num(*ao, "outer_strength", 50.0));
+            c.inner_distance = static_cast<float>(obj_num(*ao, "inner_distance", 10.0));
+            c.inner_strength = static_cast<float>(obj_num(*ao, "inner_strength", 90.0));
+            c.outer_frames = static_cast<int>(obj_int(*ao, "outer_frames", 11));
+            c.inner_frames = static_cast<int>(obj_int(*ao, "inner_frames", 6));
+            c.reset_cooldown_ms = static_cast<float>(obj_num(*ao, "reset_cooldown_ms", 500.0));
+        }
+        if (const JsonValue* sk = m->find("speed_adaptive_kp"); sk && sk->is_object()) {
+            auto& c = p.mouse.speed_adaptive_kp;
+            c.enabled = obj_bool(*sk, "enabled", false);
+            c.move_mult = static_cast<float>(obj_num(*sk, "move_mult", 1.5));
+            c.static_mult = static_cast<float>(obj_num(*sk, "static_mult", 0.8));
+            c.threshold = static_cast<float>(obj_num(*sk, "threshold", 3.0));
+            c.frames = static_cast<int>(obj_int(*sk, "frames", 5));
+        }
+        if (const JsonValue* gw = m->find("global_wave"); gw && gw->is_object()) {
+            auto& c = p.mouse.global_wave;
+            c.enabled = obj_bool(*gw, "enabled", false);
+            c.amp_x = static_cast<float>(obj_num(*gw, "amp_x", 0.10));
+            c.amp_y = static_cast<float>(obj_num(*gw, "amp_y", 0.10));
+            c.freq = static_cast<float>(obj_num(*gw, "freq", 1.0));
+            c.smooth = static_cast<float>(obj_num(*gw, "smooth", 0.50));
         }
         // 自动扳机（BB 对标，2026-09-24）解析：缺字段一律取默认（enabled=false ⇒ 行为零变化）。
         // 键位只取低 5 位（鼠标五键位图：左1 右2 中4 侧8 侧16），越界位掩掉。

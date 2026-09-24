@@ -1,0 +1,846 @@
+// test_bb_second_batch.cpp — BB 对标第二批模块单元测试（2026-09-24）
+//
+// 覆盖：
+//   A. RecoilController BB 三段查表引擎（开关/延迟/距离门/三段边界/超时末段/
+//      最大下压截断/垂直修正渐变）
+//   B. Lead1 帧窗口投票（开关/激活/距离熔断/摆动熔断）
+//   C. Lead2 积分累积（开关/冷却/钳制/死区衰减/Y 抑制）
+//   D. HumanizeShaper（开关/过冲单调/制动/噪声有界/低通）
+//   E. AntiOvershoot（开关/内圈衰减帧数/越界冷却复位）
+//   F. SpeedAdaptiveKp（开关/静止乘子/移动乘子）
+//   G. GlobalWave（开关/幅度有界）
+//   H. RuntimeProfile 新键往返（recoil_bb / lead1 / lead2 / humanize /
+//      anti_overshoot / speed_adaptive_kp / global_wave）
+//
+// ★ 全默认（enabled=false）零输出是硬约束：逐模块都有 "默认关 ⇒ 行为零变化" 用例。
+#include <cmath>
+#include <cstdio>
+
+#include "mouse/AntiOvershoot.hpp"
+#include "mouse/GlobalWave.hpp"
+#include "mouse/HumanizeShaper.hpp"
+#include "mouse/LeadPredictor.hpp"
+#include "mouse/RecoilController.hpp"
+#include "mouse/SpeedAdaptiveKp.hpp"
+#include "model/RuntimeProfile.hpp"
+
+using namespace ttbox::core::aim;
+
+namespace {
+
+int failures = 0;
+
+void check(bool cond, const char* msg) {
+    if (!cond) {
+        std::printf("  FAIL: %s\n", msg);
+        ++failures;
+    } else {
+        std::printf("  PASS: %s\n", msg);
+    }
+}
+
+constexpr float kDt = 10.0f;     // 帧间隔 10ms（100Hz）
+constexpr float kPpc = 0.65f;    // px/count
+
+RecoilConfig make_recoil_cfg() {
+    RecoilConfig c;
+    c.enabled = true;
+    c.hotkey = 0x01;
+    c.hotkey2 = 0x00;
+    c.hotkey_mode = 1;
+    return c;
+}
+
+RecoilBbConfig make_bb_cfg() {
+    RecoilBbConfig b;
+    b.enabled = true;
+    b.preset = 3;                 // vert 三段 1.0 / 1.3 / 1.6，便于区分
+    b.preset_total_time_ms[0] = 1500.0f;
+    b.preset_total_time_ms[1] = 1500.0f;
+    b.preset_total_time_ms[2] = 1500.0f;
+    b.global_vert = 1.0f;         // 关掉全局倍率，直接看表值
+    b.global_horiz = 1.0f;
+    b.delay_ms = 0.0f;
+    b.smooth = 0.0f;              // 关平滑，便于断言精确值
+    b.distance_limit = 0.0f;      // 不限距离
+    b.drift_enabled = false;
+    b.max_down_distance = 0.0f;
+    b.adv_mult = 1.0f;
+    return b;
+}
+
+// ============================ A. Recoil BB 引擎 ============================
+
+void test_bb_disabled_zero() {
+    std::printf("[A1] BB 引擎默认关 ⇒ 零输出\n");
+    RecoilController rc;
+    RecoilConfig cfg = make_recoil_cfg();
+    RecoilBbConfig bb;  // enabled = false（默认）
+    VerticalCorrectionConfig vc;
+    float sum = 0.0f;
+    for (int i = 0; i < 100; ++i) {
+        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+        sum += std::fabs(o.recoil_y) + std::fabs(o.recoil_x) + std::fabs(o.vert_y) + std::fabs(o.vert_x);
+    }
+    check(sum == 0.0f, "bb.enabled=false ⇒ 全零输出（行为零变化）");
+}
+
+void test_bb_hotkey_not_pressed() {
+    std::printf("[A2] 热键未按 ⇒ 零输出\n");
+    RecoilController rc;
+    RecoilConfig cfg = make_recoil_cfg();
+    RecoilBbConfig bb = make_bb_cfg();
+    VerticalCorrectionConfig vc;
+    float sum = 0.0f;
+    for (int i = 0; i < 100; ++i) {
+        const auto o = rc.update_bb(0x00, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+        sum += std::fabs(o.recoil_y);
+    }
+    check(sum == 0.0f, "热键未按 ⇒ 不压枪");
+}
+
+void test_bb_delay() {
+    std::printf("[A3] 开火延迟：delay 前零输出\n");
+    RecoilController rc;
+    RecoilConfig cfg = make_recoil_cfg();
+    RecoilBbConfig bb = make_bb_cfg();
+    bb.delay_ms = 50.0f;
+    VerticalCorrectionConfig vc;
+    // 前 4 帧（10/20/30/40ms，含上升沿那帧起算）应全零；第 6 帧（50ms）开始有输出
+    bool before_zero = true;
+    for (int i = 1; i <= 4; ++i) {
+        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+        if (std::fabs(o.recoil_y) > 1e-6f) before_zero = false;
+    }
+    check(before_zero, "delay_ms=50 内不压");
+    float last = 0.0f;
+    for (int i = 5; i <= 8; ++i) {
+        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+        last = o.recoil_y;
+    }
+    check(last > 0.0f, "delay 过后开始下压（Y>0）");
+}
+
+void test_bb_three_segments() {
+    std::printf("[A4] 三段查表边界（t = 1/3、2/3、超总时长）\n");
+    RecoilController rc;
+    RecoilConfig cfg = make_recoil_cfg();
+    RecoilBbConfig bb = make_bb_cfg();   // total=1500 ⇒ 段边界 500 / 1000
+    VerticalCorrectionConfig vc;
+    // 每帧 10ms；先按 1 帧确认（第 1 帧 el=0 ⇒ seg1）
+    const auto o1 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(std::fabs(o1.recoil_y - 1.0f / kPpc) < 1e-4f, "第 1 帧 = 段1 vert 1.0");
+
+    // 跑到 el≈600ms（段2）
+    for (int i = 2; i <= 61; ++i) {
+        rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    }
+    const auto o2 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(std::fabs(o2.recoil_y - 1.3f / kPpc) < 1e-4f, "el≈620ms = 段2 vert 1.3");
+
+    // 跑到 el≈1100ms（段3）
+    for (int i = 0; i < 48; ++i) {
+        rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    }
+    const auto o3 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(std::fabs(o3.recoil_y - 1.6f / kPpc) < 1e-4f, "el≈1100ms = 段3 vert 1.6");
+
+    // 超总时长仍用段3（持续压，不会停）
+    for (int i = 0; i < 60; ++i) {
+        rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    }
+    const auto o4 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(std::fabs(o4.recoil_y - 1.6f / kPpc) < 1e-4f, "el>总时长仍固定段3");
+}
+
+void test_bb_distance_gate() {
+    std::printf("[A5] 距离门 / 无目标策略\n");
+    RecoilController rc;
+    RecoilConfig cfg = make_recoil_cfg();
+    RecoilBbConfig bb = make_bb_cfg();
+    bb.distance_limit = 80.0f;
+    VerticalCorrectionConfig vc;
+    const auto o = rc.update_bb(0x01, true, 200.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(std::fabs(o.recoil_y) < 1e-6f, "目标距中心 200px > 80 ⇒ 不压");
+
+    RecoilController rc2;
+    const auto o2 = rc2.update_bb(0x01, false, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(std::fabs(o2.recoil_y) < 1e-6f, "无目标且 no_target_always=false ⇒ 不压");
+
+    RecoilController rc3;
+    RecoilBbConfig bb3 = make_bb_cfg();
+    bb3.no_target_always = true;
+    const auto o3 = rc3.update_bb(0x01, false, 10.0f, 100.0f, 100.0f, cfg, bb3, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(o3.recoil_y > 0.0f, "no_target_always=true + 无目标 ⇒ 仍压");
+}
+
+void test_bb_max_down_clamp() {
+    std::printf("[A6] 最大下压距离截断 clampRecoilDown\n");
+    RecoilController rc;
+    RecoilConfig cfg = make_recoil_cfg();
+    RecoilBbConfig bb = make_bb_cfg();
+    bb.max_down_distance = 2.0f;   // budget = fy + 2
+    VerticalCorrectionConfig vc;
+    // 目标在准星下方 1px ⇒ budget = 3px，表值 1.0px 不超 ⇒ 不截断
+    const auto o1 = rc.update_bb(0x01, true, 10.0f, 101.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(std::fabs(o1.recoil_y - 1.0f / kPpc) < 1e-4f, "budget=3px > 1.0px ⇒ 原样");
+
+    RecoilController rc2;
+    RecoilBbConfig bb2 = make_bb_cfg();
+    bb2.max_down_distance = 2.0f;
+    // 目标在准星**上方** 5px ⇒ budget = -3 ⇒ 全截断为 0
+    const auto o2 = rc2.update_bb(0x01, true, 10.0f, 95.0f, 100.0f, cfg, bb2, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(std::fabs(o2.recoil_y) < 1e-6f, "budget<=0 ⇒ 截断为 0");
+}
+
+void test_bb_vertical_ramp() {
+    std::printf("[A7] 垂直修正 + 力度渐变\n");
+    RecoilController rc;
+    RecoilConfig cfg = make_recoil_cfg();
+    RecoilBbConfig bb = make_bb_cfg();
+    bb.preset = 1;
+    VerticalCorrectionConfig vc;
+    vc.enabled = true;
+    vc.strength = 1.0f;
+    vc.horiz = 0.0f;
+    vc.delay_ms = 0.0f;
+    vc.ramp1_enabled = true;
+    vc.ramp1_duration_ms = 100.0f;
+    vc.ramp1_start = 1.0f;
+    vc.ramp1_middle = 2.0f;
+    vc.ramp1_end = 4.0f;
+
+    // 热键上升沿那一帧 el=0 ⇒ 修正还没起算，输出为 0
+    const auto o0 = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+    check(std::fabs(o0.vert_y) < 1e-6f, "el=0（上升沿帧）无垂直修正");
+
+    // 第 4 帧：el=30 ⇒ t=0.3 ⇒ 前半段 1.0→2.0 插值 = 1.6
+    float v4 = 0.0f;
+    for (int k = 2; k <= 4; ++k) {
+        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+        v4 = o.vert_y;
+    }
+    check(std::fabs(v4 - 1.6f / kPpc) < 1e-3f, "渐变前半段（t<0.5）线性 start→middle");
+
+    // 第 9 帧：el=80 ⇒ t=0.8 ⇒ 后半段 2.0→4.0 插值 = 3.2
+    float v9 = 0.0f;
+    for (int k = 5; k <= 9; ++k) {
+        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+        v9 = o.vert_y;
+    }
+    check(std::fabs(v9 - 3.2f / kPpc) < 1e-3f, "渐变后半段（t>0.5）middle→end");
+
+    // 第 12 帧：el=110 > duration ⇒ 固定 end=4.0
+    float v12 = 0.0f;
+    for (int k = 10; k <= 12; ++k) {
+        const auto o = rc.update_bb(0x01, true, 10.0f, 100.0f, 100.0f, cfg, bb, vc, kDt, kPpc, 1.0f, 1.0f);
+        v12 = o.vert_y;
+    }
+    check(std::fabs(v12 - 4.0f / kPpc) < 1e-3f, "渐变跑满 ⇒ 固定 end");
+}
+
+// ============================ B. Lead1 ============================
+
+void test_lead1_disabled_zero() {
+    std::printf("[B1] Lead1 默认关 ⇒ 零输出\n");
+    Lead1 l;
+    Lead1Config cfg;  // enabled=false
+    float sum = 0.0f;
+    for (int i = 0; i < 40; ++i) {
+        Lead1::Input in;
+        in.move_x = 20.0f;
+        in.dtt = 10.0f;
+        in.now_ms = static_cast<uint32_t>(i * 10);
+        in.has_box = true;
+        in.box_cx = static_cast<float>(i * 10);
+        in.box_cy = 0.0f;
+        in.box_w = 40.0f;
+        in.box_h = 40.0f;
+        sum += std::fabs(l.update(cfg, in));
+    }
+    check(sum == 0.0f, "lead1.enabled=false ⇒ 恒零输出");
+}
+
+void test_lead1_activate() {
+    std::printf("[B2] Lead1 稳定右移 ⇒ 窗口满后激活出正偏移\n");
+    Lead1 l;
+    Lead1Config cfg;
+    cfg.enabled = true;
+    cfg.frames = 10;
+    cfg.direction_ratio = 70.0f;      // 10 帧需 ≥7 帧同向
+    cfg.displacement_ratio = 2.0f;
+    cfg.displacement_min = 10.0f;
+    cfg.displacement_max = 40.0f;
+    cfg.dead_zone = 5.0f;
+    cfg.settle_ms = 10.0f;
+    cfg.hold_ms = 50.0f;
+    cfg.activation_distance = 40.0f;
+    float last = 0.0f;
+    // 帧间隔 20ms，框每帧右移 20px（> dead_zone=5）；mx 恒 +2px/帧。
+    // ★ 注意 displacement_min/max 判的是窗口内主向位移的**总和**（10 帧 × 2px = 20px，
+    //   落在 [10,40] 内），不是平均值 —— 这是 BB 的原始语义。
+    for (int i = 0; i < 60; ++i) {
+        Lead1::Input in;
+        in.move_x = 2.0f;
+        in.dtt = 10.0f;
+        in.now_ms = static_cast<uint32_t>(i * 20);
+        in.has_box = true;
+        in.box_cx = static_cast<float>(i * 20);
+        in.box_cy = 0.0f;
+        in.box_w = 40.0f;
+        in.box_h = 40.0f;
+        last = l.update(cfg, in);
+    }
+    check(last > 0.0f, "10 帧同向右移 ⇒ 正向提前量");
+    check(last <= cfg.displacement_max * cfg.strength,
+          "提前量受 max_count/strength 约束（远小于 displacement_max）");
+}
+
+void test_lead1_distance_breaker() {
+    std::printf("[B3] Lead1 距离超限熔断\n");
+    Lead1 l;
+    Lead1Config cfg;
+    cfg.enabled = true;
+    cfg.frames = 3;
+    cfg.direction_ratio = 60.0f;
+    cfg.displacement_ratio = 1.0f;
+    cfg.displacement_min = 5.0f;
+    cfg.displacement_max = 100.0f;
+    cfg.dead_zone = 0.0f;
+    cfg.settle_ms = 0.0f;
+    cfg.activation_distance = 40.0f;
+    for (int i = 0; i < 10; ++i) {
+        Lead1::Input in;
+        in.move_x = 20.0f;
+        in.dtt = 10.0f;
+        in.now_ms = static_cast<uint32_t>(i * 20);
+        l.update(cfg, in);
+    }
+    Lead1::Input far;
+    far.move_x = 20.0f;
+    far.dtt = 200.0f;   // 远超 40
+    far.now_ms = 400;
+    const float o = l.update(cfg, far);
+    check(o == 0.0f, "dtt > activation_distance ⇒ 熔断清零");
+}
+
+void test_lead1_oscillation_cancel() {
+    std::printf("[B4] Lead1 方向摆动熔断\n");
+    Lead1 l;
+    Lead1Config cfg;
+    cfg.enabled = true;
+    cfg.frames = 3;
+    cfg.direction_ratio = 60.0f;
+    cfg.displacement_ratio = 1.0f;
+    cfg.displacement_min = 5.0f;
+    cfg.displacement_max = 100.0f;
+    cfg.dead_zone = 0.0f;
+    cfg.settle_ms = 0.0f;
+    cfg.hold_ms = 0.0f;             // 立即重收
+    cfg.oscillation_cancel = 2;
+    cfg.activation_distance = 1000.0f;
+    uint32_t t = 0;
+    float last = 0.0f;
+    // 交替方向：右 3 帧 → 左 3 帧 → … 每 3 帧成一个判定窗。
+    // 连续两次反向激活（oscillation_cancel=2）即熔断；熔断后计数清零、重新累计，
+    // 故熔断发生在第 3、6、9… 个窗尾部 —— 跑 9 轮正好停在熔断那一轮。
+    for (int round = 0; round < 9; ++round) {
+        const float v = (round % 2 == 0) ? 30.0f : -30.0f;
+        for (int i = 0; i < 3; ++i) {
+            Lead1::Input in;
+            in.move_x = v;
+            in.dtt = 10.0f;
+            in.now_ms = t;
+            t += 20;
+            last = l.update(cfg, in);
+        }
+    }
+    check(std::fabs(last) < 1e-6f, "连续反向激活达 oscillation_cancel ⇒ 熔断归零");
+}
+
+// ============================ C. Lead2 ============================
+
+void test_lead2_disabled_zero() {
+    std::printf("[C1] Lead2 默认关 ⇒ 零输出\n");
+    Lead2 l;
+    Lead2Config cfg;  // enabled=false
+    Lead2::Input in;
+    in.has_target = true;
+    in.target_x = 200.0f;
+    in.crosshair_x = 100.0f;
+    in.now_ms = 1000;
+    check(l.update(cfg, in) == 0.0f, "lead2.enabled=false ⇒ 零输出");
+}
+
+void test_lead2_cooldown_then_integrate() {
+    std::printf("[C2] Lead2 冷却 → 积分累积 → 上限钳制\n");
+    Lead2 l;
+    Lead2Config cfg;
+    cfg.enabled = true;
+    cfg.gain = 0.05f;
+    cfg.max_offset = 25.0f;
+    cfg.decay = 0.95f;
+    cfg.activation_distance = 100.0f;
+    cfg.dead_zone = 1.0f;
+    cfg.hold_ms = 0.0f;        // 关保持窗，便于逐帧观察
+    cfg.cooldown_ms = 250.0f;
+    cfg.y_suppress_enabled = false;
+
+    uint32_t t = 0;
+    float first = 0.0f;
+    for (int i = 0; i < 20; ++i) {   // 前 200ms：冷却中
+        Lead2::Input in;
+        in.has_target = true;
+        in.target_x = 130.0f;        // 误差 +30px
+        in.target_y = 100.0f;
+        in.crosshair_x = 100.0f;
+        in.crosshair_y = 100.0f;
+        in.now_ms = t;
+        t += 10;
+        first = l.update(cfg, in);
+    }
+    check(first == 0.0f, "冷却期内零输出");
+
+    float last = 0.0f;
+    for (int i = 0; i < 200; ++i) {  // 冷却过后持续积分
+        Lead2::Input in;
+        in.has_target = true;
+        in.target_x = 130.0f;
+        in.target_y = 100.0f;
+        in.crosshair_x = 100.0f;
+        in.crosshair_y = 100.0f;
+        in.now_ms = t;
+        t += 10;
+        last = l.update(cfg, in);
+    }
+    check(last > 0.0f, "持续正误差 ⇒ 正偏移");
+    check(std::fabs(last - cfg.max_offset) < 1e-3f, "积分被钳制在 max_offset");
+}
+
+void test_lead2_deadzone_decay() {
+    std::printf("[C3] Lead2 死区内按 decay 衰减\n");
+    Lead2 l;
+    Lead2Config cfg;
+    cfg.enabled = true;
+    cfg.gain = 0.5f;
+    cfg.max_offset = 100.0f;
+    cfg.decay = 0.5f;
+    cfg.activation_distance = 1000.0f;
+    cfg.dead_zone = 30.0f;      // 误差 30px 落在死区内
+    cfg.hold_ms = 0.0f;
+    cfg.cooldown_ms = 0.0f;     // 无冷却
+    cfg.y_suppress_enabled = false;
+    uint32_t t = 0;
+    float prev = 0.0f;
+    bool decaying = true;
+    bool started = false;
+    for (int i = 0; i < 20; ++i) {
+        Lead2::Input in;
+        in.has_target = true;
+        in.target_x = 130.0f;   // 误差恒 30 ⇒ 死区内
+        in.target_y = 100.0f;
+        in.crosshair_x = 100.0f;
+        in.crosshair_y = 100.0f;
+        in.now_ms = t;
+        t += 10;
+        const float cur = l.update(cfg, in);
+        if (started && cur > prev + 1e-6f) decaying = false;
+        prev = cur;
+        started = true;
+    }
+    check(decaying, "死区内积分单调不增（decay 衰减）");
+}
+
+void test_lead2_y_suppress() {
+    std::printf("[C4] Lead2 Y 轴抑制（垂直输出大 ⇒ 横向提前量归零）\n");
+    Lead2 l;
+    Lead2Config cfg;
+    cfg.enabled = true;
+    cfg.gain = 0.05f;
+    cfg.max_offset = 25.0f;
+    cfg.activation_distance = 100.0f;
+    cfg.dead_zone = 1.0f;
+    cfg.hold_ms = 0.0f;
+    cfg.cooldown_ms = 0.0f;
+    cfg.y_suppress_enabled = true;
+    cfg.y_suppress_min = 0.5f;
+    cfg.y_suppress_max = 2.0f;
+    uint32_t t = 0;
+    float last = 0.0f;
+    for (int i = 0; i < 60; ++i) {
+        Lead2::Input in;
+        in.has_target = true;
+        in.target_x = 130.0f;
+        in.target_y = 100.0f;
+        in.crosshair_x = 100.0f;
+        in.crosshair_y = 100.0f;
+        in.last_move_y = 5.0f;   // ≥ y_suppress_max ⇒ yScale = 0
+        in.now_ms = t;
+        t += 10;
+        last = l.update(cfg, in);
+    }
+    check(std::fabs(last) < 1e-6f, "last_move_y ≥ max ⇒ 横向提前量被完全抑制");
+}
+
+// ============================ D. HumanizeShaper ============================
+
+void test_humanize_disabled() {
+    std::printf("[D1] Humanize 默认关 ⇒ 原样透传\n");
+    HumanizeShaper h;
+    HumanizeShaperConfig cfg;  // enabled=false
+    float x = 3.5f, y = -2.25f;
+    HumanizeShaper::Context ctx;
+    ctx.dtt = 50.0f;
+    ctx.aiming = true;
+    h.apply(&x, &y, cfg, ctx);
+    check(x == 3.5f && y == -2.25f, "humanize.enabled=false ⇒ 零改动");
+}
+
+void test_humanize_overshoot_monotonic() {
+    std::printf("[D2] 过冲：离目标越远放大越多（封顶 1+overshoot）\n");
+    HumanizeShaperConfig cfg;
+    cfg.enabled = true;
+    cfg.smooth_factor = 0.0f;
+    cfg.overshoot = 0.5f;
+    cfg.brake_distance = 0.0f;
+    cfg.noise_sigma = 0.0f;
+    auto run = [&](float dtt) {
+        HumanizeShaper h;
+        float x = 10.0f, y = 10.0f;
+        HumanizeShaper::Context ctx;
+        ctx.dtt = dtt;
+        ctx.aiming = true;
+        h.apply(&x, &y, cfg, ctx);
+        return x;
+    };
+    const float a = run(10.0f);    // dtt<=10 ⇒ 不放大
+    const float b = run(100.0f);   // 中间
+    const float c = run(200.0f);   // 封顶 1.5
+    check(std::fabs(a - 10.0f) < 1e-4f, "dtt<=10 不过冲");
+    check(b > a && c > b, "过冲随 dtt 单调增");
+    check(std::fabs(c - 15.0f) < 1e-3f, "dtt>=200 ⇒ 封顶 1+overshoot");
+}
+
+void test_humanize_brake() {
+    std::printf("[D3] 制动：越近压得越狠（dtt→0 时 factor→0）\n");
+    HumanizeShaperConfig cfg;
+    cfg.enabled = true;
+    cfg.smooth_factor = 0.0f;
+    cfg.overshoot = 0.0f;
+    cfg.brake_distance = 50.0f;
+    cfg.noise_sigma = 0.0f;
+    auto run = [&](float dtt) {
+        HumanizeShaper h;
+        float x = 10.0f, y = 0.0f;
+        HumanizeShaper::Context ctx;
+        ctx.dtt = dtt;
+        ctx.aiming = true;
+        h.apply(&x, &y, cfg, ctx);
+        return x;
+    };
+    check(std::fabs(run(0.0f)) < 1e-6f, "dtt=0 ⇒ 完全制动");
+    check(std::fabs(run(50.0f) - 10.0f) < 1e-4f, "dtt=brake_distance ⇒ 不制动");
+    const float mid = run(12.5f);
+    check(mid > 0.0f && mid < 10.0f, "制动区间内 0<factor<1");
+}
+
+void test_humanize_noise_bounded() {
+    std::printf("[D4] 高斯噪声有界（不出现 inf/nan）\n");
+    HumanizeShaper h;
+    HumanizeShaperConfig cfg;
+    cfg.enabled = true;
+    cfg.smooth_factor = 0.0f;
+    cfg.overshoot = 0.0f;
+    cfg.brake_distance = 0.0f;
+    cfg.noise_sigma = 0.2f;
+    float max_dev = 0.0f;
+    bool finite = true;
+    for (int i = 0; i < 5000; ++i) {
+        float x = 0.0f, y = 0.0f;
+        HumanizeShaper::Context ctx;
+        ctx.dtt = 100.0f;
+        ctx.aiming = true;
+        h.apply(&x, &y, cfg, ctx);
+        if (!std::isfinite(x) || !std::isfinite(y)) finite = false;
+        const float dev = std::fabs(x);
+        if (dev > max_dev) max_dev = dev;
+    }
+    check(finite, "5000 次采样无 inf/nan（u1 下限保护有效）");
+    check(max_dev < 2.0f, "σ=0.2 ⇒ 偏差限制在合理范围");
+}
+
+void test_humanize_lowpass() {
+    std::printf("[D5] 一阶低通：输出被往历史值拉\n");
+    HumanizeShaper h;
+    HumanizeShaperConfig cfg;
+    cfg.enabled = true;
+    cfg.smooth_factor = 0.8f;
+    cfg.overshoot = 0.0f;
+    cfg.brake_distance = 0.0f;
+    cfg.noise_sigma = 0.0f;
+    HumanizeShaper::Context ctx;
+    ctx.dtt = 50.0f;
+    ctx.aiming = true;
+    float x = 100.0f, y = 0.0f;
+    h.apply(&x, &y, cfg, ctx);   // 首帧：has_last 用当前值 ⇒ x 不变
+    check(std::fabs(x - 100.0f) < 1e-4f, "首帧建立历史，值不变");
+    float x2 = 0.0f, y2 = 0.0f;
+    h.apply(&x2, &y2, cfg, ctx); // 第二帧：0*0.2 + 100*0.8 = 80
+    check(std::fabs(x2 - 80.0f) < 1e-3f, "第二帧被历史值拉到 80");
+}
+
+// ============================ E. AntiOvershoot ============================
+
+void test_antiover_disabled() {
+    std::printf("[E1] 抗过冲默认关 ⇒ 零改动\n");
+    AntiOvershoot a;
+    AntiOvershootConfig cfg;  // enabled=false
+    float x = 10.0f, y = 10.0f;
+    a.apply(&x, &y, 5.0f, 1000, cfg);
+    check(x == 10.0f && y == 10.0f, "anti_overshoot.enabled=false ⇒ 零改动");
+}
+
+void test_antiover_inner_frames() {
+    std::printf("[E2] 内圈衰减帧数封顶\n");
+    AntiOvershoot a;
+    AntiOvershootConfig cfg;
+    cfg.enabled = true;
+    cfg.inner_distance = 10.0f;
+    cfg.inner_strength = 90.0f;
+    cfg.inner_frames = 3;
+    cfg.outer_distance = 20.0f;
+    cfg.outer_strength = 50.0f;
+    cfg.outer_frames = 3;
+    cfg.reset_cooldown_ms = 500.0f;
+    // 前 3 帧（dtt<=inner）每帧 ×0.1
+    for (int i = 0; i < 3; ++i) {
+        float x = 10.0f, y = 10.0f;
+        a.apply(&x, &y, 5.0f, static_cast<uint32_t>(1000 + i * 10), cfg);
+        check(std::fabs(x - 1.0f) < 1e-4f, "内圈每帧 ×(1-90%)");
+    }
+    // ★ BB 的两段判定是「先内圈 return，内圈用满后落进外圈分支」（不是互斥跳过）：
+    //   所以内圈帧数用满后、dtt 仍在外圈半径内 ⇒ 改按外圈强度衰减（×0.5）。
+    float x = 10.0f, y = 10.0f;
+    a.apply(&x, &y, 5.0f, 1040, cfg);
+    check(std::fabs(x - 5.0f) < 1e-4f, "内圈帧数用满后落进外圈分支（×(1-50%)）");
+    float x2 = 10.0f, y2 = 10.0f;
+    a.apply(&x2, &y2, 5.0f, 1050, cfg);   // 外圈第 2 帧
+    a.apply(&x2, &y2, 5.0f, 1060, cfg);   // 外圈第 3 帧 → 内外都满 ⇒ cycle_done
+    check(a.cycle_done(), "内外圈帧数都用满 ⇒ 本轮标记完成");
+    float x3 = 10.0f, y3 = 10.0f;
+    a.apply(&x3, &y3, 5.0f, 1070, cfg);
+    check(std::fabs(x3 - 10.0f) < 1e-4f, "本轮完成后不再衰减（等越界冷却才复位）");
+}
+
+void test_antiover_reset_cooldown() {
+    std::printf("[E3] 越界持续超冷却 ⇒ 整轮复位\n");
+    AntiOvershoot a;
+    AntiOvershootConfig cfg;
+    cfg.enabled = true;
+    cfg.inner_distance = 10.0f;
+    cfg.inner_strength = 90.0f;
+    cfg.inner_frames = 99;    // 不封顶，方便观察复位
+    cfg.outer_distance = 20.0f;
+    cfg.outer_strength = 50.0f;
+    cfg.outer_frames = 99;
+    cfg.reset_cooldown_ms = 100.0f;
+    float x = 10.0f, y = 10.0f;
+    a.apply(&x, &y, 5.0f, 1000, cfg);
+    check(a.inner_frames() == 1, "先累计 1 帧内圈衰减");
+    // 越界（dtt=100 > outer=20）：第 1 帧记起点
+    float dummy_x = 1.0f, dummy_y = 1.0f;
+    a.apply(&dummy_x, &dummy_y, 100.0f, 2000, cfg);
+    check(a.inner_frames() == 1, "刚越界不立即复位");
+    // 越界持续 100ms ⇒ 复位
+    a.apply(&dummy_x, &dummy_y, 100.0f, 2100, cfg);
+    check(a.inner_frames() == 0, "越界持续 ≥ reset_cooldown ⇒ 状态复位");
+}
+
+// ============================ F. SpeedAdaptiveKp ============================
+
+void test_speed_kp() {
+    std::printf("[F1] 速度自适应 Kp\n");
+    SpeedAdaptiveKp s;
+    SpeedAdaptiveKpConfig cfg;  // enabled=false
+    check(s.multiplier(cfg, true, 0.0f, 0.0f) == 1.0f, "默认关 ⇒ 1.0");
+
+    cfg.enabled = true;
+    cfg.frames = 5;
+    cfg.threshold = 3.0f;
+    cfg.move_mult = 1.5f;
+    cfg.static_mult = 0.8f;
+    // 静止目标：位置不变
+    float m = 1.0f;
+    for (int i = 0; i < 8; ++i) m = s.multiplier(cfg, true, 100.0f, 100.0f);
+    check(std::fabs(m - cfg.static_mult) < 1e-6f, "静止目标 ⇒ static_mult");
+
+    SpeedAdaptiveKp s2;
+    float m2 = 1.0f;
+    for (int i = 0; i < 8; ++i) m2 = s2.multiplier(cfg, true, static_cast<float>(i) * 20.0f, 0.0f);
+    check(std::fabs(m2 - cfg.move_mult) < 1e-6f, "移动目标 ⇒ move_mult");
+
+    SpeedAdaptiveKp s3;
+    check(s3.multiplier(cfg, false, 0.0f, 0.0f) == 1.0f, "无目标 ⇒ 不干预");
+}
+
+// ============================ G. GlobalWave ============================
+
+void test_global_wave() {
+    std::printf("[G1] 全局正弦扰动\n");
+    GlobalWave g;
+    GlobalWaveConfig cfg;  // enabled=false
+    float x = 5.0f, y = -5.0f;
+    g.apply(&x, &y, 1234, cfg);
+    check(x == 5.0f && y == -5.0f, "默认关 ⇒ 零改动");
+
+    GlobalWave g2;
+    cfg.enabled = true;
+    cfg.amp_x = 0.10f;
+    cfg.amp_y = 0.10f;
+    cfg.freq = 1.0f;
+    cfg.smooth = 0.5f;
+    float max_extra = 0.0f;
+    bool finite = true;
+    for (int i = 0; i < 2000; ++i) {
+        float px = 0.0f, py = 0.0f;
+        g2.apply(&px, &py, static_cast<uint32_t>(i * 10), cfg);
+        if (!std::isfinite(px) || !std::isfinite(py)) finite = false;
+        const float e = std::fabs(px);
+        if (e > max_extra) max_extra = e;
+    }
+    check(finite, "长跑无 inf/nan");
+    check(max_extra <= cfg.amp_x + 1e-4f, "扰动幅度不超过 amp_x");
+}
+
+// ============================ H. RuntimeProfile 往返 ============================
+
+void test_profile_roundtrip() {
+    std::printf("[H1] RuntimeProfile 新键序列化/解析往返\n");
+    ttbox::core::RuntimeProfile p;
+    p.mouse.recoil_bb.enabled = true;
+    p.mouse.recoil_bb.preset = 2;
+    p.mouse.recoil_bb.preset_total_time_ms[2] = 1234.0f;
+    p.mouse.recoil_bb.preset_vert[2][1] = 1.75f;
+    p.mouse.recoil_bb.preset_horiz[1][2] = -3.5f;
+    p.mouse.recoil_bb.drift_enabled = true;
+    p.mouse.recoil_bb.drift_freq = 2.5f;
+    p.mouse.vertical_correction.ramp1_enabled = true;
+    p.mouse.vertical_correction.ramp1_start = 1.25f;
+    p.mouse.lead1.enabled = true;
+    p.mouse.lead1.frames = 12;
+    p.mouse.lead1.direction_ratio = 66.0f;
+    p.mouse.lead2.enabled = true;
+    p.mouse.lead2.gain = 0.075f;
+    p.mouse.lead2.decay = 0.9f;
+    p.mouse.humanize.enabled = true;
+    p.mouse.humanize.smooth_factor = 0.35f;
+    p.mouse.humanize.noise_sigma = 0.33f;
+    p.mouse.humanize.accuracy_sim_direction = 2;
+    p.mouse.anti_overshoot.enabled = true;
+    p.mouse.anti_overshoot.inner_frames = 4;
+    p.mouse.speed_adaptive_kp.enabled = true;
+    p.mouse.speed_adaptive_kp.move_mult = 1.8f;
+    p.mouse.global_wave.enabled = true;
+    p.mouse.global_wave.freq = 1.7f;
+
+    const auto json = p.to_json();
+    const auto q = ttbox::core::RuntimeProfile::from_json(json);
+
+    check(q.mouse.recoil_bb.enabled && q.mouse.recoil_bb.preset == 2,
+          "recoil_bb.enabled/preset 往返一致");
+    check(std::fabs(q.mouse.recoil_bb.preset_total_time_ms[2] - 1234.0f) < 1e-3f,
+          "recoil_bb.preset_total_time_ms[2] 往返一致");
+    check(std::fabs(q.mouse.recoil_bb.preset_vert[2][1] - 1.75f) < 1e-4f,
+          "recoil_bb.preset_vert[2][1] 往返一致（二维表）");
+    check(std::fabs(q.mouse.recoil_bb.preset_horiz[1][2] + 3.5f) < 1e-4f,
+          "recoil_bb.preset_horiz[1][2] 往返一致（可为负）");
+    check(q.mouse.recoil_bb.drift_enabled && std::fabs(q.mouse.recoil_bb.drift_freq - 2.5f) < 1e-4f,
+          "recoil_bb 漂移键往返一致");
+    check(q.mouse.vertical_correction.ramp1_enabled &&
+              std::fabs(q.mouse.vertical_correction.ramp1_start - 1.25f) < 1e-4f,
+          "vertical_correction 渐变键往返一致");
+    check(q.mouse.lead1.enabled && q.mouse.lead1.frames == 12 &&
+              std::fabs(q.mouse.lead1.direction_ratio - 66.0f) < 1e-4f,
+          "lead1 键往返一致");
+    check(q.mouse.lead2.enabled && std::fabs(q.mouse.lead2.gain - 0.075f) < 1e-5f &&
+              std::fabs(q.mouse.lead2.decay - 0.9f) < 1e-5f,
+          "lead2 键往返一致");
+    check(q.mouse.humanize.enabled && std::fabs(q.mouse.humanize.smooth_factor - 0.35f) < 1e-4f &&
+              std::fabs(q.mouse.humanize.noise_sigma - 0.33f) < 1e-4f &&
+              q.mouse.humanize.accuracy_sim_direction == 2,
+          "humanize 键往返一致");
+    check(q.mouse.anti_overshoot.enabled && q.mouse.anti_overshoot.inner_frames == 4,
+          "anti_overshoot 键往返一致");
+    check(q.mouse.speed_adaptive_kp.enabled &&
+              std::fabs(q.mouse.speed_adaptive_kp.move_mult - 1.8f) < 1e-4f,
+          "speed_adaptive_kp 键往返一致");
+    check(q.mouse.global_wave.enabled && std::fabs(q.mouse.global_wave.freq - 1.7f) < 1e-4f,
+          "global_wave 键往返一致");
+
+    std::string err;
+    check(q.validate(&err), "往返后的配置通过校验");
+}
+
+void test_profile_defaults_zero_behavior() {
+    std::printf("[H2] 默认配置：第二批全部关闭 + 校验通过\n");
+    ttbox::core::RuntimeProfile p;
+    std::string err;
+    check(p.validate(&err), "RuntimeProfile 默认值校验通过");
+    check(!p.mouse.recoil_bb.enabled && !p.mouse.lead1.enabled && !p.mouse.lead2.enabled &&
+              !p.mouse.humanize.enabled && !p.mouse.anti_overshoot.enabled &&
+              !p.mouse.speed_adaptive_kp.enabled && !p.mouse.global_wave.enabled,
+          "第二批模块默认全关（输出链逐字节不变的前提）");
+
+    // 反例：越界值被拒绝
+    ttbox::core::RuntimeProfile bad;
+    bad.mouse.global_wave.smooth = 1.5f;
+    check(!bad.validate(&err), "global_wave.smooth=1.5 ⇒ 校验拒绝");
+    ttbox::core::RuntimeProfile bad2;
+    bad2.mouse.lead1.frames = 0;
+    check(!bad2.validate(&err), "lead1.frames=0 ⇒ 校验拒绝");
+    ttbox::core::RuntimeProfile bad3;
+    bad3.mouse.anti_overshoot.inner_strength = 150.0f;
+    check(!bad3.validate(&err), "anti_overshoot.inner_strength=150 ⇒ 校验拒绝");
+}
+
+}  // namespace
+
+int main() {
+    std::printf("=== test_bb_second_batch：BB 对标第二批模块测试 ===\n");
+    test_bb_disabled_zero();
+    test_bb_hotkey_not_pressed();
+    test_bb_delay();
+    test_bb_three_segments();
+    test_bb_distance_gate();
+    test_bb_max_down_clamp();
+    test_bb_vertical_ramp();
+
+    test_lead1_disabled_zero();
+    test_lead1_activate();
+    test_lead1_distance_breaker();
+    test_lead1_oscillation_cancel();
+
+    test_lead2_disabled_zero();
+    test_lead2_cooldown_then_integrate();
+    test_lead2_deadzone_decay();
+    test_lead2_y_suppress();
+
+    test_humanize_disabled();
+    test_humanize_overshoot_monotonic();
+    test_humanize_brake();
+    test_humanize_noise_bounded();
+    test_humanize_lowpass();
+
+    test_antiover_disabled();
+    test_antiover_inner_frames();
+    test_antiover_reset_cooldown();
+
+    test_speed_kp();
+    test_global_wave();
+
+    test_profile_roundtrip();
+    test_profile_defaults_zero_behavior();
+
+    std::printf("结果: %d failures\n", failures);
+    return failures == 0 ? 0 : 1;
+}

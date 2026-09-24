@@ -670,6 +670,12 @@ if(TTBOX_CORE_BUILD_TESTS)
                         target_link_libraries(test_recoil PRIVATE ttbox_core)
                         add_test(NAME test_recoil COMMAND test_recoil)
 
+  # BB 对标第二批（2026-09-24）：压枪三段查表 / 两代提前量 / 拟人化链 / 抗过冲 /
+  # 速度自适应 Kp / 全局正弦扰动 + 新配置键往返 —— 每模块含"默认关=行为零变化"用例
+  add_executable(test_bb_second_batch tests/test_bb_second_batch.cpp)
+  target_link_libraries(test_bb_second_batch PRIVATE ttbox_core)
+  add_test(NAME test_bb_second_batch COMMAND test_bb_second_batch)
+
     # 热键完全可配置化验收（默认/换键/侧键/双键/any-all/免重启生效/未按键零输出）
   add_executable(test_hotkey_config tests/test_hotkey_config.cpp)
   target_link_libraries(test_hotkey_config PRIVATE ttbox_core)
