@@ -161,7 +161,32 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                 // ByteTrack：每帧先对现有轨迹做卡尔曼预测（写入 pred_cx/pred_cy 供关联参考）
                 for (auto& t : tracks_) kalman_predict(t, cfg);
 
-                auto cands = collect_candidates(dets, cfg, cx, cy, radius_sq);
+                // 头身稳定过滤（对齐 BB applyHeadBodyStable）：同一帧同时出现 (bodyN + headN)
+                // 时删掉 headN 框 —— 头身同框时头部框容易把瞄准点抢走，只留身体框更稳。
+                // 默认 head_body_stable=false ⇒ dets 原样传入，行为与本参数加入前一致。
+                std::vector<DetectionBox> stable_dets;
+                const std::vector<DetectionBox>* use_dets = &dets;
+                if (cfg.head_body_stable) {
+                    auto has_class = [&dets](int c) {
+                        if (c < 0) return false;
+                        for (const auto& b : dets) {
+                            if (b.class_id == c) return true;
+                        }
+                        return false;
+                    };
+                    const bool combo1 = has_class(cfg.hb_body1) && has_class(cfg.hb_head1);
+                    const bool combo2 = has_class(cfg.hb_body2) && has_class(cfg.hb_head2);
+                    if (combo1 || combo2) {
+                        stable_dets.reserve(dets.size());
+                        for (const auto& b : dets) {
+                            if (combo1 && b.class_id == cfg.hb_head1) continue;
+                            if (combo2 && b.class_id == cfg.hb_head2) continue;
+                            stable_dets.push_back(b);
+                        }
+                        use_dets = &stable_dets;
+                    }
+                }
+                auto cands = collect_candidates(*use_dets, cfg, cx, cy, radius_sq);
     if (cands.empty()) {
             // 有检测但全被过滤/出范围：同上宽限判定
             for (auto& t : tracks_) {
@@ -217,6 +242,10 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
                 out.reason = TargetSelection::kTrackLock;
                 last_reason_ = out.reason;
                 last_locked_dist_sq_ = best->dist_sq;  // 供丢失后切靶滞后比较用
+                // BB 对标：记录本帧选中点，供打分制的 stick（粘滞）项使用
+                last_target_x_ = best->box.x1 + (best->box.x2 - best->box.x1) * cfg.aim_ratio_x;
+                last_target_y_ = best->box.y1 + (best->box.y2 - best->box.y1) * cfg.aim_ratio_y;
+                has_last_target_ = true;
                 return out;
             }
             // 激活 track 未匹配：丢失宽限
@@ -313,7 +342,59 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
 
     // ---- 第 3 层：score（无锁定，新建 track 或复用最近 track）----
         {
-            const Candidate& c = cands.front();  // 已按距离排序，取最近
+            // ---- lock_hold：锁定保持窗内维持现锁，不给新目标（对齐 BB lock_hold_time=1500ms）----
+            // 只作用在「锁定已丢失、正要另选」的第 3 层；默认 0 = 关闭，行为与加入前一致。
+            // 窗口内的处理是"只刷新位置"——但本帧没有匹配到该轨迹的新检测框，故沿用其历史框。
+            if (cfg.lock_hold_ms > 0.0f && lock_track_id_ >= 0) {
+                const long long held =
+                    static_cast<long long>(now_ms) - static_cast<long long>(lock_start_ms_);
+                if (held >= 0 && held < static_cast<long long>(cfg.lock_hold_ms)) {
+                    for (auto& t : tracks_) {
+                        if (t.id != lock_track_id_) continue;
+                        out.valid = true;
+                        out.box = t.box;
+                        out.target_id = t.id;
+                        const float hdx = t.cx - cx, hdy = t.cy - cy;
+                        out.distance = std::sqrt(hdx * hdx + hdy * hdy);
+                        out.lock_radius = std::max(1.0f, 0.06f * (t.box.x2 - t.box.x1));
+                        out.reason = TargetSelection::kTrackLock;
+                        last_reason_ = out.reason;
+                        return out;
+                    }
+                    // 锁定轨迹已被裁剪 ⇒ 放弃保持，继续走正常选靶
+                }
+            }
+            // ---- 候选优选：打分制（BB calcPriority）或"最近优先"（默认，现行为）----
+            const Candidate* chosen = &cands.front();  // 已按（优先级, 距离）排序
+            if (cfg.priority_scoring) {
+                // raw = distScore×w_dist + sizeScore×w_size + stick×0.5
+                //   distScore = 1/(1+dist/100)；sizeScore = min(1, w×h/10000)
+                //   stick = distLast<threshold ? (1-distLast/threshold)×stickiness : 0
+                float best_score = -1e30f;
+                for (const auto& cand : cands) {
+                    const float dist = std::sqrt(cand.dist_sq);
+                    const float dist_score = dist > 0.0f ? 1.0f / (1.0f + dist / 100.0f) : 0.0f;
+                    const float bw = cand.box.x2 - cand.box.x1;
+                    const float bh = cand.box.y2 - cand.box.y1;
+                    const float size_score = std::fmin(1.0f, bw * bh / 10000.0f);
+                    float stick = 0.0f;
+                    if (has_last_target_ && cfg.switch_threshold_px > 0.0f) {
+                        const float sdx = cand.cx - last_target_x_;
+                        const float sdy = cand.cy - last_target_y_;
+                        const float dist_last = std::sqrt(sdx * sdx + sdy * sdy);
+                        if (dist_last < cfg.switch_threshold_px) {
+                            stick = (1.0f - dist_last / cfg.switch_threshold_px) * cfg.stickiness;
+                        }
+                    }
+                    const float score = dist_score * cfg.weight_dist +
+                                        size_score * cfg.weight_size + stick * 0.5f;
+                    if (score > best_score) {
+                        best_score = score;
+                        chosen = &cand;
+                    }
+                }
+            }
+            const Candidate& c = *chosen;
             // 切靶防抖：冷却未过 / 新目标不够近 ⇒ 本帧不选新目标（返回无效）。
             // 宁可短暂无目标，也不在两个目标之间来回拉锯（对齐 BB 的 cooldown + hysteresis）。
             if (switch_blocked(c.dist_sq)) {
@@ -373,6 +454,15 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             last_switch_ms_ = now_ms;
             has_switch_ = true;
             last_locked_dist_sq_ = c.dist_sq;
+            // BB 对标：本次选择建立/延续锁定 ⇒ 记锁定轨迹与起点（lock_hold 窗口判据），
+            // 并留下上帧选中瞄准点（打分制 stick 项用）。
+            if (out.target_id != lock_track_id_) {
+                lock_track_id_ = out.target_id;
+                lock_start_ms_ = now_ms;
+            }
+            last_target_x_ = c.box.x1 + (c.box.x2 - c.box.x1) * cfg.aim_ratio_x;
+            last_target_y_ = c.box.y1 + (c.box.y2 - c.box.y1) * cfg.aim_ratio_y;
+            has_last_target_ = true;
             out.reason = TargetSelection::kScore;
             last_reason_ = out.reason;
             return out;

@@ -182,6 +182,35 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse.switch_cooldown_ms 不能为负";
         return false;
     }
+    // 自动扳机（BB 对标，2026-09-24）：时长/距离/计数类不得为负；置信度与比例类限 [0,1]。
+    if (mouse.trigger.dist_threshold < 0.0f || mouse.trigger.fire_delay < 0.0f ||
+        mouse.trigger.fire_random < 0.0f || mouse.trigger.first_delay_min < 0.0f ||
+        mouse.trigger.first_delay_max < 0.0f || mouse.trigger.rifle_interval < 0.0f ||
+        mouse.trigger.press_duration < 0.0f || mouse.trigger.stability_frames < 0 ||
+        mouse.trigger.click_count < 0) {
+        if (error) *error = "trigger 时长/距离/计数不能为负";
+        return false;
+    }
+    if (mouse.trigger.confidence < 0.0f || mouse.trigger.confidence > 1.0f ||
+        mouse.trigger.aim_confidence < 0.0f || mouse.trigger.aim_confidence > 1.0f ||
+        mouse.trigger.y_offset < 0.0f || mouse.trigger.y_offset > 1.0f) {
+        if (error) *error = "trigger 置信度/偏移比例超出 [0,1]";
+        return false;
+    }
+    if (mouse.trigger2.first_err < 0.0f || mouse.trigger2.first_delay < 0.0f ||
+        mouse.trigger2.fire_interval < 0.0f || mouse.trigger2.fire_random < 0.0f ||
+        mouse.trigger2.press_duration < 0.0f || mouse.trigger2.precision_range < 0.0f ||
+        mouse.trigger2.retarget_reset_ms < 0.0f || mouse.trigger2.move_throttle_frames < 0 ||
+        mouse.trigger2.precision_frames < 0 || mouse.trigger2.fire_count < 0 ||
+        mouse.trigger2.stop_detect_tolerance < 0 || mouse.trigger2.stop_detect_range < 0 ||
+        mouse.trigger2.stop_detect_interval < 0) {
+        if (error) *error = "trigger2 时长/距离/计数不能为负";
+        return false;
+    }
+    if (mouse.trigger2.confidence < 0.0f || mouse.trigger2.confidence > 1.0f) {
+        if (error) *error = "trigger2.confidence 超出 [0,1]";
+        return false;
+    }
     if (mouse.personal_motion.curve_blend < 0.0f || mouse.personal_motion.curve_blend > 1.0f ||
         mouse.personal_motion.speed_blend < 0.0f || mouse.personal_motion.speed_blend > 1.0f ||
         mouse.personal_motion.reaction_blend < 0.0f || mouse.personal_motion.reaction_blend > 1.0f ||
@@ -383,6 +412,60 @@ JsonValue RuntimeProfile::to_json() const {
     rc.set("humanize_jitter_px", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_px)));
     rc.set("humanize_jitter_frequency", JsonValue::number(static_cast<double>(mouse.recoil.humanize_jitter_frequency)));
     m.set("recoil", std::move(rc));
+    // 自动扳机（BB 对标，2026-09-24）：两套独立状态机，默认全关。
+    // 运行时状态（激活态 / 发数 / 计时器）不落盘，这里只持久化配置。
+    JsonValue tg = JsonValue::object();
+    tg.set("enabled", JsonValue::boolean(mouse.trigger.enabled));
+    tg.set("key1", JsonValue::number(static_cast<double>(mouse.trigger.key1)));
+    tg.set("key2", JsonValue::number(static_cast<double>(mouse.trigger.key2)));
+    tg.set("key3", JsonValue::number(static_cast<double>(mouse.trigger.key3)));
+    tg.set("with_aim", JsonValue::boolean(mouse.trigger.with_aim));
+    tg.set("aim_confidence", JsonValue::number(static_cast<double>(mouse.trigger.aim_confidence)));
+    tg.set("confidence", JsonValue::number(static_cast<double>(mouse.trigger.confidence)));
+    tg.set("dist_threshold", JsonValue::number(static_cast<double>(mouse.trigger.dist_threshold)));
+    tg.set("stability_frames", JsonValue::number(static_cast<double>(mouse.trigger.stability_frames)));
+    tg.set("crosshair_check", JsonValue::boolean(mouse.trigger.crosshair_check));
+    tg.set("fire_delay", JsonValue::number(static_cast<double>(mouse.trigger.fire_delay)));
+    tg.set("fire_random", JsonValue::number(static_cast<double>(mouse.trigger.fire_random)));
+    tg.set("first_delay_min", JsonValue::number(static_cast<double>(mouse.trigger.first_delay_min)));
+    tg.set("first_delay_max", JsonValue::number(static_cast<double>(mouse.trigger.first_delay_max)));
+    tg.set("rifle_mode", JsonValue::boolean(mouse.trigger.rifle_mode));
+    tg.set("rifle_interval", JsonValue::number(static_cast<double>(mouse.trigger.rifle_interval)));
+    tg.set("click_count", JsonValue::number(static_cast<double>(mouse.trigger.click_count)));
+    tg.set("click_key", JsonValue::number(static_cast<double>(mouse.trigger.click_key)));
+    tg.set("press_duration", JsonValue::number(static_cast<double>(mouse.trigger.press_duration)));
+    tg.set("recoil_enabled", JsonValue::boolean(mouse.trigger.recoil_enabled));
+    tg.set("y_offset", JsonValue::number(static_cast<double>(mouse.trigger.y_offset)));
+    tg.set("status_log", JsonValue::boolean(mouse.trigger.status_log));
+    m.set("trigger", std::move(tg));
+    JsonValue tg2 = JsonValue::object();
+    tg2.set("enabled", JsonValue::boolean(mouse.trigger2.enabled));
+    tg2.set("key1", JsonValue::number(static_cast<double>(mouse.trigger2.key1)));
+    tg2.set("key2", JsonValue::number(static_cast<double>(mouse.trigger2.key2)));
+    tg2.set("fire_button", JsonValue::number(static_cast<double>(mouse.trigger2.fire_button)));
+    tg2.set("with_aim", JsonValue::boolean(mouse.trigger2.with_aim));
+    tg2.set("with_crosshair", JsonValue::boolean(mouse.trigger2.with_crosshair));
+    tg2.set("with_simple_recoil", JsonValue::boolean(mouse.trigger2.with_simple_recoil));
+    tg2.set("with_adv_recoil", JsonValue::boolean(mouse.trigger2.with_adv_recoil));
+    tg2.set("confidence", JsonValue::number(static_cast<double>(mouse.trigger2.confidence)));
+    tg2.set("first_err", JsonValue::number(static_cast<double>(mouse.trigger2.first_err)));
+    tg2.set("first_delay", JsonValue::number(static_cast<double>(mouse.trigger2.first_delay)));
+    tg2.set("fire_interval", JsonValue::number(static_cast<double>(mouse.trigger2.fire_interval)));
+    tg2.set("fire_random", JsonValue::number(static_cast<double>(mouse.trigger2.fire_random)));
+    tg2.set("fire_count", JsonValue::number(static_cast<double>(mouse.trigger2.fire_count)));
+    tg2.set("press_duration", JsonValue::number(static_cast<double>(mouse.trigger2.press_duration)));
+    tg2.set("move_throttle_frames", JsonValue::number(static_cast<double>(mouse.trigger2.move_throttle_frames)));
+    tg2.set("precision_enabled", JsonValue::boolean(mouse.trigger2.precision_enabled));
+    tg2.set("precision_range", JsonValue::number(static_cast<double>(mouse.trigger2.precision_range)));
+    tg2.set("precision_frames", JsonValue::number(static_cast<double>(mouse.trigger2.precision_frames)));
+    tg2.set("retarget_reset_ms", JsonValue::number(static_cast<double>(mouse.trigger2.retarget_reset_ms)));
+    tg2.set("lite_mode", JsonValue::boolean(mouse.trigger2.lite_mode));
+    tg2.set("stop_detect_enabled", JsonValue::boolean(mouse.trigger2.stop_detect_enabled));
+    tg2.set("stop_detect_color_id", JsonValue::number(static_cast<double>(mouse.trigger2.stop_detect_color_id)));
+    tg2.set("stop_detect_tolerance", JsonValue::number(static_cast<double>(mouse.trigger2.stop_detect_tolerance)));
+    tg2.set("stop_detect_range", JsonValue::number(static_cast<double>(mouse.trigger2.stop_detect_range)));
+    tg2.set("stop_detect_interval", JsonValue::number(static_cast<double>(mouse.trigger2.stop_detect_interval)));
+    m.set("trigger2", std::move(tg2));
     // 热键保护（hotkey_guard）：按一次 toggle_hotkey 切换「热键挂起」。
     // 挂起状态本身是运行时状态（AimThread 成员），**不落盘**；这里只持久化配置。
     JsonValue hg = JsonValue::object();
@@ -587,6 +670,60 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.recoil.humanize_curve_strength = static_cast<float>(obj_num(*rk, "humanize_curve_strength", 0.45));
             p.mouse.recoil.humanize_jitter_px = static_cast<float>(obj_num(*rk, "humanize_jitter_px", 0.25));
             p.mouse.recoil.humanize_jitter_frequency = static_cast<float>(obj_num(*rk, "humanize_jitter_frequency", 8.0));
+        }
+        // 自动扳机（BB 对标，2026-09-24）解析：缺字段一律取默认（enabled=false ⇒ 行为零变化）。
+        // 键位只取低 5 位（鼠标五键位图：左1 右2 中4 侧8 侧16），越界位掩掉。
+        if (const JsonValue* tg = m->find("trigger"); tg && tg->is_object()) {
+            p.mouse.trigger.enabled = obj_bool(*tg, "enabled", false);
+            p.mouse.trigger.key1 = static_cast<uint8_t>(obj_int(*tg, "key1", 4) & 0x1F);
+            p.mouse.trigger.key2 = static_cast<uint8_t>(obj_int(*tg, "key2", 0) & 0x1F);
+            p.mouse.trigger.key3 = static_cast<uint8_t>(obj_int(*tg, "key3", 0) & 0x1F);
+            p.mouse.trigger.with_aim = obj_bool(*tg, "with_aim", true);
+            p.mouse.trigger.aim_confidence = static_cast<float>(obj_num(*tg, "aim_confidence", 0.40));
+            p.mouse.trigger.confidence = static_cast<float>(obj_num(*tg, "confidence", 0.40));
+            p.mouse.trigger.dist_threshold = static_cast<float>(obj_num(*tg, "dist_threshold", 50.0));
+            p.mouse.trigger.stability_frames = static_cast<int>(obj_int(*tg, "stability_frames", 0));
+            p.mouse.trigger.crosshair_check = obj_bool(*tg, "crosshair_check", false);
+            p.mouse.trigger.fire_delay = static_cast<float>(obj_num(*tg, "fire_delay", 10.0));
+            p.mouse.trigger.fire_random = static_cast<float>(obj_num(*tg, "fire_random", 1.0));
+            p.mouse.trigger.first_delay_min = static_cast<float>(obj_num(*tg, "first_delay_min", 20.0));
+            p.mouse.trigger.first_delay_max = static_cast<float>(obj_num(*tg, "first_delay_max", 30.0));
+            p.mouse.trigger.rifle_mode = obj_bool(*tg, "rifle_mode", true);
+            p.mouse.trigger.rifle_interval = static_cast<float>(obj_num(*tg, "rifle_interval", 50.0));
+            p.mouse.trigger.click_count = static_cast<int>(obj_int(*tg, "click_count", 50));
+            p.mouse.trigger.click_key = static_cast<uint8_t>(obj_int(*tg, "click_key", 1) & 0x1F);
+            p.mouse.trigger.press_duration = static_cast<float>(obj_num(*tg, "press_duration", 50.0));
+            p.mouse.trigger.recoil_enabled = obj_bool(*tg, "recoil_enabled", true);
+            p.mouse.trigger.y_offset = static_cast<float>(obj_num(*tg, "y_offset", 0.8));
+            p.mouse.trigger.status_log = obj_bool(*tg, "status_log", false);
+        }
+        if (const JsonValue* tg = m->find("trigger2"); tg && tg->is_object()) {
+            p.mouse.trigger2.enabled = obj_bool(*tg, "enabled", false);
+            p.mouse.trigger2.key1 = static_cast<uint8_t>(obj_int(*tg, "key1", 16) & 0x1F);
+            p.mouse.trigger2.key2 = static_cast<uint8_t>(obj_int(*tg, "key2", 0) & 0x1F);
+            p.mouse.trigger2.fire_button = static_cast<uint8_t>(obj_int(*tg, "fire_button", 1) & 0x1F);
+            p.mouse.trigger2.with_aim = obj_bool(*tg, "with_aim", true);
+            p.mouse.trigger2.with_crosshair = obj_bool(*tg, "with_crosshair", false);
+            p.mouse.trigger2.with_simple_recoil = obj_bool(*tg, "with_simple_recoil", false);
+            p.mouse.trigger2.with_adv_recoil = obj_bool(*tg, "with_adv_recoil", false);
+            p.mouse.trigger2.confidence = static_cast<float>(obj_num(*tg, "confidence", 0.5));
+            p.mouse.trigger2.first_err = static_cast<float>(obj_num(*tg, "first_err", 30.0));
+            p.mouse.trigger2.first_delay = static_cast<float>(obj_num(*tg, "first_delay", 0.0));
+            p.mouse.trigger2.fire_interval = static_cast<float>(obj_num(*tg, "fire_interval", 1.0));
+            p.mouse.trigger2.fire_random = static_cast<float>(obj_num(*tg, "fire_random", 0.0));
+            p.mouse.trigger2.fire_count = static_cast<int>(obj_int(*tg, "fire_count", 1));
+            p.mouse.trigger2.press_duration = static_cast<float>(obj_num(*tg, "press_duration", 50.0));
+            p.mouse.trigger2.move_throttle_frames = static_cast<int>(obj_int(*tg, "move_throttle_frames", 2));
+            p.mouse.trigger2.precision_enabled = obj_bool(*tg, "precision_enabled", false);
+            p.mouse.trigger2.precision_range = static_cast<float>(obj_num(*tg, "precision_range", 10.0));
+            p.mouse.trigger2.precision_frames = static_cast<int>(obj_int(*tg, "precision_frames", 5));
+            p.mouse.trigger2.retarget_reset_ms = static_cast<float>(obj_num(*tg, "retarget_reset_ms", 1000.0));
+            p.mouse.trigger2.lite_mode = obj_bool(*tg, "lite_mode", false);
+            p.mouse.trigger2.stop_detect_enabled = obj_bool(*tg, "stop_detect_enabled", false);
+            p.mouse.trigger2.stop_detect_color_id = static_cast<int>(obj_int(*tg, "stop_detect_color_id", 2));
+            p.mouse.trigger2.stop_detect_tolerance = static_cast<int>(obj_int(*tg, "stop_detect_tolerance", 60));
+            p.mouse.trigger2.stop_detect_range = static_cast<int>(obj_int(*tg, "stop_detect_range", 80));
+            p.mouse.trigger2.stop_detect_interval = static_cast<int>(obj_int(*tg, "stop_detect_interval", 10));
         }
         // 热键保护（hotkey_guard）解析：缺字段一律取"保守默认"（enabled=false ⇒ 不翻转、位图原样透传），
         // 故旧配置/旧预设文件加载后行为与本功能加入前完全一致（向后兼容）。

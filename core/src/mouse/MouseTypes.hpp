@@ -203,6 +203,84 @@ struct RecoilConfig {
     float humanize_jitter_frequency = 8.0f; // X 轴微动变化频率（Hz）
 };
 
+// ---------------------------------------------------------------------------
+// 自动扳机 v7.26（对齐 BB `auto_trigger_*`，见 bb-port/01-选靶与扳机.md §2）
+//
+// 激活：长按组合键 (key1 ∧ key2) 按下后，由 key3 的**按下边沿**激活；
+//       key3 = 0 表示"常满足"⇒ 长键按下即激活（无需点按）。
+// 发射：rifle_mode（默认开）= 每 rifle_interval ms 连射一发；
+//       非连发 = 受 click_count 上限的计数模式。
+// 开枪门（每帧校验）：有锁定目标 ∧ conf ≥ confidence ∧ dtt ≤ dist_threshold
+//       ∧（可选）中心被任一检测框覆盖。
+// ★ 键位是**位掩码**，与 MouseProfile.aim_hotkey 同域：
+//   1=left 2=right 4=middle 8=back 16=forward。BB 编号 1/2/3/5/6 → 0x01/0x02/0x04/0x08/0x10。
+// ★ 默认 enabled=false ⇒ 不开时 AimThread 完全不跑本模块，输出链与本参数加入前一致。
+// ---------------------------------------------------------------------------
+struct TriggerConfig {
+    bool enabled = false;            // 总开关
+    uint8_t key1 = 0x04;             // 长按组合键1（BB 默认 3=中键 → 0x04）
+    uint8_t key2 = 0x00;             // 长按组合键2（0 = 常满足，不参与判定）
+    uint8_t key3 = 0x00;             // 点按激活键（0 = 常满足 ⇒ 按住长键即激活）
+    bool with_aim = true;            // 激活时附带自瞄（改用 aim_confidence 作检测门）
+    float aim_confidence = 0.40f;    // 附带自瞄时的检测置信
+    float confidence = 0.40f;        // 开枪所需的目标置信
+    float dist_threshold = 50.0f;    // 目标到中心的最大允许误差（px）
+    int stability_frames = 0;        // 非连发模式需先稳定的帧数（0 = 立即）
+    bool crosshair_check = false;    // 中心须落在某检测框内才开枪
+    float fire_delay = 10.0f;        // 开火间隔基准（ms，非连发模式）
+    float fire_random = 1.0f;        // 开火间隔随机 ±（ms）
+    float first_delay_min = 20.0f;   // 首枪最小延迟（ms）
+    float first_delay_max = 30.0f;   // 首枪最大延迟（ms）
+    bool rifle_mode = true;          // true = 连发（按 rifle_interval）；false = 计数模式
+    float rifle_interval = 50.0f;    // 连发间隔（ms）
+    int click_count = 50;            // 计数模式的最大发数（rifle_mode 下不生效）
+    uint8_t click_key = 0x01;        // 开火键位掩码（BB 默认 {1}=左键）
+    float press_duration = 50.0f;    // 单次点击的按下保持时长（ms）
+    bool recoil_enabled = true;      // 首枪是否触发压枪
+    float y_offset = 0.8f;           // 激活期间覆盖的垂直瞄准比例（距顶比例）
+    bool status_log = false;         // 打印状态日志（诊断用）
+};
+
+// ---------------------------------------------------------------------------
+// BB 扳机 2.0（对齐 BB `auto_trigger2_*`，见 bb-port/01-选靶与扳机.md §3）
+//
+// 与 v7.26 的核心差异：
+//   · 组合键**按住即连发**（无点按激活态）；
+//   · **首枪门**：需 dtt < first_err（可选 precision 需先稳定 N 帧）；
+//     首枪之后**不再校验距离**，只要有锁定就按间隔继续打；
+//   · 目标丢失超过 retarget_reset_ms 才重置首枪态（重新走误差+延迟）；
+//   · 可选「急停检测」：中心出现指定准星颜色才允许开枪（打狙急停用）；
+//   · 支持随枪压枪（简易 / 进阶 / 准星三路触发）。
+// ---------------------------------------------------------------------------
+struct Trigger2Config {
+    bool enabled = false;            // 总开关
+    uint8_t key1 = 0x10;             // 组合键1（BB 默认 6=侧键2 → 0x10）
+    uint8_t key2 = 0x00;             // 组合键2（0 = 常满足）
+    uint8_t fire_button = 0x01;      // 开火键位掩码（BB 默认 1=左键）
+    bool with_aim = true;            // 附带自瞄
+    bool with_crosshair = false;     // 附带准星压枪（组合键按下即生效）
+    bool with_simple_recoil = false; // 附带简易压枪
+    bool with_adv_recoil = false;    // 附带进阶压枪
+    float confidence = 0.5f;         // 本扳机专用检测置信
+    float first_err = 30.0f;         // 首枪允许误差上限（px）
+    float first_delay = 0.0f;        // 首枪延迟（ms，从首次进入误差圈起算）
+    float fire_interval = 1.0f;      // 连发间隔（帧；按 600Hz 折算为 ms = 帧 × 1000/600）
+    float fire_random = 0.0f;        // 连发间隔随机 ±（帧）
+    int fire_count = 1;              // 每次连发点击次数
+    float press_duration = 50.0f;    // 单次点击的按下保持时长（ms）
+    int move_throttle_frames = 2;    // 连发期移动合帧发送间隔（帧）
+    bool precision_enabled = false;  // 精确模式：首枪前需连续 N 帧进入 precision_range
+    float precision_range = 10.0f;   // 精确判定距离阈（px）
+    int precision_frames = 5;        // 精确稳定帧数
+    float retarget_reset_ms = 1000.0f; // 目标丢失超过该时长即重置首枪态（0 = 不重置）
+    bool lite_mode = false;          // 精简模式（跳过拟人/抗过冲，仅压枪）
+    bool stop_detect_enabled = false; // 急停检测开关
+    int stop_detect_color_id = 2;    // 目标准星颜色（1=红 2=绿 3=蓝 4=黄 5=青 6=品红）
+    int stop_detect_tolerance = 60;  // 颜色容差（0~255）
+    int stop_detect_range = 80;      // 中心检测半径（px）
+    int stop_detect_interval = 10;   // 检测周期（帧）
+};
+
 // 热键保护（hotkey_guard）：按一次 toggle_hotkey 在「热键生效 / 全部挂起」之间切换。
 //
 // 挂起的实现方式是**把物理按键位图在本控制周期内清零**（AimThread 里做），
@@ -285,6 +363,12 @@ struct MouseProfile {
         // **本结构体缺该成员、AimThread 从未调用** ⇒ 签名/面板都无从配置（M2 补齐）。
         ContinuousLeadConfig continuous_lead;
     RecoilConfig recoil;                    // 压枪（输出链 pull_curve 后、deadzone 前注入 scaled_y）
+    // ---- 自动扳机（BB 对标，2026-09-24 移植）----
+    // 两套状态机互相独立，可分别开启；都只产出"要开火"的决策（TriggerCmd），
+    // 真正的点击由 AimThread 拿到决策后调 output->mouse_click 注入 —— 决策与注入分离。
+    // 默认 enabled=false ⇒ 不开时 AimThread 不跑扳机，输出链与加入前逐字节一致。
+    TriggerConfig trigger;                  // 自动扳机 v7.26
+    Trigger2Config trigger2;                // BB 扳机 2.0
     HotkeyGuardConfig hotkey_guard;         // 热键保护（按 toggle_hotkey 切换「热键挂起」）
     AimPointProfile aim_point;
     float lost_grace_ms = 78.0f;                // 目标丢失宽限期

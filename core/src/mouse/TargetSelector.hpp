@@ -75,6 +75,23 @@ struct TargetSelectorConfig {
     bool priority_enabled = false;   // 是否启用优先级排序
     std::vector<int> priority_classes;      // 优先类别（优先级=1，列表内优先）
     std::vector<int> priority_classes_high; // 高优先类别（优先级=2，最优先）
+
+    // ---- BB 对标（2026-09-24，见 bb-port/01-选靶与扳机.md §1）----
+    // ★ 全部默认 0/false ⇒ 不开启时行为与本参数加入前**逐字节一致**（1.5.46 兼容）。
+    //   铁律：新机制一律出厂关，要在面板上显式打开才生效。
+    float lock_hold_ms = 0.0f;          // 锁定保持窗：期内只刷新位置、不换目标（0=关；对齐 BB lock_hold_time=1500）
+    bool priority_scoring = false;      // true=打分制选靶（dist+size+stick），false=最近优先（现行为）
+    float weight_dist = 1.0f;           // 打分制：距离项权重（对齐 BB priority_weight_dist=1）
+    float weight_size = 0.3f;           // 打分制：尺寸项权重（对齐 BB priority_weight_size=0.3）
+    float stickiness = 1.0f;            // 打分制：粘滞权重（对齐 BB target_stickiness=1，进公式时 ×0.5）
+    float switch_threshold_px = 60.0f;  // stick 判定半径（对齐 BB target_switch_threshold=60px）
+    // 头身稳定过滤：同一帧里同时出现 (bodyN + headN) 时删掉 headN 框，
+    // 理由——头身同框时"头部框"容易把瞄准点抢走，只留身体框更稳（对齐 BB applyHeadBodyStable）。
+    bool head_body_stable = false;      // 总开关（默认关）
+    int hb_body1 = 0;                   // 组合1：身体类（BB head_body_body1=0）
+    int hb_head1 = 1;                   // 组合1：头类（BB head_body_head1=1，命中即删）
+    int hb_body2 = -1;                  // 组合2：身体类（-1 = 该组不启用）
+    int hb_head2 = -1;                  // 组合2：头类
 };
 
 // 选择结果
@@ -135,6 +152,11 @@ public:
         has_switch_ = false;
         last_switch_ms_ = 0;
         last_locked_dist_sq_ = -1.0f;
+        lock_track_id_ = -1;
+        lock_start_ms_ = 0;
+        has_last_target_ = false;
+        last_target_x_ = 0.0f;
+        last_target_y_ = 0.0f;
     }
 
     const std::vector<TrackEntry>& tracks() const { return tracks_; }
@@ -176,6 +198,12 @@ private:
                     bool has_switch_ = false;
                     uint32_t last_switch_ms_ = 0;       // 上次切换（选中新目标）的时刻
                     float last_locked_dist_sq_ = -1.0f; // 刚失去的锁定目标的距离平方（<0 表示无）
+                    // ---- BB 对标状态（2026-09-24）----
+                    int lock_track_id_ = -1;        // 当前锁定的 track id（lock_hold 判据）
+                    uint32_t lock_start_ms_ = 0;    // 该锁定建立时刻（用于 lock_hold_ms 窗口）
+                    bool has_last_target_ = false;  // last_target_x_/y_ 是否有效
+                    float last_target_x_ = 0.0f;    // 上帧选中瞄准点（打分制 stick 项用）
+                    float last_target_y_ = 0.0f;
         };
 
 }  // namespace ttbox::core::aim
