@@ -7,12 +7,15 @@
 //   Case4 热键OFF + 拉枪激活             -> 最终输出仍被安全门吃成 {0,0}
 //   Case5 BB 拟人化链（humanize）开启     -> 近距离基线为 0 时被噪声顶成非零（接线生效）
 //   Case6 BB 三段查表压枪开启             -> 误差≈0 时仍出现纯下压量（接线生效）
+//   Case7 新版提前量开启                  -> 老的持续提前量让路（X 输出回落，互斥生效）
 //
 // 说明：PullCurve / HumanizeShaper / RecoilController 算法本身的单测在
 // test_mouse.cpp 与 test_bb_second_batch.cpp；本文件只验证 AimThread 输出链
 // **注入点位置**正确、与死区/安全门的先后关系正确。
 // Case5/Case6 是"接线了没有"的哨兵：这两个模块默认关，若 AimThread 忘了调用它们，
 // 断言会红（而不是静默通过）。
+// Case7 是"新老互斥"的哨兵：业主裁定「新版替老版，界面只留一套」，
+// 老 continuous_lead 必须在新版开启时完全不参与输出，否则两条 X 偏移会叠加。
 #include <chrono>
 #include <cstdio>
 #include <memory>
@@ -262,6 +265,46 @@ int main() {
         });
         ctx.thread.stop();
         check(got_pull, "Case6 BB 三段查表压枪开启 -> 误差≈0 仍出现向下压枪量（接线生效）");
+    }
+
+    // Case7: 新老提前量互斥（业主 2026-09-24 裁定「新版替老版，界面只留一套」）。
+    // 判据：同样目标与热键下，只开老的持续提前量时 X 输出更大（多了偏置）；
+    //       把新版一代打开（strength=0，它自己不产生偏移，只验互斥）后，老的必须让路
+    //       ⇒ X 输出回落到纯 PID 量级。若互斥守卫被删（老的照跑），两组输出相同，本用例必红。
+    {
+        auto max_abs_x = [](const std::vector<Action>& acts) {
+            int best = 0;
+            for (const auto& a : acts) {
+                const int v = static_cast<int>(a.move_x);
+                const int av = (v < 0) ? -v : v;
+                if (av > best) best = av;
+            }
+            return best;
+        };
+        auto run_case = [&](bool lead1_on) -> int {
+            TestCtx ctx(false);
+            auto& m = ctx.profile->mouse;
+            m.continuous_lead.enabled = true;
+            m.continuous_lead.enter_distance = 1.0f;   // 极易触发（误差≈140 count/帧）
+            m.continuous_lead.scale = 1.0f;
+            m.lead1.enabled = lead1_on;
+            m.lead1.strength = 0.0f;                   // 新版自身零偏移，只验"老的有没有让路"
+            ctx.reapply();
+            if (!ctx.start()) { std::printf("[FAIL] start\n"); return -1; }
+            ctx.buttons.store(0x02);
+            ctx.feed(1, 1000, make_far_box());
+            wait_until(ctx, [](const std::vector<Action>& acts) {
+                return !acts.empty() && any_move(acts);
+            });
+            // 老的偏置是渐入的（level_ += (target-level_)*0.2），要跑够帧才接近满值
+            std::this_thread::sleep_for(std::chrono::milliseconds(150));
+            ctx.thread.stop();
+            return max_abs_x(ctx.output->snapshot());
+        };
+        const int only_old = run_case(false);
+        const int with_new = run_case(true);
+        check(only_old > with_new && with_new > 0,
+              "Case7 新版提前量开启 -> 老的持续提前量让路（X 输出回落）");
     }
 
     if (fails == 0) std::printf("test_pull_curve_aimthread: ALL PASS\n");

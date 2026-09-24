@@ -395,9 +395,19 @@ void AimThread::loop() {
                 //   若喂 scaled_*（= aibox × sens × output_scale × personal_gain），
                 //   用户一调高灵敏度就会让提前量**静默地更早触发**，行为不可预期。
                 //   截断成 int32 只丢 <1 count 的残差，对"累计同向距离"判定无实质影响。
-                scaled_x += continuous_lead_.apply(static_cast<int32_t>(aibox_x),
-                                                   static_cast<int32_t>(aibox_y),
-                                                   dt_ms, lead_cfg);
+                //
+                // ★★ 新老互斥（业主 2026-09-24 裁定「新版替老版，界面只留一套」）：
+                //   新版提前量（lead1/lead2）只要有一代开启，老的持续提前量就**不参与输出**，
+                //   否则两条 X 轴偏移会叠加（老的在 scaled_x 上、新的在 control_x 上，
+                //   同一功能的两个补丁同时生效 ⇒ 提前量翻倍且互相打架）。
+                //   切到新版时把老引擎的累计/渐入电平清掉，避免关掉新版后残留一个旧偏置。
+                if (!lead1_cfg.enabled && !lead2_cfg.enabled) {
+                    scaled_x += continuous_lead_.apply(static_cast<int32_t>(aibox_x),
+                                                       static_cast<int32_t>(aibox_y),
+                                                       dt_ms, lead_cfg);
+                } else if (lead_cfg.enabled) {
+                    continuous_lead_.reset();
+                }
                 // 压枪（recoil）：开火期间持续下压补偿后坐力。
                 // 位置在 pull_curve 之后、deadzone 之前（与 pull_curve 同一注入点语义）。
                 // 压枪量（count 域）与 PID 输出融合，之后统一走 deadzone → remainder →
