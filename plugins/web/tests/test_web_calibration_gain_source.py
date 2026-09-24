@@ -263,6 +263,16 @@ def test_worker_clears_bias_before_every_round():
 # 6. 失败清理：bias 必须归零
 # ===========================================================================
 
+def test_worker_clears_bias_on_entry():
+    """★ 入场也要清零：上一轮若异常退出（进程被杀/重启），板上可能留着非零偏置，
+    那会让紧接着的「稳定检测」先把目标拉偏 ⇒ 直接判目标不稳、标定还没开始就死。
+    """
+    body = _worker_src()
+    head = body[:body.index('try:')]
+    assert re.search(r"mo0\['calibration_bias_x'\]\s*=\s*0\.0", head), '入场没清 x 偏置'
+    assert re.search(r"mo0\['calibration_bias_y'\]\s*=\s*0\.0", head), '入场没清 y 偏置'
+
+
 def test_worker_finally_clears_bias():
     """★ 中途取消/失败若留着 calibration_bias_*，参考点会被永久顶偏只能重启。
 

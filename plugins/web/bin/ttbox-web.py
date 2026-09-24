@@ -3875,8 +3875,10 @@ def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
 
 
 def _calib_worker() -> None:
-    """真实标定闭环：稳定检测 → X 轴往返注入 → 目标位移(px) → gain=px/count。
-    TTBOX/旧后端：10 轮、幅度 8→32、中值去抖、Y 轴复用 X。
+    """真实标定闭环：稳定检测 → X/Y 分轴正负交替注入参考点偏置 → 用真实注入 count 测 gain。
+
+    gain(px/count) = Δ目标画面位移(px) / ΔΣ注入count —— 闭环恒等式，与 PID 参数、
+    与游戏灵敏度无关，对任意时间窗成立（不必等稳态）。参数推导见 derive_pid_params。
     注入：标定时 mouse.calibrating=true（AimThread/OutputBackend 放行 AI 移动），
     kp 输出经现有控制链驱动鼠标 → 目标在画面中位移 → aim_pos_x 反馈。"""
     prof0 = _get_runtime_profile()
@@ -3884,6 +3886,10 @@ def _calib_worker() -> None:
     mo0 = prof0.setdefault('mouse', {})
     mo0['enabled'] = True
     mo0['calibrating'] = True
+    # 入场清零：上一轮若异常退出（进程被杀/重启），板上可能留着非零偏置，
+    # 那会让紧接着的"稳定检测"先把目标拉偏、直接判定目标不稳。
+    mo0['calibration_bias_x'] = 0.0
+    mo0['calibration_bias_y'] = 0.0
     ipc_request('SET_CONFIG', {'profile': prof0})
     try:
         _calib_set(state='preparing', status='running', phase='preparing', reason='准备标定环境',
