@@ -5,7 +5,8 @@
 #     · 算法 + 单测在：core/src/mouse/ContinuousLead.hpp、core/tests/test_mouse.cpp
 #     · 结构体在：MouseTypes.hpp ContinuousLeadConfig
 #     · 但 RuntimeProfile.mouse 无该成员、AimThread 从未调用、Web 层只有
-#       static/legacy/index-preview.html（已归档的遗留模板）里一句"持续提前量参数配置占位"
+#       static/legacy/index-preview.html 里一句"持续提前量参数配置占位"
+#       （该遗留模板 2026-09-24 面板收敛时已删除，归档见 .workbuddy/artifacts/archive/）
 #       ⇒ 该功能**永远无法从面板开启**。
 #   本次把四层补齐，本文件锁死其中 Web 那两层（参数翻译 + 反向投影）。
 #

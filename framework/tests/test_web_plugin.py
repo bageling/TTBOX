@@ -17,8 +17,11 @@ class WebPluginTests(unittest.TestCase):
         self.assertEqual(manifest["api_version"], "1")
         self.assertTrue((WEB_PLUGIN / manifest["entry"]).is_file())
         self.assertTrue((WEB_PLUGIN / "templates" / "index.html").is_file())
-        # E01（2026-09-18）：旧前端已迁入 static/legacy/，断言随实际布局修正
-        self.assertTrue((WEB_PLUGIN / "static" / "legacy" / "app.js").is_file())
+        # E01：旧前端 2026-09-18 迁入 static/legacy/，2026-09-24 随面板收敛**删除**
+        #   （740K 死资产，现役 index.html 自包含、零引用；归档在
+        #   .workbuddy/artifacts/archive/legacy-static-2026-09-24/，也可用 git 历史回滚）。
+        #   断言反转为「必须不存在」，防止哪天被误拷回来。
+        self.assertFalse((WEB_PLUGIN / "static" / "legacy").exists())
 
     def test_flask_routes_and_pages_from_migrated_entry(self):
         entry = WEB_PLUGIN / "bin" / "ttbox-web.py"
@@ -32,7 +35,8 @@ class WebPluginTests(unittest.TestCase):
         self.assertEqual(r_home.status_code, 302)
         self.assertTrue(r_home.headers.get("Location", "").endswith("/activate"))
         self.assertEqual(client.get("/activate").status_code, 200)
-        self.assertEqual(client.get("/static/legacy/app.js").status_code, 200)
+        # 旧前端资产已删（2026-09-24）⇒ 这条路径必须 404，不能还能被当静态资源取到
+        self.assertEqual(client.get("/static/legacy/app.js").status_code, 404)
         rules = {rule.rule for rule in module.app.url_map.iter_rules()}
         # S1-2026-09-18：/api/hailo/status、/api/network/wifi 随页签移除已删，断言同步
         for route in ("/api/state", "/api/models", "/api/config", "/api/system", "/api/preview.mjpg"):

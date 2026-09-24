@@ -466,9 +466,11 @@ sync_tree() {
     #   `from plugins.system_host import SystemPluginHost`（以及 system_common / fan / wifi 等
     #   顶层模块与子包）——只拷 web/preview 两个子目录会让 release 树里 `plugins` 包残缺，
     #   web 启动即 ModuleNotFoundError。bin/ 闭集（A7）不受影响（那是 bin/ 的白名单）。
-    #   S1-2026-09-18（A0-3c/A0-3d/C04）：死路由文件与旧版静态资产移出出货包（仓库内保留）。
+    #   S1-2026-09-18（A0-3c/A0-3d/C04）：死路由文件与旧版静态资产移出出货包；
+    #     2026-09-24 面板收敛后两者都从仓库删除（源头不再存在，下面两行 rm 仅作兜底，
+    #     防陈旧工作树/旧清单又把它们带进 payload）。
     #     api_v1.py / framework_api.py：死路由，且 ttbox-web.py 已同步摘除注册点；
-    #     static/legacy：旧版面板资产，现役 index.html 自包含零引用（E01 断言已改指 legacy）。
+    #     static/legacy：740K 旧面板资产，现役 index.html 自包含零引用。
     rm -f "${payload}/plugins/web/api_v1.py" \
           "${payload}/plugins/web/framework_api.py"
     rm -rf "${payload}/plugins/web/static/legacy"

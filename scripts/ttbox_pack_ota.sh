@@ -191,7 +191,8 @@ LEAK="$(cd "$PAYLOAD" && find . -type f | sed 's|^\./||' \
         | while IFS= read -r f; do [ -e "${REPO_ROOT}/${f}" ] || echo "$f"; done)"
 [ -z "$LEAK" ] || die "payload 存在仓库外文件（混入）:
 ${LEAK}"
-# 正向：白名单展开的每个文件，payload 里必须存在（api_v1/framework_api/legacy 是定向修剪；
+# 正向：白名单展开的每个文件，payload 里必须存在（api_v1/framework_api/legacy 是定向修剪，
+#   2026-09-24 起 legacy 源头已删、此条 continue 仅作兜底；
 #   find 剔除集必须与装配 tar 的 --exclude 完全一致，否则 tests 会假报漏装）
 MISS=""
 while IFS= read -r entry <&3; do
