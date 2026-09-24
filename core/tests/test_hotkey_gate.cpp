@@ -67,9 +67,9 @@ struct TestCtx {
 
     TestCtx() {
         profile->mouse.enabled = true;      // 总开关打开，本文件只测热键位语义
-        profile->mouse.aim_hotkey = 0x02;   // 右键
-        profile->mouse.aim_hotkey2 = 0x00;
-        profile->mouse.aim_hotkey_mode = 0; // any
+        profile->mouse.aim_profiles[0].hotkey = 0x02;   // 右键
+        profile->mouse.aim_profiles[0].hotkey2 = 0x00;
+        profile->mouse.aim_profiles[0].hotkey_mode = 0; // any
         profile->mouse.kp_x = 1.0f;
         profile->mouse.kp_y = 1.0f;
         profile->mouse.lost_grace_ms = 78.0f;

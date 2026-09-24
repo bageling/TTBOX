@@ -63,6 +63,10 @@ struct PipelineMetrics {
     // 挂起时 injection_allowed 恒 false、gated_frames 持续增长 —— 两者要分开看：
     // 「挂起」是用户主动刹的车，「没按热键」只是没在瞄。
     bool aim_hotkeys_suspended = false;
+    // 本周期生效的瞄准档索引（mouse.aim_profiles 下标）；-1 = 无档命中。
+    // 档位之间键位互斥（面板保存时校验）⇒ 值唯一。
+    // 排查"按了键却用了别的档参数"时看它：与 last_hotkey_bits 对照即可。
+    int aim_active_profile = -1;
     bool mouse_control_connected = false;
     // 后端静态总闸（output_enabled）的实际生效值。与 injection_allowed 是**两个独立闸门**：
     // 只有两者同时为真才可能真的注入。历史上它恒为 false 而 injection_allowed 恒 true，

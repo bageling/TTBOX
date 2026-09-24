@@ -397,9 +397,44 @@ JsonValue RuntimeProfile::to_json() const {
     // A10：鼠标 AI 注入配置
     JsonValue m = JsonValue::object();
     m.set("enabled", JsonValue::boolean(mouse.enabled));
-    m.set("aim_hotkey", JsonValue::number(static_cast<double>(mouse.aim_hotkey)));
-    m.set("aim_hotkey2", JsonValue::number(static_cast<double>(mouse.aim_hotkey2)));
-    m.set("aim_hotkey_mode", JsonValue::string(aim::mouse_hotkey_mode_name(mouse.aim_hotkey_mode)));
+    // 平铺热键 key：**只写不读**（解析时仅在 aim_profiles 缺失的场合当合成源）。
+    // 继续写出去是为了让旧版 Core / 外部工具仍能读懂配置，便于回退排查。
+    // 值 = 第 0 档的镜像；真源始终是下面的 mouse.aim_profiles。
+    {
+        const auto& ap0 = aim::aim_profile_at(mouse, 0);
+        m.set("aim_hotkey", JsonValue::number(static_cast<double>(ap0.hotkey)));
+        m.set("aim_hotkey2", JsonValue::number(static_cast<double>(ap0.hotkey2)));
+        m.set("aim_hotkey_mode", JsonValue::string(aim::mouse_hotkey_mode_name(ap0.hotkey_mode)));
+    }
+    // ---- 瞄准档位（真源）----
+    JsonValue aps = JsonValue::array();
+    for (const auto& ap : mouse.aim_profiles) {
+        JsonValue j = JsonValue::object();
+        j.set("hotkey", JsonValue::number(static_cast<double>(ap.hotkey)));
+        j.set("hotkey2", JsonValue::number(static_cast<double>(ap.hotkey2)));
+        j.set("hotkey_mode", JsonValue::string(aim::mouse_hotkey_mode_name(ap.hotkey_mode)));
+        j.set("offset_x", JsonValue::number(static_cast<double>(ap.offset_x)));
+        j.set("offset_y", JsonValue::number(static_cast<double>(ap.offset_y)));
+        j.set("sensitivity", JsonValue::number(static_cast<double>(ap.sensitivity)));
+        j.set("fov_scale", JsonValue::number(static_cast<double>(ap.fov_scale)));
+        JsonValue ap_cos = JsonValue::array();
+        for (const auto& c : ap.class_offsets) {
+            JsonValue o = JsonValue::object();
+            o.set("class_id", JsonValue::number(static_cast<double>(c.class_id)));
+            o.set("offset_x", JsonValue::number(static_cast<double>(c.offset_x)));
+            o.set("offset_y", JsonValue::number(static_cast<double>(c.offset_y)));
+            o.set("priority", JsonValue::number(static_cast<double>(c.priority)));
+            ap_cos.push_back(std::move(o));
+        }
+        j.set("class_offsets", std::move(ap_cos));
+        JsonValue ap_cf = JsonValue::array();
+        for (const int c : ap.class_filter) {
+            ap_cf.push_back(JsonValue::number(static_cast<double>(c)));
+        }
+        j.set("class_filter", std::move(ap_cf));
+        aps.push_back(std::move(j));
+    }
+    m.set("aim_profiles", std::move(aps));
     m.set("fov_range", JsonValue::number(static_cast<double>(mouse.fov_range)));
     m.set("confidence", JsonValue::number(static_cast<double>(mouse.confidence)));
     m.set("kp_x", JsonValue::number(static_cast<double>(mouse.kp_x)));
@@ -812,9 +847,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
     // A10：鼠标 AI 注入配置
     if (const JsonValue* m = v.find("mouse"); m && m->is_object()) {
         p.mouse.enabled = obj_bool(*m, "enabled", false);
-        p.mouse.aim_hotkey = static_cast<uint8_t>(obj_int(*m, "aim_hotkey", 2));
-        p.mouse.aim_hotkey2 = static_cast<uint8_t>(obj_int(*m, "aim_hotkey2", 0));
-        p.mouse.aim_hotkey_mode = aim::mouse_hotkey_mode_from_string(obj_str(*m, "aim_hotkey_mode", "any").c_str());
+        // 平铺 aim_hotkey / aim_hotkey2 / aim_hotkey_mode 不再在这里读 ——
+        // 热键的唯一真源是 mouse.aim_profiles（见本段末尾的档位解析，老配置在那里合成第 0 档）。
         p.mouse.fov_range = static_cast<float>(obj_num(*m, "fov_range", 1.0));
         p.mouse.confidence = static_cast<float>(obj_num(*m, "confidence", 0.25));
         p.mouse.kp_x = static_cast<float>(obj_num(*m, "kp_x", 25.0));
@@ -1173,6 +1207,60 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
                 c.priority = static_cast<int>(obj_int(e, "priority", 0));
                 p.mouse.aim_point.class_offsets.push_back(c);
             }
+        }
+        // ---- 瞄准档位（2026-09-24）：热键的唯一真源 ----
+        // JSON 里有非空数组 ⇒ 逐档读；没有（老配置，或旧版 Core 写回的配置）⇒
+        // 用平铺 key 合成第 0 档。**不做 config.d 迁移**：OTA 不覆盖 config.d，
+        // 合成这条路保证老设备升级后行为逐位不变。
+        bool got_profiles = false;
+        if (const JsonValue* aps = m->find("aim_profiles"); aps && aps->is_array() && !aps->as_array().empty()) {
+            p.mouse.aim_profiles.clear();
+            for (const auto& j : aps->as_array()) {
+                if (!j.is_object()) continue;
+                aim::AimHotkeyProfile ap;
+                ap.hotkey = static_cast<uint8_t>(obj_int(j, "hotkey", 2));
+                ap.hotkey2 = static_cast<uint8_t>(obj_int(j, "hotkey2", 0));
+                ap.hotkey_mode = aim::mouse_hotkey_mode_from_string(obj_str(j, "hotkey_mode", "any").c_str());
+                ap.offset_x = static_cast<float>(obj_num(j, "offset_x", 0.5));
+                ap.offset_y = static_cast<float>(obj_num(j, "offset_y", 0.5));
+                ap.sensitivity = static_cast<float>(obj_num(j, "sensitivity", 1.0));
+                ap.fov_scale = static_cast<float>(obj_num(j, "fov_scale", 1.0));
+                if (const JsonValue* co = j.find("class_offsets"); co && co->is_array()) {
+                    for (const auto& e : co->as_array()) {
+                        if (!e.is_object()) continue;
+                        aim::ClassOffset c;
+                        c.class_id = static_cast<int>(obj_int(e, "class_id", 0));
+                        c.offset_x = static_cast<float>(obj_num(e, "offset_x", 0.5));
+                        c.offset_y = static_cast<float>(obj_num(e, "offset_y", 0.5));
+                        c.priority = static_cast<int>(obj_int(e, "priority", 0));
+                        ap.class_offsets.push_back(c);
+                    }
+                }
+                if (const JsonValue* cf = j.find("class_filter"); cf && cf->is_array()) {
+                    for (const auto& e : cf->as_array()) {
+                        if (!e.is_number()) continue;
+                        ap.class_filter.push_back(static_cast<int>(e.as_number()));
+                    }
+                }
+                p.mouse.aim_profiles.push_back(std::move(ap));
+            }
+            got_profiles = !p.mouse.aim_profiles.empty();
+        }
+        if (!got_profiles) {
+            // 老配置回退：平铺 key → 第 0 档。
+            // class_offsets 留空 = 沿用 mouse.aim_point 的全局类别偏移表；
+            // sensitivity / fov_scale 取结构体默认 1.0 = 不影响全局量 ⇒ 与老代码等价。
+            // 偏移直接取上面已解析的全局瞄准点，保证"平铺 offset_x/offset_y"只有一个入口。
+            aim::AimHotkeyProfile ap;
+            ap.hotkey = static_cast<uint8_t>(obj_int(*m, "aim_hotkey", 2));
+            ap.hotkey2 = static_cast<uint8_t>(obj_int(*m, "aim_hotkey2", 0));
+            ap.hotkey_mode =
+                aim::mouse_hotkey_mode_from_string(obj_str(*m, "aim_hotkey_mode", "any").c_str());
+            ap.offset_x = p.mouse.aim_point.offset_x;
+            ap.offset_y = p.mouse.aim_point.offset_y;
+            const std::vector<int>& global_cf = p.inference.class_filter;
+            ap.class_filter = global_cf;  // 全局类别过滤 → 第 0 档，单档语义不变
+            p.mouse.aim_profiles.assign(1, std::move(ap));
         }
     }
     if (const JsonValue* pv = v.find("preview"); pv && pv->is_object()) {

@@ -1,8 +1,10 @@
 // test_hotkey_config.cpp — 热键完全可配置化验收。
 //
-// 核心原则：热键是用户配置项（RuntimeProfile.mouse.aim_hotkey / aim_hotkey2 /
-// aim_hotkey_mode / enabled），不是程序常量。AimThread 主门与 AiboxHidOutput
-// 保险门都必须实时读取配置快照，改配置即时生效，无需重启。
+// 核心原则：热键是用户配置项，不是程序常量。2026-09-24 起热键的**唯一真源**是
+// RuntimeProfile.mouse.aim_profiles（每档一组 主键/副键/触发方式），
+// 原来的平铺 aim_hotkey / aim_hotkey2 / aim_hotkey_mode 字段已从结构体删除
+// （旧 JSON 里的平铺 key 仍在解析时被当作第 0 档的合成源，见 RuntimeProfile）。
+// AimThread 主门与 AiboxHidOutput 保险门都必须实时读取配置快照，改配置即时生效，无需重启。
 //
 // 场景：
 //   A  默认热键（右键 0x02）：按右键出移动，按左键不出
@@ -18,6 +20,7 @@
 // 边界观察最终输出行为。
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <mutex>
@@ -73,10 +76,11 @@ struct TestCtx {
 
     TestCtx() {
         // 与产品默认一致的基线（右键 0x02 / any / enabled=true 由各场景覆盖）。
+        // 热键真源是 mouse.aim_profiles（老平铺 aim_hotkey/aim_hotkey2/aim_hotkey_mode 已删除）。
         profile->mouse.enabled = true;
-        profile->mouse.aim_hotkey = 0x02;
-        profile->mouse.aim_hotkey2 = 0x00;
-        profile->mouse.aim_hotkey_mode = 0;
+        profile->mouse.aim_profiles[0].hotkey = 0x02;
+        profile->mouse.aim_profiles[0].hotkey2 = 0x00;
+        profile->mouse.aim_profiles[0].hotkey_mode = 0;
         profile->mouse.kp_x = 1.0f;
         profile->mouse.kp_y = 1.0f;
         profile->mouse.lost_grace_ms = 78.0f;
@@ -105,14 +109,59 @@ struct TestCtx {
     // 运行中改配置：模拟用户改热键 → RuntimeConfig::update（AimThread 不重启）。
     void reconfigure(uint8_t hk, uint8_t hk2, int mode, bool enabled) {
         auto p = std::make_shared<ttbox::core::RuntimeProfile>(*profile);
-        p->mouse.aim_hotkey = hk;
-        p->mouse.aim_hotkey2 = hk2;
-        p->mouse.aim_hotkey_mode = mode;
+        p->mouse.aim_profiles[0].hotkey = hk;
+        p->mouse.aim_profiles[0].hotkey2 = hk2;
+        p->mouse.aim_profiles[0].hotkey_mode = mode;
         p->mouse.enabled = enabled;
         profile = p;
         config.update(p);
     }
+
+    // 直接换整张档位表（多档场景用）。档位之间键位必须互斥，面板保存时已校验。
+    void set_profiles(const std::vector<AimHotkeyProfile>& profs) {
+        auto p = std::make_shared<ttbox::core::RuntimeProfile>(*profile);
+        p->mouse.aim_profiles = profs;
+        profile = p;
+        config.update(p);
+    }
+
+    // 喂一帧自定义检测框（多类别 / 多目标场景用；frame 必须递增，否则信箱不投递）。
+    void feed_dets(uint64_t frame, uint64_t ts_us,
+                   const std::vector<ttbox::core::DetectionBox>& dets) {
+        AimTargetTask t;
+        t.frame_number = frame;
+        t.timestamp_us = ts_us;
+        t.frame_width = 1280;
+        t.frame_height = 720;
+        t.has_target = !dets.empty();
+        t.detections = dets;
+        if (!dets.empty()) {
+            t.target = dets.front();
+            t.aim_point = {(dets.front().x1 + dets.front().x2) * 0.5f,
+                           (dets.front().y1 + dets.front().y2) * 0.5f};
+        }
+        mailbox.offer(0, t);
+    }
 };
+
+// 自定类别与位置的检测框（make_box() 固定 class 0，多类别场景用它）。
+ttbox::core::DetectionBox make_class_box(float x1, float y1, float x2, float y2,
+                                         int class_id, float score) {
+    ttbox::core::DetectionBox b;
+    b.x1 = x1; b.y1 = y1; b.x2 = x2; b.y2 = y2;
+    b.score = score;
+    b.class_id = class_id;
+    return b;
+}
+
+// 造一个档位（只填身份字段，其余吃结构体默认）。
+AimHotkeyProfile make_profile(uint8_t hk, uint8_t hk2, int mode) {
+    AimHotkeyProfile ap;
+    ap.hotkey = hk;
+    ap.hotkey2 = hk2;
+    ap.hotkey_mode = mode;
+    return ap;
+}
 
 int wait_frames(TestCtx& ctx, int ms = 30) {
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
@@ -314,6 +363,105 @@ int main() {
         wait_frames(ctx);
         ctx.thread.stop();
         check(all_zero(ctx.output->snapshot()), "G2 enabled=false+按对热键 -> HID=0,0");
+    }
+
+    // ---- H. 多档选档：两档键位互斥，生效档索引随按键切换 ----
+    {
+        TestCtx ctx;
+        ctx.set_profiles({make_profile(0x02, 0x00, 0),   // 档0：右键
+                          make_profile(0x01, 0x00, 0)});  // 档1：左键
+        if (!ctx.start()) { std::printf("[FAIL] H start\n"); return 1; }
+
+        ctx.buttons.store(0x02);
+        ctx.feed(1, 1000, true);
+        wait_frames(ctx);
+        check(ctx.thread.status().active_profile == 0, "H1 按右键 -> 生效档=0");
+
+        ctx.buttons.store(0x01);
+        ctx.feed(2, 2000, true);
+        wait_frames(ctx);
+        check(ctx.thread.status().active_profile == 1, "H2 按左键 -> 生效档=1");
+
+        const uint64_t gated_before = ctx.thread.status().gated_frames;
+        ctx.buttons.store(0x04);  // 中键：两档都不认
+        ctx.feed(3, 3000, true);
+        wait_frames(ctx);
+        const auto st_h = ctx.thread.status();
+        ctx.thread.stop();
+        check(st_h.active_profile == -1, "H3 按无关键 -> 生效档=-1");
+        check(st_h.gated_frames > gated_before, "H4 按无关键 -> 输出被 Hotkey Gate 拦截");
+    }
+
+    // ---- I. 按档覆盖瞄准点：同一目标框，两档 offset_y 不同 ⇒ 瞄准点 Y 随档变 ----
+    // 用两个独立 ctx 各自观测：同一实例里先锁上的目标会被粘滞/冷却留住，干扰第二次观测。
+    // make_box 的 y 范围是 180..300（h=120）⇒ offset 0.10 → 192，0.90 → 288。
+    float y_hi_shared = -1.0f;  // 档0 观测值，供 I3 做相对断言
+    {
+        TestCtx ctx;
+        auto p0 = make_profile(0x02, 0x00, 0); p0.offset_y = 0.10f;
+        auto p1 = make_profile(0x01, 0x00, 0); p1.offset_y = 0.90f;
+        ctx.set_profiles({p0, p1});
+        if (!ctx.start()) { std::printf("[FAIL] I start\n"); return 1; }
+        ctx.buttons.store(0x02);   // 按档0
+        ctx.feed(1, 1000, true);
+        wait_frames(ctx);
+        y_hi_shared = ctx.thread.status().target_point_y;
+        ctx.thread.stop();
+        check(std::fabs(y_hi_shared - 192.0f) < 12.0f, "I1 档0(offset_y=0.10) -> 瞄准点 ≈ y1+0.10h");
+    }
+    {
+        TestCtx ctx;
+        auto p0 = make_profile(0x02, 0x00, 0); p0.offset_y = 0.10f;
+        auto p1 = make_profile(0x01, 0x00, 0); p1.offset_y = 0.90f;
+        ctx.set_profiles({p0, p1});
+        if (!ctx.start()) { std::printf("[FAIL] I2 start\n"); return 1; }
+        ctx.buttons.store(0x01);   // 按档1
+        ctx.feed(1, 1000, true);
+        wait_frames(ctx);
+        const float y_lo = ctx.thread.status().target_point_y;
+        ctx.thread.stop();
+        check(std::fabs(y_lo - 288.0f) < 12.0f, "I2 档1(offset_y=0.90) -> 瞄准点 ≈ y1+0.90h");
+        check(y_lo > y_hi_shared + 50.0f, "I3 档1 瞄准点明显低于档0（按档覆盖确实生效）");
+    }
+
+    // ---- J. 目标类别按档窄化（瞄准侧）----
+    // 两个框：class 0 较远、class 1 较近。若 scfg.class_filter 没接上，
+    // 两档都会选更近的 class 1 —— 所以这个用例能直接钉住"类别按档"。
+    {
+        std::vector<ttbox::core::DetectionBox> dets = {
+            make_class_box(560.0f, 180.0f, 640.0f, 300.0f, 0, 0.90f),  // 中心 (600,240)
+            make_class_box(590.0f, 240.0f, 660.0f, 360.0f, 1, 0.90f),  // 中心 (625,300)
+        };
+        auto p0 = make_profile(0x02, 0x00, 0); p0.class_filter = {0};
+        auto p1 = make_profile(0x01, 0x00, 0); p1.class_filter = {1};
+
+        TestCtx ctx;
+        ctx.set_profiles({p0, p1});
+        if (!ctx.start()) { std::printf("[FAIL] J start\n"); return 1; }
+        ctx.buttons.store(0x02);   // 按档0（类别={0}）
+        ctx.feed_dets(1, 1000, dets);
+        wait_frames(ctx);
+        const int c0 = ctx.thread.status().target_class_id;
+        ctx.thread.stop();
+        check(c0 == 0, "J1 档0 类别={0} -> 只锁 class 0（不被更近的 class 1 抢走）");
+    }
+    {
+        std::vector<ttbox::core::DetectionBox> dets = {
+            make_class_box(560.0f, 180.0f, 640.0f, 300.0f, 0, 0.90f),
+            make_class_box(590.0f, 240.0f, 660.0f, 360.0f, 1, 0.90f),
+        };
+        auto p0 = make_profile(0x02, 0x00, 0); p0.class_filter = {0};
+        auto p1 = make_profile(0x01, 0x00, 0); p1.class_filter = {1};
+
+        TestCtx ctx;
+        ctx.set_profiles({p0, p1});
+        if (!ctx.start()) { std::printf("[FAIL] J2 start\n"); return 1; }
+        ctx.buttons.store(0x01);   // 按档1（类别={1}）
+        ctx.feed_dets(1, 1000, dets);
+        wait_frames(ctx);
+        const int c1 = ctx.thread.status().target_class_id;
+        ctx.thread.stop();
+        check(c1 == 1, "J2 档1 类别={1} -> 只锁 class 1");
     }
 
     if (fails == 0) std::printf("test_hotkey_config: PASS\n");

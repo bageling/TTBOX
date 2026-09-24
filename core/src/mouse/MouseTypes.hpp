@@ -95,6 +95,52 @@ struct AimPointProfile {
     HeadAimConfig head_aim;     // 头部瞄准约束（第3项）
 };
 
+// 瞄准档位（2026-09-24）：面板「热键与类别」页每张卡片 = 一个档位。
+// 按下的鼠标键命中哪一档，本次瞄准就用那一档的瞄准点 / 类别 / 移动倍率 / FOV 倍率。
+//
+// ★★ 硬约束：**任意两档的键位并集（主 ∪ 副）必须互斥**（按位与 == 0）。
+//    它挡掉的是"同一个键给两档"——那种配置连单键按下都判不出该用哪档，纯属配错。
+//    校验由面板保存时（前端 + 后端）共同执行；Core 侧只消费，不报错。
+//    代价（业主已接受）：不支持「档1=右键、档2=右键+侧键」这种嵌套。
+//    只约束档位之间；挂起键（hotkey_guard.toggle_hotkey）与压枪键不参与 ——
+//    压枪与瞄准共用右键本来就有意为之。
+//
+// ★★★ 但互斥**不足以**让选档唯一，这点必须说清：同时按下两档各自的键
+//    （例如左键开火 + 右键瞄准同时按住）会让两档都命中。位图能同时置多位，
+//    物理上禁不掉，穷举 32 种按键组合就能看到多档同时命中。
+//    所以选档还需要一条兜底：**取面板顺序里第一个命中的档**（见 aim_profile_match）。
+//    「单键按下 → 互斥保证唯一」+「多键同按 → 顺序优先」合起来才是确定的选档。
+//
+// ★ 默认值 (0x02 / 0 / any) 与老平铺字段 aim_hotkey / aim_hotkey2 / aim_hotkey_mode 的默认值
+//   逐位相同 ⇒ 结构体自带一档即可让 aim_profiles 非空，是老配置的行为等价基线。
+struct AimHotkeyProfile {
+    uint8_t hotkey = 0x02;                    // 主热键位掩码：1=left 2=right 4=middle 8=back 16=forward
+    uint8_t hotkey2 = 0x00;                   // 副热键位掩码（0=不使用）
+    int hotkey_mode = 0;                      // 触发方式：0=任一按键(any) 1=同时按下(all)
+    float offset_x = 0.5f;                    // 本档瞄准点 X（框内比例 0~1）
+    float offset_y = 0.5f;                    // 本档瞄准点 Y
+    std::vector<ClassOffset> class_offsets;   // 本档类别专属偏移（空=沿用 mouse.aim_point 的全局表）
+    std::vector<int> class_filter;            // 本档目标类别（空=不限）
+    float sensitivity = 1.0f;                 // 本档移动倍率（乘在全局 mouse.sensitivity 之后）
+    float fov_scale = 1.0f;                   // 本档 FOV 倍率（0.1~1.0，乘在全局 fov.radius 之后）
+};
+
+// 单档命中判定：当前按键位图是否落进这一档。
+// mode=0(any)：主/副键任一按下即命中（副键为 0 时只看主键）；
+// mode=1(all)：主键与副键必须同时按下（任一侧为 0 则永不命中 —— 面板已校验，此处 fail-closed）。
+inline bool aim_hotkey_profile_hit(const AimHotkeyProfile& ap, uint16_t buttons) {
+    const bool a = ap.hotkey != 0 && (buttons & ap.hotkey) != 0;
+    const bool b = ap.hotkey2 != 0 && (buttons & ap.hotkey2) != 0;
+    return ap.hotkey_mode == 1 ? (a && b) : (a || b);
+}
+
+// 两档键位是否重叠（主 ∪ 副 按位相交）。面板保存校验用同一个判定，避免两处口径漂移。
+inline bool aim_profiles_overlap(const AimHotkeyProfile& a, const AimHotkeyProfile& b) {
+    const uint16_t ma = static_cast<uint16_t>(a.hotkey) | static_cast<uint16_t>(a.hotkey2);
+    const uint16_t mb = static_cast<uint16_t>(b.hotkey) | static_cast<uint16_t>(b.hotkey2);
+    return (ma & mb) != 0;
+}
+
 // 拉枪曲线（pull_curve：目标距离 ≥ min_distance 时在拉枪方向附加弧线/抖动）
 struct PullCurveConfig {
     bool enabled = true;
@@ -500,9 +546,13 @@ struct PersonalMotionConfig {
 // 鼠标配置（RuntimeProfile.mouse，与模型彻底分离）
 struct MouseProfile {
     bool enabled = false;                       // AI 注入总开关（false = 纯物理透传，与 A9 一致）
-    uint8_t aim_hotkey = 0x02;                  // 瞄准主热键位掩码：1=left 2=right 4=middle 8=back 16=forward
-    uint8_t aim_hotkey2 = 0x00;                 // 瞄准副热键位掩码（0=不使用）
-    int aim_hotkey_mode = 0;                    // 触发方式：0=任一按键(any) 1=同时按下(all)
+    // ---- 瞄准档位（2026-09-24）：热键的唯一真源 ----
+    // ★ 结构体里**不再**保留平铺的 aim_hotkey / aim_hotkey2 / aim_hotkey_mode，
+    //   免得出现"改了平铺字段却不生效"的第二条路。
+    // ★ 不变量：**非空**。默认自带一档（0x02 / 0 / any = 老默认值）；
+    //   RuntimeProfile 解析时若 JSON 没有 aim_profiles（老配置），会用平铺 JSON key 合成第 0 档。
+    //   所以运行期（AimThread / 输出闸门）可以直接遍历，零分配。
+    std::vector<AimHotkeyProfile> aim_profiles{AimHotkeyProfile{}};
     float fov_range = 1.0f;                     // 目标选择范围（0~1，仅影响目标选择）
     float confidence = 0.25f;                   // 目标置信度阈值（目标选择）
     // PID 默认值以用户提供的 pid1.cpp 权威参数为准（X: kp=25 kd=25 predict=3 rate=0.3；Y: predict=0）
@@ -593,5 +643,44 @@ struct MouseProfile {
     float calibration_bias_x = 0.0f;            // 标定偏置 px（加在参考点上，自瞄自动拉到该点）
     float calibration_bias_y = 0.0f;
 };
+
+// ---- 瞄准档位查询 ----
+// MouseProfile.aim_profiles 非空是**结构体不变量**（默认自带一档；解析时若 JSON 无数组
+// 则用平铺老 key 合成第 0 档）。下面几个查询仍各自做一次兜底，防手工构造的 profile 越界。
+
+// 生效档数。数组意外为空时按 1 算（= 用默认档）。
+inline size_t aim_profile_count(const MouseProfile& p) {
+    return p.aim_profiles.empty() ? 1u : p.aim_profiles.size();
+}
+
+// 按索引取档。数组为空时给静态默认档，越界时给最后一份 —— 都是 fail-safe 读取，不崩。
+inline const AimHotkeyProfile& aim_profile_at(const MouseProfile& p, size_t idx) {
+    static const AimHotkeyProfile kFallback{};
+    if (p.aim_profiles.empty()) return kFallback;
+    if (idx >= p.aim_profiles.size()) return p.aim_profiles.back();
+    return p.aim_profiles[idx];
+}
+
+// 所有档位的键位并集 —— 输出放行闸门用。
+// ★ 闸门必须用并集：选档只认命中的那一档，但 usb 报告什么时候来取决于玩家按了哪个键。
+//   闸门若只看某一档，其它档的键位会被整条拦掉，表现为「换个键就不瞄了」。
+inline uint16_t aim_hotkey_mask(const MouseProfile& p) {
+    uint16_t m = 0;
+    for (const auto& ap : p.aim_profiles) {
+        m |= static_cast<uint16_t>(ap.hotkey) | static_cast<uint16_t>(ap.hotkey2);
+    }
+    return m;
+}
+
+// 选档：返回命中的档索引，无档命中返回 -1（等价于老代码里的「没按热键」）。
+// ★ 命中即返回 ⇒ **面板顺序优先**。单键按下时「键位互斥」保证只有一个档命中，顺序无所谓；
+//   多键同按（左键+右键）可能多档都命中，这时取数组中靠前的那一档 ——
+//   见 AimHotkeyProfile 处的说明：互斥挡不住多键同按，必须靠顺序兜底。
+inline int aim_profile_match(const MouseProfile& p, uint16_t buttons) {
+    for (size_t i = 0; i < p.aim_profiles.size(); ++i) {
+        if (aim_hotkey_profile_hit(p.aim_profiles[i], buttons)) return static_cast<int>(i);
+    }
+    return -1;
+}
 
 }  // namespace ttbox::core::aim

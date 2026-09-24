@@ -73,9 +73,9 @@ bool IOutputBackend::gate_allows() const {
         if (!p) return false;
         const bool calibrating = p->mouse.calibrating;
         if (!p->mouse.enabled && !calibrating) return false;
-        const uint16_t mask = static_cast<uint16_t>(
-            static_cast<uint16_t>(p->mouse.aim_hotkey) |
-            static_cast<uint16_t>(p->mouse.aim_hotkey2));
+        // 放行掩码 = 所有瞄准档位键位的并集（必须与 AiboxHidOutput::send 里的判据同口径）。
+        // 只认某一档会把其它档的键位拦掉 —— 详见 AiboxHidOutput.cpp 处的说明。
+        const uint16_t mask = aim::aim_hotkey_mask(p->mouse);
         if (mask == 0 && !calibrating) return false;  // 配置缺失 → 禁止注入
         // 标定模式：无视热键放行（标定线程自己注入运动帧，物理鼠标不参与）
         if (calibrating) return true;

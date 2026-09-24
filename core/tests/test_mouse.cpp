@@ -443,7 +443,7 @@ TEST(mouse_target_selector_reset_restarts_track_identity) {
 TEST(mouse_runtime_profile_json_roundtrip) {
     RuntimeProfile p;
     p.mouse.enabled = true;
-    p.mouse.aim_hotkey = 0x02;
+    p.mouse.aim_profiles[0].hotkey = 0x02;
     p.mouse.fov_range = 0.41f;
     p.mouse.kp_x = 17.0f;
     p.mouse.kp_y = 10.0f;
@@ -467,7 +467,7 @@ TEST(mouse_runtime_profile_json_roundtrip) {
     const JsonValue j = p.to_json();
     RuntimeProfile q = RuntimeProfile::from_json(j);
     CHECK(q.mouse.enabled);
-    CHECK_EQ(q.mouse.aim_hotkey, 0x02u);
+    CHECK_EQ(q.mouse.aim_profiles.at(0).hotkey, 0x02u);
     CHECK(q.mouse.fov_range == 0.41f);
     CHECK(q.mouse.kp_x == 17.0f);
     CHECK(q.mouse.kp_y == 10.0f);

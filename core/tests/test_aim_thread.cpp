@@ -70,7 +70,7 @@ TEST(aim_thread_out_counts_match_sent_moves) {
     profile->mouse.enabled = true;
     profile->mouse.calibrating = true;          // 标定期无视物理热键强制放行注入
     profile->mouse.calibration_bias_x = 20.0f;  // 参考点像素偏置（控制误差域）
-    profile->mouse.aim_hotkey = 0x02;
+    profile->mouse.aim_profiles[0].hotkey = 0x02;
     profile->mouse.kp_x = 1.0f;
     profile->mouse.kp_y = 1.0f;
     profile->mouse.kd_x = 0.0f;
@@ -121,7 +121,7 @@ TEST(aim_thread_out_counts_ignore_gated_frames) {
 
     profile->mouse.enabled = true;
     profile->mouse.calibrating = false;
-    profile->mouse.aim_hotkey = 0x02;
+    profile->mouse.aim_profiles[0].hotkey = 0x02;
     profile->mouse.kp_x = 1.0f;
     profile->mouse.kp_y = 1.0f;
     profile->mouse.smooth_x = 0.0f;

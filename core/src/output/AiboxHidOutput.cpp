@@ -29,14 +29,15 @@ bool AiboxHidOutput::send(const OutputAction& a) {
     if (!enabled_) return false;
     // 配置实时保险门（每次发送重新判定，改热键/总开关即时生效，无需重启）：
     //   1) mouse.enabled 为总开关；
-    //   2) 放行掩码 = aim_hotkey | aim_hotkey2，全部来自用户配置，不写死任何键位。
-    //      主/副热键均为 0 时视为配置缺失，直接拒绝注入（fail-closed）。
+    //   2) 放行掩码 = **所有瞄准档位键位的并集**，全部来自用户配置，不写死任何键位。
+    //      ★ 必须是并集而不是某一档：选档只认命中的那一档，但 usb 报告什么时候来取决于
+    //      玩家按了哪个键 —— 只看某一档会把其它档的键位整条拦掉（表现为"换个键就不瞄了"）。
+    //      并集为 0 时视为配置缺失，直接拒绝注入（fail-closed）。
     if (config_source_) {
         auto p = config_source_->snapshot();
         if (!p) return false;
         if (!p->mouse.enabled) return false;
-        const uint16_t mask = static_cast<uint16_t>(
-            static_cast<uint16_t>(p->mouse.aim_hotkey) | static_cast<uint16_t>(p->mouse.aim_hotkey2));
+        const uint16_t mask = aim::aim_hotkey_mask(p->mouse);
         if (mask == 0) return false;  // 配置缺失 → 禁止注入
         if (button_source_ && (button_source_->load(std::memory_order_acquire) & mask) == 0) return false;
     } else if (button_source_) {

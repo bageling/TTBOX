@@ -83,9 +83,9 @@ struct TestCtx {
 
     TestCtx(bool pull_enabled = true) {
         profile->mouse.enabled = true;
-        profile->mouse.aim_hotkey = 0x02;   // 右键
-        profile->mouse.aim_hotkey2 = 0x00;
-        profile->mouse.aim_hotkey_mode = 0; // any
+        profile->mouse.aim_profiles[0].hotkey = 0x02;   // 右键
+        profile->mouse.aim_profiles[0].hotkey2 = 0x00;
+        profile->mouse.aim_profiles[0].hotkey_mode = 0; // any
         profile->mouse.kp_x = 1.0f;         // 小 kp：输出量级可预测
         profile->mouse.kp_y = 1.0f;
         profile->mouse.sensitivity = 1.0f;

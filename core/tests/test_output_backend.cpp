@@ -76,7 +76,7 @@ int main() {
         RuntimeConfig cfg;
         auto prof = std::make_shared<RuntimeProfile>();
         prof->mouse.enabled = true;
-        prof->mouse.aim_hotkey = 1;   // left
+        prof->mouse.aim_profiles[0].hotkey = 1;   // left
         cfg.update(prof);
         p.runtime_config = &cfg;
         std::atomic<uint16_t> btn{0};
@@ -96,15 +96,17 @@ int main() {
         // mouse.enabled=false → Gate 拦截
         auto prof2 = std::make_shared<RuntimeProfile>();
         prof2->mouse.enabled = false;
-        prof2->mouse.aim_hotkey = 1;
+        prof2->mouse.aim_profiles[0].hotkey = 1;
         cfg.update(prof2);
         check(!backend->mouse_move(10, 10), "gate: mouse.enabled=false 拦截");
 
-        // 热键 mask 缺失（aim_hotkey=0 且 aim_hotkey2=0）→ fail-closed 拦截
+        // 热键 mask 缺失（第 0 档 主键=0 且 副键=0，且没有别的档）→ fail-closed 拦截
         auto prof3 = std::make_shared<RuntimeProfile>();
         prof3->mouse.enabled = true;
-        prof3->mouse.aim_hotkey = 0;
-        prof3->mouse.aim_hotkey2 = 0;
+        prof3->mouse.aim_profiles.clear();
+        prof3->mouse.aim_profiles.push_back(aim::AimHotkeyProfile{});
+        prof3->mouse.aim_profiles[0].hotkey = 0;
+        prof3->mouse.aim_profiles[0].hotkey2 = 0;
         cfg.update(prof3);
         check(!backend->mouse_move(10, 10), "gate: 热键 mask 缺失拦截");
 
@@ -146,12 +148,34 @@ int main() {
         RuntimeConfig cfg_probe;
         auto prof_probe = std::make_shared<RuntimeProfile>();
         prof_probe->mouse.enabled = true;
-        prof_probe->mouse.aim_hotkey = 1;  // left
+        prof_probe->mouse.aim_profiles[0].hotkey = 1;  // left
         cfg_probe.update(prof_probe);
         std::atomic<uint16_t> btn_probe{1};
         probe.set_config_source(&cfg_probe);
         probe.set_button_source(&btn_probe);
         check(probe.gate(), "E-07 对照: 有配置源+热键按下 → 放行");
+
+        // ---- 3c) 多档位：闸门必须按**全档键位并集**放行 ----
+        // 选档只认命中的那一档，但 usb 报告什么时候来取决于玩家按了哪个键。
+        // 修复前闸门取的是单档掩码（aim_hotkey|aim_hotkey2），档 1 的键位会被整条拦掉，
+        // 表现为「换个键就不瞄了」。这里逐档逐个键位都要能放行。
+        RuntimeConfig cfg_multi;
+        auto prof_multi = std::make_shared<RuntimeProfile>();
+        prof_multi->mouse.enabled = true;
+        prof_multi->mouse.aim_profiles.clear();
+        prof_multi->mouse.aim_profiles.push_back(aim::AimHotkeyProfile{});
+        prof_multi->mouse.aim_profiles[0].hotkey = 1;   // 档0：左键
+        prof_multi->mouse.aim_profiles.push_back(aim::AimHotkeyProfile{});
+        prof_multi->mouse.aim_profiles[1].hotkey = 16;  // 档1：侧2
+        cfg_multi.update(prof_multi);
+        std::atomic<uint16_t> btn_multi{1};
+        probe.set_config_source(&cfg_multi);
+        probe.set_button_source(&btn_multi);
+        check(probe.gate(), "多档: 只按档0的键位 -> 闸门放行");
+        btn_multi.store(16);
+        check(probe.gate(), "多档: 只按档1的键位 -> 闸门放行（并集覆盖每一档）");
+        btn_multi.store(8);  // 侧1：两档都不使用
+        check(!probe.gate(), "多档: 按两档都不用的键 -> 闸门拒绝");
     }
 
     // ---- 4) 零移动 / 目标丢失（target lost = 全 0 输出）----
@@ -163,7 +187,7 @@ int main() {
         RuntimeConfig cfg;
         auto prof = std::make_shared<RuntimeProfile>();
         prof->mouse.enabled = true;
-        prof->mouse.aim_hotkey = 1;
+        prof->mouse.aim_profiles[0].hotkey = 1;
         cfg.update(prof);
         p.runtime_config = &cfg;
         std::atomic<uint16_t> btn{1};

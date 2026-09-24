@@ -89,6 +89,10 @@ public:
         // 热键保护是否处于「全部挂起」（hotkey_guard.enabled 时由 toggle_hotkey 翻转）。
         // 挂起期间热键位图被清零 ⇒ last_injection_allowed 恒 false、gated_frames 持续增长。
         bool hotkeys_suspended = false;
+        // 本周期生效的瞄准档索引（mouse.aim_profiles 的下标）；-1 = 无档命中。
+        // 「任意两档键位互斥」的面板约束保证最多一档命中 ⇒ 这个值没有歧义。
+        // 标定模式（mouse.calibrating）恒为 0。面板用它显示"当前第 N 档生效"。
+        int active_profile = -1;
         uint64_t last_timestamp_us = 0;
     };
     AimThread() = default;

@@ -113,8 +113,84 @@ void AimThread::loop() {
             if (runtime_config_) {
                 frame_profile = runtime_config_->snapshot();
             }
+            // ---- 热键解析与选档（2026-09-24）----
+            // ★ 必须放在选靶之前：选靶要用**本档**的 FOV 半径 / 瞄准点 / 目标类别，
+            //   这几项都是 TargetSelectorConfig 的入参，晚一步算就等于用了上一帧的档。
+            // 顺序：物理按键 → 热键保护挂起 → 逐档命中 → 生效档索引。
+            const uint16_t raw_buttons =
+                physical_buttons_ ? physical_buttons_->load(std::memory_order_acquire) : 0;
+            // ---- 热键保护（hotkey_guard）：toggle 键**上升沿**翻转「全部挂起」----
+            // 挂起 = 本控制周期把热键位图清零 ⇒ 瞄准 Gate 与压枪一并失效（两者都读这个位图）。
+            // 物理鼠标透传不受影响：那条路在 usbproxy 侧，不经过本变量。
+            // guard 关掉（或 toggle 键未配）时立即恢复"未挂起"，不保留幽灵挂起状态。
+            uint8_t guard_toggle = 0;
             if (frame_profile) {
-                scfg.fov_range = frame_profile->fov.enabled ? frame_profile->fov.radius * 2.0f : 1.0f;
+                const auto& guard = frame_profile->mouse.hotkey_guard;
+                if (guard.enabled) guard_toggle = guard.toggle_hotkey;
+            }
+            if (guard_toggle != 0) {
+                const bool now_down = (raw_buttons & guard_toggle) != 0;
+                const bool was_down = (last_raw_buttons_ & guard_toggle) != 0;
+                if (now_down && !was_down) hotkeys_suspended_ = !hotkeys_suspended_;
+            } else {
+                hotkeys_suspended_ = false;
+            }
+            last_raw_buttons_ = raw_buttons;
+            const uint16_t hotkey_bits = hotkeys_suspended_ ? 0u : raw_buttons;
+            // 鼠标五键统一位图：左1、右2、中4、侧1 8、侧2 16。
+            // 热键位全部来自用户配置快照（每周期重读 → 改配置即时生效，无需重启）。
+            // ★ 「任意两档键位互斥」（面板保存时校验）⇒ 任何按键组合最多命中一档，
+            //   所以命中即返回，不需要优先级，结果也与遍历顺序无关。
+            // A11 标定模式：无视物理热键强制放行（标定线程注入运动帧，物理鼠标不参与），
+            //   并强制用第 0 档参数 —— 标定要的是一份确定的瞄准点/FOV，不是"哪档被按下"。
+            int active_profile = -1;
+            bool injection_allowed = false;
+            if (frame_profile) {
+                active_profile = frame_profile->mouse.calibrating
+                                     ? 0
+                                     : aim::aim_profile_match(frame_profile->mouse, hotkey_bits);
+                injection_allowed = frame_profile->mouse.calibrating ||
+                                    (frame_profile->mouse.enabled && active_profile >= 0);
+            }
+            // ---- BB 热键边沿（对齐「按下 shuwuResetPid、松开完全重置」）----
+            // 上升沿：热键刚按下 → 清 PID 在途量，本次瞄准从零起算（BB 的原生行为）。
+            // 下降沿：热键松开 → 连提前量/拟人化/抗过冲/速度Kp 一并复位，
+            //   下次按下是全新一轮（否则上一轮的收帧窗/积分/衰减帧数会带过来）。
+            if (injection_allowed && !last_injection_allowed_) {
+                pid_x_.reset();
+                pid_y_.reset();
+                remainder_x_ = 0.0f;
+                remainder_y_ = 0.0f;
+            } else if (!injection_allowed && last_injection_allowed_) {
+                pid_x_.reset();
+                pid_y_.reset();
+                remainder_x_ = 0.0f;
+                remainder_y_ = 0.0f;
+                lead_pred_.reset();
+                humanize_shaper_.reset();
+                anti_overshoot_.reset();
+                speed_kp_.reset();
+                global_wave_.reset();
+                lead_last_move_y_ = 0.0f;
+            }
+            last_injection_allowed_ = injection_allowed;
+            if (frame_profile) {
+                // 本周期生效档；无档命中（未按热键 / 全部挂起）时退回全局量，
+                // 此时输出本来就被 Gate 拦着，选靶仍用全局参数 —— 与加档位前逐位一致。
+                const aim::AimHotkeyProfile* ap =
+                    active_profile >= 0
+                        ? &aim::aim_profile_at(frame_profile->mouse,
+                                               static_cast<size_t>(active_profile))
+                        : nullptr;
+                // FOV：**全局基准半径 × 本档倍率**。倍率 1.0 ⇒ 等于总览滑块原值。
+                // 拆开是因为总览半径是全局的、倍率是按档的（面板「热键 FOV 缩放」文案
+                // 就是"在总览 FOV 半径上再乘这个倍率"）。
+                scfg.fov_range = (frame_profile->fov.enabled ? frame_profile->fov.radius * 2.0f : 1.0f) *
+                                 (ap ? ap->fov_scale : 1.0f);
+                // 本档目标类别（瞄准侧窄化）。推理侧收的是**全档并集**，见 web_body_to_profile。
+                // ★ 此前 scfg.class_filter 从未被赋值 ⇒ 瞄准侧类别过滤一直是关的，
+                //   全靠推理侧把非本类别框丢掉。多档位必须把这个字段接上。
+                if (ap) scfg.class_filter = ap->class_filter;
                 // 瞄准范围 = **截取尺寸内划最大的圆形**（业主口径）：
                 // 半径基准取 capture（中心截取尺寸，板端 640×640）⇒ 320px。
                 // 之前用整帧 task.frame_width/height（2560×1440）⇒ min/2 = 720px，
@@ -150,13 +226,21 @@ void AimThread::loop() {
                 scfg.hb_head2 = frame_profile->mouse.hb_head2;
                 scfg.confidence = frame_profile->mouse.confidence > 0.0f
                                       ? frame_profile->mouse.confidence : 0.25f;
-                scfg.aim_ratio_x = frame_profile->mouse.aim_point.offset_x;
-                scfg.aim_ratio_y = frame_profile->mouse.aim_point.offset_y;
+                // 瞄准点：先取全局基底（含 aim_offset_* / head_aim / switch_delay 这些不按档的量），
+                // 再用本档覆盖 offset 与类别偏移。
+                scfg.aim_ratio_x = ap ? ap->offset_x : frame_profile->mouse.aim_point.offset_x;
+                scfg.aim_ratio_y = ap ? ap->offset_y : frame_profile->mouse.aim_point.offset_y;
                 kp_x = frame_profile->mouse.kp_x; kp_y = frame_profile->mouse.kp_y;
                 kd_x = frame_profile->mouse.kd_x; kd_y = frame_profile->mouse.kd_y;
                 aim_point = frame_profile->mouse.aim_point;
-                // 输出链参数：sens 全局缩放 × output_scale × output_deadzone
-                out_sensitivity = frame_profile->mouse.sensitivity;
+                if (ap) {
+                    aim_point.offset_x = ap->offset_x;
+                    aim_point.offset_y = ap->offset_y;
+                    // 本档类别偏移为空 = 沿用全局类别偏移表（老配置合成的第 0 档就是这种情况）
+                    if (!ap->class_offsets.empty()) aim_point.class_offsets = ap->class_offsets;
+                }
+                // 输出链参数：sens 全局缩放 ×（本档移动倍率）× output_scale × output_deadzone
+                out_sensitivity = frame_profile->mouse.sensitivity * (ap ? ap->sensitivity : 1.0f);
                 out_scale = frame_profile->mouse.output_scale;
                 out_deadzone = frame_profile->mouse.output_deadzone;
                 recoil_px_per_count = frame_profile->mouse.gain_y_px_per_count > 0.05f
@@ -199,63 +283,8 @@ void AimThread::loop() {
                                      frame_profile->mouse.rate_y, frame_profile->mouse.smooth_y);
                 }
             }
-            // ---- Hotkey Gate 输入解析（每周期独立计算，AI 链路照常运行）----
-            // any 模式：主键或副键任一按下即触发；all 模式：两者同时按下。
-            const uint16_t raw_buttons =
-                physical_buttons_ ? physical_buttons_->load(std::memory_order_acquire) : 0;
-            // ---- 热键保护（hotkey_guard）：toggle 键**上升沿**翻转「全部挂起」----
-            // 挂起 = 本控制周期把热键位图清零 ⇒ 瞄准 Gate 与压枪一并失效（两者都读这个位图）。
-            // 物理鼠标透传不受影响：那条路在 usbproxy 侧，不经过本变量。
-            // guard 关掉（或 toggle 键未配）时立即恢复"未挂起"，不保留幽灵挂起状态。
-            uint8_t guard_toggle = 0;
-            if (frame_profile) {
-                const auto& guard = frame_profile->mouse.hotkey_guard;
-                if (guard.enabled) guard_toggle = guard.toggle_hotkey;
-            }
-            if (guard_toggle != 0) {
-                const bool now_down = (raw_buttons & guard_toggle) != 0;
-                const bool was_down = (last_raw_buttons_ & guard_toggle) != 0;
-                if (now_down && !was_down) hotkeys_suspended_ = !hotkeys_suspended_;
-            } else {
-                hotkeys_suspended_ = false;
-            }
-            last_raw_buttons_ = raw_buttons;
-            uint16_t hotkey_bits = hotkeys_suspended_ ? 0u : raw_buttons;
-            bool injection_allowed = false;
-            if (frame_profile) {
-                const bool a = (hotkey_bits & frame_profile->mouse.aim_hotkey) != 0;
-                const bool b = frame_profile->mouse.aim_hotkey2 != 0 && (hotkey_bits & frame_profile->mouse.aim_hotkey2) != 0;
-                // 鼠标五键统一位图：左1、右2、中4、侧1 8、侧2 16。
-                // 热键位全部来自用户配置快照（每周期重读 → 改配置即时生效，无需重启）。
-                // mouse.enabled 是总开关；any 模式主/副键任一命中即可，all 模式需同时按下。
-                // A11 标定闭环：calibrating=true 期间无视物理热键强制放行
-                // （标定线程注入运动帧，物理鼠标不参与），与 C 桥 compute_aiming 语义一致。
-                injection_allowed = frame_profile->mouse.calibrating ||
-                                    (frame_profile->mouse.enabled &&
-                                    (frame_profile->mouse.aim_hotkey_mode == 1 ? (a && b) : (a || b)));
-            }
-            // ---- BB 热键边沿（对齐「按下 shuwuResetPid、松开完全重置」）----
-            // 上升沿：热键刚按下 → 清 PID 在途量，本次瞄准从零起算（BB 的原生行为）。
-            // 下降沿：热键松开 → 连提前量/拟人化/抗过冲/速度Kp 一并复位，
-            //   下次按下是全新一轮（否则上一轮的收帧窗/积分/衰减帧数会带过来）。
-            if (injection_allowed && !last_injection_allowed_) {
-                pid_x_.reset();
-                pid_y_.reset();
-                remainder_x_ = 0.0f;
-                remainder_y_ = 0.0f;
-            } else if (!injection_allowed && last_injection_allowed_) {
-                pid_x_.reset();
-                pid_y_.reset();
-                remainder_x_ = 0.0f;
-                remainder_y_ = 0.0f;
-                lead_pred_.reset();
-                humanize_shaper_.reset();
-                anti_overshoot_.reset();
-                speed_kp_.reset();
-                global_wave_.reset();
-                lead_last_move_y_ = 0.0f;
-            }
-            last_injection_allowed_ = injection_allowed;
+            // 热键解析/挂起/选档/边沿复位已在选靶之前完成（见上面「热键解析与选档」段）——
+            // 这里只消费 injection_allowed 组装状态机事件，不再重复判决。
             AimStateEvent event; event.has_target = selected.valid;
             event.hotkey_active = injection_allowed;
             event.now_ms = task.timestamp_us / 1000ULL;
@@ -713,6 +742,8 @@ void AimThread::loop() {
             // 挂起本身单独用一个布尔字段表达，避免"挂起"与"没按键"在遥测里混成同一件事。
             status_.last_hotkey_bits = raw_buttons;
             status_.hotkeys_suspended = hotkeys_suspended_;
+            // 本周期生效档索引（-1 = 无档命中）。标定模式恒为 0。
+            status_.active_profile = active_profile;
             status_.last_injection_allowed = injection_allowed;
             status_.last_timestamp_us = task.timestamp_us;
             status_.last_frame = task.frame_number;

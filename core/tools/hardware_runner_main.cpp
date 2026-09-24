@@ -158,9 +158,10 @@ int main(int argc, char** argv) {
     } else {
         profile.model_id = model;
         profile.mouse.enabled = false;
-        profile.mouse.aim_hotkey = 0x03;
-        profile.mouse.aim_hotkey2 = 0x00;
-        profile.mouse.aim_hotkey_mode = 0;
+        // 热键的唯一真源是 mouse.aim_profiles（老平铺字段已删除），这里显式写第 0 档。
+        profile.mouse.aim_profiles[0].hotkey = 0x03;
+        profile.mouse.aim_profiles[0].hotkey2 = 0x00;
+        profile.mouse.aim_profiles[0].hotkey_mode = 0;
         profile.mouse.kp_x = 0.20f;
         profile.mouse.kp_y = 0.20f;
         profile.mouse.kd_x = profile.mouse.kd_y = 0.0f;

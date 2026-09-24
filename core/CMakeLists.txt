@@ -681,6 +681,12 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_hotkey_config PRIVATE ttbox_core)
   add_test(NAME test_hotkey_config COMMAND test_hotkey_config)
 
+  # 瞄准档位（多热键）数据层验收：命中判定 / 互斥不变量 / 闸门键位并集 /
+  # 多档序列化往返 / 老配置（只有平铺 key）合成单档 / 数组优先于平铺 key
+  add_executable(test_aim_profiles tests/test_aim_profiles.cpp)
+  target_link_libraries(test_aim_profiles PRIVATE ttbox_core)
+  add_test(NAME test_aim_profiles COMMAND test_aim_profiles)
+
   # 贝塞尔移动轨迹（一代分段自适应/二代随机弧线/抽签时机/弓高上限）单元测试
   add_executable(test_bezier_trajectory tests/test_bezier_trajectory.cpp)
   target_link_libraries(test_bezier_trajectory PRIVATE ttbox_core)
