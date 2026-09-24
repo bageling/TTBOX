@@ -20,7 +20,8 @@
 
 ## 一、新人三步看懂这个仓库
 
-1. **先看目录**：`core/` 是真正跑 AI 的 C++ 程序，`usbproxy/` 是鼠标注入代理，`plugins/` 是网页控制台。
+1. **先看目录**：`core/` 是真正跑 AI 的 C++ 程序，`usbproxy/` 是鼠标注入代理，`plugins/` 是网页控制台，
+   `framework/` 是插件管理框架，`ttbox_motion/` 是运动校准。每个目录的职责见[第四节](#四仓库目录结构)的表。
 2. **再看链路**：画面采集 → 图像缩放 → AI 推理 → 目标选择 → 位移计算 → 鼠标注入。
 3. **最后动手**：按下面"快速上手"把盒子接好，打开网页控制台就能看状态。
 
@@ -103,17 +104,28 @@ http://<盒子IP>:8000
 systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 ```
 
-板端安装路径：
+板端安装路径（`current` 是**版本化运行树的原子切换点**，OTA 与回滚对整棵树生效）：
 
 ```text
 /opt/ttbox/
-├── bin/ttbox_core_main         AI 核心主程序
-├── config/default.json         运行配置
-├── web/ttbox-web.py             网页后端（来自 plugins/web/bin/ttbox-web.py）
-├── usbproxy/usb-proxy          鼠标注入代理
-├── models/installed/           已安装模型
-└── src/core/                   源码和构建目录
+├── current -> releases/<版本>   当前生效的运行树（**禁止直写**）
+│   ├── bin/ttbox_core_main      AI 核心主程序
+│   ├── lib/librknnrt.so         NPU 运行库（随包）
+│   ├── plugins/                 网页(8000) / 预览(8001) 插件
+│   ├── framework/               Python 插件管理框架
+│   ├── ttbox_motion/            运动校准 / 训练
+│   ├── usbproxy/usb-proxy       鼠标注入代理（预编译 ELF）
+│   ├── scripts/                 运维脚本 + edid 工具链
+│   └── deploy/                  systemd 单元 / 出厂配置
+├── releases/<版本>/            各版本运行树（历史留档，可回滚）
+├── plugins -> current/plugins   过渡软链（兼容旧硬编码路径）
+├── scripts -> current/scripts   过渡软链（同上）
+├── config/                      运行配置（真源 = /etc/ttbox/config.d/）
+└── models/                      已安装模型
 ```
+
+> 板端**不编译源码**。换 core 二进制走正规发布链（`scripts/ttbox_build_release.sh` →
+> `scripts/ttbox_pack_ota.sh` → OTA），不要手工往 `/opt/ttbox/current/` 里拷。
 
 系统用户与用户组的约定见 [`platform/supervisor/README.md`](platform/supervisor/README.md)；
 板端依赖清单见 [`deploy/DEPENDENCIES.md`](deploy/DEPENDENCIES.md)。
@@ -123,40 +135,44 @@ systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 ## 四、仓库目录结构
 
 ```text
-├── core/               AI 核心 C++ 源码 + 单元测试
+├── core/               AI 核心：C++ 源码 + 单元测试（唯一构建源树）
+│   ├── include/        跨模块接口头
 │   ├── src/            生产源码（采集/推理/瞄准/输出）
-│   ├── tests/          C++ 测试 + 真机调试脚本
-│   ├── tools/          板端工具（压测、诊断、状态查询）
+│   ├── tests/          C++ 单测 + 真机调试脚本
+│   ├── tools/          本机/板端调试工具（IPC 探针、HID 工具）
+│   ├── third_party/    第三方内嵌源码
 │   └── CMakeLists.txt  构建脚本
-├── usbproxy/           自研鼠标注入代理源码
-├── plugins/            网页/预览等插件
-├── scripts/            运维脚本 + 网页主程序
-├── framework/          Python 框架（插件管理）
-├── config/             配置模板
-├── deploy/             systemd 服务文件和依赖说明
-├── docs/               文档中心（现行 20 份，见 docs/README.md）
+├── plugins/            网页控制台(8000) / 预览(8001) 等插件
+├── framework/          Python 插件管理框架
+├── ttbox_motion/       运动校准 / 训练
+├── usbproxy/           自研鼠标注入代理源码（含预编译 ELF）
 ├── platform/           V1 实验骨架（未接入运行链路）
-├── tools/              模型转换工具
-├── ttbox_motion/       运动控制（校准/训练）
-└── tests/              集成测试脚本
+├── image/              出厂整机镜像烘焙链（不进包）
+├── tools/              离线工具（模型转换 / 许可 / OTA 签发）
+├── scripts/            构建 / 发布 / 运维脚本 + edid 工具链
+├── config/             开发侧配置模板
+├── deploy/             systemd 单元 / 出厂配置 / 依赖说明
+├── docs/               文档中心（见 docs/README.md）
+└── tests/              板端集成 / 监控 / API 验收脚本
 ```
 
 各顶层目录的职责与「是否进 payload（release 树）」：
 
-| 目录 | 职责 | 是否进 payload |
-|---|---|:--:|
-| `core/` | C++ AI 核心唯一构建源树（采集→推理→瞄准→输出） | 仅 `bin/ttbox_core_main` |
-| `usbproxy/` | Raw Gadget 鼠标注入代理（含预编译 ELF） | ✅ 整包 |
-| `plugins/` | Python 插件包（web/preview/model/fan/wifi/network/monitor/log/system/upgrade） | ✅ 整包 |
-| `framework/` | 插件管理框架（web 运行期硬依赖） | ✅ 整包 |
-| `ttbox_motion/` | 运动校准/训练（web + core/tools 依赖） | ✅ 整包 |
-| `config/` | 开发侧配置模板（运行期真值在 `/opt/ttbox/config`、`/etc/ttbox`） | ❌ |
-| `deploy/` | 部署输入（systemd unit / toolchain / 出厂配置 / DEPENDENCIES） | 仅 `systemd/*` + `config/{00-factory,hardware_display}.json` |
-| `scripts/` | 构建/发布/运维脚本 + edid 工具链（★FHS 锚定，**不可移动**） | 仅 `edid/` + `wifi_manager.py` + `ttbox_ensure_services.sh` |
-| `tools/` | 离线开发工具（模型转换 / 许可/OTA 签发） | ❌ |
-| `tests/` | 板端集成/监控/API 验收脚本 | ❌ |
-| `docs/` | 文档中心（分类规则见 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)） | ❌ |
-| `platform/` | V1 实验骨架（随包但代码级不可达，**待实测出清**） | ✅（当前随包） |
+| 目录 | 中文功能 | 职责 | 是否进 payload |
+|---|---|---|:--:|
+| `core/` | 核心引擎 | C++ AI 核心唯一构建源树（采集 → 推理 → 瞄准 → 输出） | 仅 `bin/ttbox_core_main` |
+| `plugins/` | 插件 | 网页控制台(8000) / 预览(8001) / model / fan / wifi / network / monitor / log / system / upgrade | ✅ 整包 |
+| `framework/` | 框架 | 插件发现 / 安装 / 生命周期 / 权限；web 运行期硬依赖 | ✅ 整包 |
+| `ttbox_motion/` | 运动控制 | 运动校准 / 训练（web 与 `core/tools` 依赖） | ✅ 整包 |
+| `usbproxy/` | 鼠标代理 | Raw Gadget 鼠标注入代理（含预编译 ELF） | ✅ 整包 |
+| `scripts/` | 运维脚本 | 构建/发布/运维 + edid 工具链（★FHS 锚定，**不可移动**） | **白名单点名**：`edid/` + `deploy/pack_manifest.txt` 里逐个列出的 `ttbox*.sh` / `ttbox_*.py` |
+| `deploy/` | 部署输入 | systemd 单元 / 出厂配置 / OTA 公钥 / 已启用 HDMI-RX 的 DTB | 仅 `systemd/*.{service,timer,path}` + `config/{00-factory,10-device,hardware_display}.json` + `keys/*.pub` + `dtb/*.dtb` |
+| `config/` | 配置模板 | 开发侧模板（运行期真值在 `/opt/ttbox/config`、`/etc/ttbox`） | ❌ |
+| `platform/` | 平台骨架 | V1 实验骨架，代码级不可达 | ❌（出厂即不随包，定案 H-26 / S1） |
+| `image/` | 出厂镜像 | 厂商整机镜像烘焙链（loop 挂载 + chroot 自检） | ❌ |
+| `tools/` | 离线工具 | 模型转换 / 许可签发 / OTA 签名（不在板端跑） | ❌ |
+| `tests/` | 集成测试 | 板端集成 / 监控 / API 验收脚本 | ❌ |
+| `docs/` | 文档 | 文档中心（分类规则见 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)） | ❌ |
 
 > 「是否进 payload」= 是否被 `scripts/ttbox_fhs_init.sh` 的 `sync_tree` 收入 release 树。
 > **唯一真源以该脚本的白名单闭集为准**，本表只是说明。
@@ -265,23 +281,18 @@ ctest --test-dir build-win --output-on-failure
 
 Windows 下需要先准备 MSYS2 工具链，编译时把 `C:\msys64\ucrt64\bin` 加到 `PATH`。
 
-### 板端 RK3588（真机）
+### 交叉编译到 aarch64（出货）
+
+板端**不编译源码**，只运行交叉编译产物。用 WSL 里的交叉工具链出包，再走发布链上板：
 
 ```bash
-cd /opt/ttbox/src/core
-cmake --build build -j6
-systemctl stop ttbox-core
-cp build/ttbox_core_main /opt/ttbox/bin/ttbox_core_main
-systemctl start ttbox-core
+bash scripts/ttbox_build_release.sh   # 出货构建（先提交，否则留档 commit 不自洽）
+bash scripts/ttbox_pack_ota.sh        # 打包 + 签名
 ```
 
-### 板端 usbproxy
-
-```bash
-cd /opt/ttbox/src/usbproxy
-make
-systemctl restart ttbox-usbproxy
-```
+> `usbproxy/usb-proxy` 是**入库的预编译 ELF**，不随版本重建。需要重建时在 WSL 里 `make`，
+> 产物按 [`docs/build/build-reproducibility.md`](docs/build/build-reproducibility.md) §11
+> 回收入库（重建 → 覆盖入库件 → 重算 `.sha256`）。
 
 ---
 
@@ -295,13 +306,13 @@ cmake --build build-win -j8
 ctest --test-dir build-win --output-on-failure
 ```
 
-当前状态（2026-09-19 本机实测）：
+当前状态（2026-09-23 本机实测）：
 
 | 套件 | 结果 |
 |---|---|
-| Core CTest | **29 / 29 passed** |
-| `plugins/web/tests`（pytest） | **267 passed** |
-| `framework` + `platform`（pytest，需 `--import-mode=importlib`） | **92 passed** |
+| Core CTest（构建目录 `core/build-ascii`） | **35 / 35 passed** |
+| `plugins/web/tests`（pytest） | **289 passed** |
+| `framework` + `platform`（pytest，`PYTHONPATH=.`） | **92 passed** |
 | `scripts/ttbox_conventions_gate.sh` | **PASS**（退出码 0） |
 | `python docs/check_links.py` | **broken_count=0** |
 
@@ -313,8 +324,8 @@ ctest --test-dir build-win --output-on-failure
 # 服务健康
 systemctl is-active ttbox-core ttbox-web ttbox-preview ttbox-usbproxy
 
-# usbproxy 按键/移动测试
-python3 /opt/ttbox/src/core/tests/usbproxy_buttontest.py
+# usbproxy 按键/移动测试（在仓库树里跑，板端不存源码）
+python3 core/tests/usbproxy_buttontest.py
 ```
 
 ---
@@ -333,13 +344,13 @@ python3 /opt/ttbox/src/core/tests/usbproxy_buttontest.py
 | RKNN 输入 | external DMA 直连（2026-09-13 的历史取值）→ 现默认**关闭**：`rknn_external_dma_input` 已在三份配置中全部置为 false。订正（2026-09-17）：关闭原因不是"缺 XOR `0x80` 重映射"——重映射已实现并单测通过；真实原因是当前主用模型为 FP16（`kCompatible`），零拷贝结构性不可用。需换 INT8（`zp == -128`）模型并经板端实测后再开 |
 | 授权 features 门控 | `LicenseSnapshot.features` / `ui_brand` 已由签名卡驱动（M2）：可信态（kValid/kFallback/kExpired 宽限内）才投影；未激活与权威否定一律清空且品牌回落 `ttbox`。闭集 = `capture/inference/aim/ota`，闭集外名字丢弃；`ui_brand` 过 `[A-Za-z0-9_-]` 字符集闸门 |
 | 模型热切换 | EP ↔ 320dawan 连续切换通过 |
-| 板端服务 | core/web/preview/usbproxy 全部 active |
+| 板端服务 | ttbox-core / ttbox-web / ttbox-preview / ttbox-usbproxy 全部 active |
 
 ---
 
 ## 十、文档
 
-文档中心只保留**与代码有引用关系**的文档，共 20 份。入口与"谁引用谁"的对照表见
+文档中心只保留**与代码有引用关系**的文档。入口与"谁引用谁"的对照表见
 [`docs/README.md`](docs/README.md)；分类规则见 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)。
 
 | 想了解 | 看哪里 |
