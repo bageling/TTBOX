@@ -21,6 +21,7 @@
 #include "mouse/ContinuousLead.hpp"
 #include "mouse/PersonalTrajectoryShader.hpp"
 #include "mouse/RecoilController.hpp"
+#include "mouse/TriggerController.hpp"
 // BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 抗过冲 / 速度自适应 Kp / 全局正弦
 #include "mouse/LeadPredictor.hpp"
 #include "mouse/HumanizeShaper.hpp"
@@ -94,6 +95,10 @@ public:
         // 标定模式（mouse.calibrating）恒为 0。面板用它显示"当前第 N 档生效"。
         int active_profile = -1;
         uint64_t last_timestamp_us = 0;
+        // ---- 自动扳机遥测（2026-09-25 接线后新增）----
+        uint64_t trigger_fire_count = 0;  // 自 start() 起累计开火次数（按下命令成功投递才算）
+        bool trigger_active = false;      // 任一扳机处于激活态（面板 pill 用）
+        uint8_t trigger_button = 0;       // 最近一次开火使用的键位掩码（0 = 未开火）
     };
     AimThread() = default;
     ~AimThread() { stop(); }
@@ -147,6 +152,12 @@ private:
     ContinuousLead continuous_lead_;  // 持续提前量：AI 输出持续同向后附加 X 偏置（pull_curve 后、recoil 前注入 scaled_x）
     PersonalTrajectoryShader personal_shader_;  // 拟人化整形引擎：Fitts 时长+包络+垂直抖动（Gate 前生效）
     RecoilController recoil_;       // 压枪引擎：开火期间下压（pull_curve 后、deadzone 前注入 scaled_y）
+    // 自动扳机（BB 两套状态机）。此前全仓无人 include ⇒ 面板开关是死的、点击发不出去。
+    // 决策在这里产出，注入走 output_->mouse_button（按下/抬起两条命令，不在控制线程里 sleep）。
+    TriggerController trigger_;
+    uint8_t trigger_release_btn_ = 0;      // 待抬起的键位掩码（0 = 无）
+    uint32_t trigger_release_at_ms_ = 0;   // 抬起时刻（now_ms 时基）
+    uint64_t trigger_fire_count_ = 0;
     // ---- BB 对标第二批（2026-09-24）----
     // 全部构件默认 enabled=false ⇒ 不跑即零输出，输出链与本批加入前逐字节一致。
     LeadPredictor lead_pred_;       // 两代提前量：X 轴偏移叠加进控制误差 control_x

@@ -758,6 +758,15 @@ def _hotkey_to_bits(v, default=0):
     return default
 
 
+# 合法的热键位掩码集合（左1 右2 中4 侧8 侧16）。
+# ★ 2026-09-25：只判「hk == 0」是不够的 —— -1 / 32 / 255 都会放行，落到 core 的
+#   static_cast<uint8_t> 上会绕回 / 越界（如 -1 ⇒ 255），命中判据 `buttons & 255 != 0`
+#   对**任意**物理键成立 ⇒ 按什么键都瞄准（热键闸门 fail-open）。
+#   组合掩码（如 3 = 左|右）core 侧能用，但面板无法回填（_bits_to_hotkey(3) 返回 ''，
+#   会被 `or 'right'` 静默显示成右键，下次保存真变成 2 ⇒ 静默漂移）⇒ 面板这一层拒掉。
+AIM_PROFILE_VALID_BITS = frozenset(HOTKEY_BITS.values())
+
+
 def _bits_to_hotkey(v):
     """位掩码 → Web 热键字符串（0 → ''）。"""
     try:
@@ -1089,8 +1098,12 @@ def _aim_profile_core_dict(p: dict) -> dict:
     """单张热键卡 → core aim_profiles[] 的一项。缺字段不写（让 core 吃结构体默认）。"""
     p = p if isinstance(p, dict) else {}
     out: dict = {}
-    out['hotkey'] = _hotkey_to_bits(p.get('hotkey'), 2) or 2
-    out['hotkey2'] = _hotkey_to_bits(p.get('hotkey2'), 0)
+    # 域内才写，越界/负数落回默认值（面板这一层不让非法掩码出网；
+    # core 侧另有 sanitize_hotkey_bits 兜底，双保险）
+    _hk = _hotkey_to_bits(p.get('hotkey'), 2)
+    out['hotkey'] = _hk if _hk in AIM_PROFILE_VALID_BITS else 2
+    _hk2 = _hotkey_to_bits(p.get('hotkey2'), 0)
+    out['hotkey2'] = _hk2 if _hk2 in AIM_PROFILE_VALID_BITS else 0
     out['hotkey_mode'] = _hotkey_mode_to_web(p.get('hotkey_mode'))
     if p.get('offset_x') is not None:
         out['offset_x'] = p['offset_x']
@@ -1147,6 +1160,14 @@ def validate_aim_profiles(profiles) -> list:
         mode = _hotkey_mode_to_web(p.get('hotkey_mode'))
         if hk == 0:
             raise ConfigValidationError(f'热键 {i}：请选择主按键')
+        # ★ 域校验：必须是五个合法键位之一。放行了 -1/32/255 会让 core 侧绕回成
+        #   255，命中判据对任意键成立 ⇒ 热键闸门形同虚设。
+        if hk not in AIM_PROFILE_VALID_BITS:
+            raise ConfigValidationError(
+                f'热键 {i}：主按键值非法（{hk}），只能是 左键/右键/中键/侧键1/侧键2 之一')
+        if hk2 != 0 and hk2 not in AIM_PROFILE_VALID_BITS:
+            raise ConfigValidationError(
+                f'热键 {i}：副按键值非法（{hk2}），只能是 左键/右键/中键/侧键1/侧键2 之一')
         if hk & hk2:
             raise ConfigValidationError(f'热键 {i}：副按键不能与主按键相同（同一个键等于没按）')
         if mode == 'all' and hk2 == 0:
@@ -1369,8 +1390,13 @@ def web_body_to_profile(body: dict) -> dict:
     # 否则档 2 要用的类别会在推理阶段就被丢掉。瞄准侧再按当前档窄化（AimThread 的
     # scfg.class_filter），单档时两侧相同 ⇒ 行为与加档位之前逐位一致。
     # 提交体不带 aim_profiles 时不动这一项（None 哨兵），免得"改个别处把类别清空"。
+    # ★ 2026-09-25 修：哨兵必须与 mouse 段**同解**。原先这里挂的是 `profiles is not None`，
+    #   mouse 段挂的是 `if core_profiles` ⇒ `aim_profiles: []` 被当成两种意思：
+    #   mouse 段当"未提交"（保留旧档表），inference 段当"已提交"（并集 0 ⇒ class_filter
+    #   写 []），而 core 侧 `TargetSelector.cpp` 空 class_filter = **不过滤 = 全类别放行**。
+    #   净效果：档表纹丝不动，用户已排除的类别却全都回来了。两边必须挂同一个条件。
     class_union_mask = None
-    if profiles is not None:
+    if core_profiles:
         class_union_mask = 0
         for p in (profiles or []):
             class_union_mask |= int((p or {}).get('class_filter_mask') or 0)

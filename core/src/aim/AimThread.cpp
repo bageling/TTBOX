@@ -13,6 +13,7 @@
 #include "mouse/PersonalTrajectoryShader.hpp"
 #include "common/CpuAffinity.hpp"
 #include "common/Logger.hpp"
+#include "output/OutputBackend.hpp"   // kActDown/kActUp（自动扳机注入动作）
 namespace ttbox::core::aim {
 bool AimThread::start(AimTargetMailbox* mailbox, std::shared_ptr<output::IHidOutput> output, int interval_us, RuntimeConfig* runtime_config, std::atomic<uint16_t>* physical_buttons) {
     if (!mailbox || !output || running_.exchange(true)) return false;
@@ -43,6 +44,10 @@ void AimThread::reset_runtime_state() {
     speed_kp_.reset();
     global_wave_.reset();
     lead_last_move_y_ = 0.0f;
+    // 自动扳机：换世代必须清状态，且**先把按住的键抬起**（否则换模型时鼠标键卡在按下态）。
+    trigger_.reset();
+    trigger_release_btn_ = 0;
+    trigger_release_at_ms_ = 0;
     last_injection_allowed_ = false;
     display_smooth_x1_.reset();
     display_smooth_y1_.reset();
@@ -295,6 +300,8 @@ void AimThread::loop() {
             float pred_ex = 0.0f, pred_ey = 0.0f;  // 第15阶段：预测误差
             float tx = 0.0f, ty = 0.0f, ref_x = 0.0f, ref_y = 0.0f;
             float smooth_tx = 0.0f, smooth_ty = 0.0f;  // 第15阶段：平滑后瞄准点（滤检测框抖动，遥测/控制共用）
+            // 控制域误差（像素域）。提到块外：无目标时保持 0，供输出尾链读取。
+            float control_x = 0.0f, control_y = 0.0f;
             float aibox_x = 0.0f, aibox_y = 0.0f, scaled_x = 0.0f, scaled_y = 0.0f;
             bool fov_mode_active = false;  // FOV 模式：fov_move 已是 count 域最终移动量，旁路 PID 的 kp×err
             float fov_out_x = 0.0f, fov_out_y = 0.0f;  // FOV 模式输出（count 域）
@@ -311,7 +318,20 @@ void AimThread::loop() {
                 remainder_x_ = 0.0f;
                 remainder_y_ = 0.0f;
             }
-            if (selected.valid && task.frame_width > 0 && task.frame_height > 0) {
+            // ---- 本帧目标是否可用于误差控制 ----
+            // ★ 压枪**不能**挂在这个条件里：它必须能在无目标时继续下压，否则面板的
+            //   「无目标时也压枪」(no_target_always) 与「目标丢失保持窗」
+            //   (target_lost_release_ms) 两个语义在集成层永远走不到
+            //   （RecoilController.hpp 要求 !has_target 才进这些分支，
+            //    而此前传给它的 target_visible 就是 selected.valid ⇒ 恒为 true）。
+            const bool target_ok = selected.valid && task.frame_width > 0 && task.frame_height > 0;
+            // 准星到目标距离（px）。无目标时无意义 ⇒ 保持 0（下游据此跳过距离相关项）。
+            float dtt_px = 0.0f;
+            // 帧间时间基准：**不依赖目标** ⇒ 提到块外，压枪与拉枪曲线都要用。
+            const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
+                ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
+            const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
+            if (target_ok) {
                 if (!aim_point_at(selected.box, selected.box.class_id, aim_point, &tx, &ty)) {
                     tx = (selected.box.x1 + selected.box.x2) * 0.5f;
                     ty = selected.box.y1 + (selected.box.y2 - selected.box.y1) * 0.15f;
@@ -364,14 +384,14 @@ void AimThread::loop() {
                 ey = ty - ref_y;
                 pred_ex = pred_tx - ref_x;
                 pred_ey = pred_ty - ref_y;
-                float control_x = (prediction_time_s_ > 0.0f) ? pred_ex : (smooth_tx - ref_x);
-                float control_y = (prediction_time_s_ > 0.0f) ? pred_ey : (smooth_ty - ref_y);
+                control_x = (prediction_time_s_ > 0.0f) ? pred_ex : (smooth_tx - ref_x);
+                control_y = (prediction_time_s_ > 0.0f) ? pred_ey : (smooth_ty - ref_y);
                 // ---- BB 提前量（两代，只改 X 轴）----
                 // ★ 叠加在**控制误差**上、而不是塞进 tracker 之前的瞄准点：
                 //   BB 原版是 `at.x += offset` 后立刻算 `fx = at.x - chX` —— 偏移不经任何滤波
                 //   直接进 PID。若加在 tracker 之前，会被 One-Euro 低通吃掉大半，等于没效果。
                 // ★ 一代天然滞后一帧（本帧投票 → 下帧用），二代同帧生效；两代默认都关。
-                const float dtt_px = std::hypot(ex, ey);
+                dtt_px = std::hypot(ex, ey);
                 const float box_cx = (selected.box.x1 + selected.box.x2) * 0.5f;
                 const float box_cy = (selected.box.y1 + selected.box.y2) * 0.5f;
                 const float box_w = selected.box.x2 - selected.box.x1;
@@ -401,9 +421,6 @@ void AimThread::loop() {
                         fov_mode_active = true;
                     }
                 }
-                const float dt = previous_timestamp_us > 0 && task.timestamp_us > previous_timestamp_us
-                    ? static_cast<float>(task.timestamp_us - previous_timestamp_us) / 1000000.0f : 0.004f;
-                const float dt_ms = dt * 1000.0f;  // 拉枪曲线抖动需要毫秒级时间基准
                 // pid1.cpp P_PID 直接消费控制域误差（像素域）。
                 // FOV 模式：fov_out 已是 count 域最终移动量，直接作为控制器输出（旁路 kp×err）。
                 trace_smith_dx = 0.0f; trace_smith_dy = 0.0f;
@@ -465,30 +482,106 @@ void AimThread::loop() {
                 } else if (lead_cfg.enabled) {
                     continuous_lead_.reset();
                 }
-                // 压枪（recoil）：开火期间持续下压补偿后坐力。
-                // 位置在 pull_curve 之后、deadzone 之前（与 pull_curve 同一注入点语义）。
-                // 压枪量（count 域）与 PID 输出融合，之后统一走 deadzone → remainder →
-                // int16 → 拟人化整形 → 热键安全门；Gate 关闭时最终输出仍被归零。
+            }  // ← 结束 target_ok 块（以下压枪与输出尾链在无目标时也要跑）
+
+            // ---- 自动扳机（BB 两套状态机 v7.26 / 2.0）----
+            // ★ 2026-09-25 接线：此前 TriggerController **全仓无人 include**，AimThread 也不跑它
+            //   ⇒ 面板上的「自动扳机」开关是死的：决策没人算、点击没人发
+            //   （OutputAction.button_mask 恒 0，后端 mouse_button 也一个字节都没往外发）。
+            // 本模块只产出"要不要开火"的决策，注入在这里做（决策与注入分离的原设计）。
+            // 两套都关（默认）时 update() 立刻返回空命令 ⇒ 输出链与接线前逐字节一致。
+            TriggerCmd trig_cmd;
+            if (frame_profile) {
+                TriggerInput tin;
+                tin.now_ms = now_ms32;
+                tin.dt_ms = dt_ms;
+                tin.has_target = target_ok;
+                tin.dtt_px = dtt_px;
+                tin.target_conf = selected.valid ? selected.box.score : 0.0f;
+                tin.hotkey_bits = hotkey_bits;   // 挂起时位图已清零 ⇒ 扳机一并停火
+                // 准星中心是否被任一检测框覆盖（v7.26 的 crosshair_check 门）
                 {
-                    if (recoil_bb_cfg.enabled) {
-                        // BB 三段查表引擎（含垂直修正 + 力度渐变）。
-                        // adv/simple 倍率由 BB 扳机（trigger2）决定；扳机没跑时恒 1.0。
-                        const auto bbo = recoil_.update_bb(
-                            hotkey_bits, selected.valid, dtt_px, ty, ref_y,
-                            recoil_cfg, recoil_bb_cfg, vc_cfg, dt_ms, recoil_px_per_count,
-                            1.0f, 1.0f);
-                        scaled_y += bbo.recoil_y + bbo.vert_y;
-                        scaled_x += bbo.recoil_x + bbo.vert_x;
-                    } else {
-                        const auto rd = recoil_.update(hotkey_bits, selected.valid, recoil_cfg, dt_ms,
-                                                       recoil_px_per_count);
-                        scaled_y += rd.y;  // 下压为正（目标偏下方向）
-                        scaled_x += rd.x;  // 拟人 X 微动（可正可负）
+                    float chx = 0.0f, chy = 0.0f;
+                    CoordinateTransform::reference_point(static_cast<float>(task.frame_width),
+                                                         static_cast<float>(task.frame_height),
+                                                         aim_point, &chx, &chy);
+                    tin.center_covered = false;
+                    for (const auto& tb : task.detections) {
+                        if (chx >= tb.x1 && chx <= tb.x2 && chy >= tb.y1 && chy <= tb.y2) {
+                            tin.center_covered = true;
+                            break;
+                        }
                     }
                 }
+                // 急停检测（准星颜色）在采集侧，core 侧拿不到该信号 ⇒ 恒真（= 不启用）。
+                // 面板打开 stop_detect_enabled 时要知道：它是"就绪但未接线"，不是真在判色。
+                tin.stop_detect_found = true;
+                trig_cmd = trigger_.update(frame_profile->mouse, tin);
+
+                // ---- 按下/抬起：拆成两条命令，绝不在控制线程里 sleep ----
+                // 按压时长（press_duration，默认 50ms）用时间戳跨周期保持：本帧按下、
+                // 到点的那一帧抬起。控制线程阻塞 sleep 会直接吃掉几帧瞄准输出。
+                if (trigger_release_btn_ != 0 && now_ms32 >= trigger_release_at_ms_) {
+                    output_->mouse_button(trigger_release_btn_, output::kActUp);
+                    trigger_release_btn_ = 0;
+                }
+                if (trig_cmd.fire && trig_cmd.button != 0 &&
+                    output_->mouse_button(trig_cmd.button, output::kActDown)) {
+                    ++trigger_fire_count_;
+                    trigger_release_btn_ = trig_cmd.button;
+                    const float hold_ms = trig_cmd.press_duration_ms > 1.0f
+                                              ? trig_cmd.press_duration_ms : 10.0f;
+                    trigger_release_at_ms_ = now_ms32 + static_cast<uint32_t>(hold_ms);
+                }
+            } else {
+                trigger_.reset();
+            }
+
+            // ---- 压枪（recoil）：开火期间持续下压补偿后坐力 ----
+            // ★ 2026-09-25 修：**在目标块外计算**。此前它整段待在 `if (selected.valid)` 里，
+            //   而传给模块的 target_visible 实参就是 selected.valid ⇒ 恒为 true ⇒
+            //   RecoilController 里「无目标时也压枪」(no_target_always) 与「目标丢失保持窗」
+            //   (target_lost_release_ms) 两个分支永远进不去，面板上的复选框是死的。
+            //   （模块级单测直接传 target_visible=false 全过，正好盖住了集成层走不到。）
+            // 无目标时 dtt_px/ty/ref_y 无意义 —— update_bb 在 target_visible=false 时
+            // 本来就不消费它们（见 RecoilController.hpp 的 has_target 分支）。
+            float recoil_add_x = 0.0f;
+            float recoil_add_y = 0.0f;
+            {
+                if (recoil_bb_cfg.enabled) {
+                    // BB 三段查表引擎（含垂直修正 + 力度渐变）。
+                    // ★ adv 倍率已真接线：扳机首枪发出 recoil_adv ⇒ 走 recoil_bb.adv_mult（默认 0.9）。
+                    //   扳机没跑（两套都关）时恒 1.0 ⇒ 与接线前逐位一致。
+                    // ★ simple 倍率**仍是死值 1.0**：RecoilBbConfig 没给"简易压枪"留倍率字段，
+                    //   而 update_bb 里 simple_mult<=0 会被兜回 1.0 ⇒ 用 0 表达"不压"根本传不进去。
+                    //   这是接口缺口（不是已接线项），真要按 trigger2.with_simple_recoil 控制
+                    //   简易压枪，得改 update_bb 的语义。此处如实保留 1.0 并标注。
+                    const float adv_mult = trig_cmd.recoil_adv ? recoil_bb_cfg.adv_mult : 1.0f;
+                    const auto bbo = recoil_.update_bb(
+                        hotkey_bits, target_ok, dtt_px, ty, ref_y,
+                        recoil_cfg, recoil_bb_cfg, vc_cfg, dt_ms, recoil_px_per_count,
+                        adv_mult, 1.0f);
+                    recoil_add_x = bbo.recoil_x + bbo.vert_x;
+                    recoil_add_y = bbo.recoil_y + bbo.vert_y;   // 下压为正（目标偏下方向）
+                } else {
+                    const auto rd = recoil_.update(hotkey_bits, target_ok, recoil_cfg, dt_ms,
+                                                   recoil_px_per_count);
+                    recoil_add_x = rd.x;   // 拟人 X 微动（可正可负）
+                    recoil_add_y = rd.y;   // 下压为正
+                }
+            }
+            // ---- 输出尾链 ----
+            // 有目标 ⇒ PID 已算出 scaled；无目标但压枪在压 ⇒ 也走同一条尾链
+            // （deadzone → remainder → int16 → 拟人化 → 热键安全门），
+            // 保证压枪量与正常瞄准一样受同样的安全门与量化约束，不绕过任何一道。
+            if (target_ok || recoil_add_x != 0.0f || recoil_add_y != 0.0f) {
+                scaled_y += recoil_add_y;
+                scaled_x += recoil_add_x;
                 // ---- BB 抗过冲（recoil 之后、deadzone 之前）----
                 // 靠近目标时按内/外圈强度分段衰减位移；各圈"最多衰减 N 帧"，跑满即本轮停手。
-                if (anti_over_cfg.enabled) {
+                // ★ 无目标时跳过：它按"离目标距离"分区，dtt=0 会被判成"在最内圈"
+                //   ⇒ 把压枪量整体衰减掉（inner_strength=100 时直接归零，等于白压）。
+                if (target_ok && anti_over_cfg.enabled) {
                     anti_overshoot_.apply(&scaled_x, &scaled_y, dtt_px, now_ms32, anti_over_cfg);
                 }
                 // ---- BB 全局正弦扰动（deadzone 之前）----
@@ -688,6 +781,10 @@ void AimThread::loop() {
                 status_.target_height = 0.0f;
             }
             if (selected.valid) ++status_.target_frames; else ++status_.no_target_frames;
+            status_.trigger_fire_count = trigger_fire_count_;
+            status_.trigger_active = trigger_.auto_trigger().activated() ||
+                                     trigger_.auto_trigger2().activated();
+            status_.trigger_button = trig_cmd.button;
             uint32_t active_tracks = 0;
             for (const auto& te : selector_.tracks()) {
                 if (te.active) ++active_tracks;

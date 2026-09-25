@@ -17,6 +17,7 @@
  */
 
 #include "output/OutputBackend.hpp"
+#include "output/OutputGate.hpp"
 
 #include <utility>
 #include <chrono>
@@ -53,7 +54,19 @@ public:
         health_.last_send_ok_us = static_cast<int64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
         return true;
     }
-    bool mouse_button(uint8_t, uint8_t) override { return gate_allows(); }
+    // 按键注入（自动扳机）：此前只做 gate 检查、一个字节都没发出去 ⇒ 面板上的
+    // 「自动扳机」开了也点不动（TriggerController 决策全被丢在后端门口）。
+    bool mouse_button(uint8_t button, uint8_t action) override {
+        if (!gate_allows()) return false;
+        std::string error;
+        if (!client_.send_button(button, action, &error)) {
+            health_.detail = error;
+            ++health_.send_fail;
+            return false;
+        }
+        ++health_.send_ok;
+        return true;
+    }
     bool mouse_click(uint8_t b) override { return mouse_button(b, ttbox::core::output::kActClick); }
     const char* name() const override { return "usb_proxy_mouse_control"; }
 private:
@@ -65,30 +78,11 @@ private:
 
 namespace ttbox::core::output {
 
-// 发送前 Gate：判定顺序与 AiboxHidOutput::send 完全一致（fail-closed）。
+// 发送前 Gate：判据已抽到 OutputGate.hpp（**单一权威源**），与 AiboxHidOutput::send 共用同一份。
+// 此前两处各写一遍然后漂移（aibox 侧缺标定豁免、两侧都在"按键源没绑"时 fail-open），
+// 靠注释互相保证"口径一致"是不可靠的，改为共用函数。
 bool IOutputBackend::gate_allows() const {
-    if (!enabled_) return false;
-    if (config_source_) {
-        auto p = config_source_->snapshot();
-        if (!p) return false;
-        const bool calibrating = p->mouse.calibrating;
-        if (!p->mouse.enabled && !calibrating) return false;
-        // 放行掩码 = 所有瞄准档位键位的并集（必须与 AiboxHidOutput::send 里的判据同口径）。
-        // 只认某一档会把其它档的键位拦掉 —— 详见 AiboxHidOutput.cpp 处的说明。
-        const uint16_t mask = aim::aim_hotkey_mask(p->mouse);
-        if (mask == 0 && !calibrating) return false;  // 配置缺失 → 禁止注入
-        // 标定模式：无视热键放行（标定线程自己注入运动帧，物理鼠标不参与）
-        if (calibrating) return true;
-        if (button_source_ && (button_source_->load(std::memory_order_acquire) & mask) == 0) {
-            return false;
-        }
-    } else if (button_source_) {
-        return false;  // 有按键源但无配置源 → fail-closed
-    } else {
-        // 无配置源且无按键源：类契约自称 fail-closed，禁止放行（E-07）。
-        return false;
-    }
-    return true;
+    return output_gate_allows(OutputGateInputs{enabled_, config_source_, button_source_});
 }
 
 OutputBackend::~OutputBackend() = default;
@@ -127,6 +121,17 @@ bool OutputBackend::configure(const Params& p, std::string* error) {
 // IHidOutput 兼容：AimThread 仍调用 send(OutputAction)，零改动。
 // 热路径：无分配、无锁、无日志；Gate 判定在后端内部（与 AiboxHidOutput 相同）。
 // ---------------------------------------------------------------------------
+bool OutputBackend::mouse_button(uint8_t button, uint8_t action) {
+    if (!backend_) return false;
+    const uint8_t index = button_index_from_mask(button);
+    if (index == 0) return false;   // 空掩码 = 不点任何键（fail-closed，绝不猜成"点左键"）
+    return backend_->mouse_button(index, action);
+}
+
+bool OutputBackend::mouse_click(uint8_t button) {
+    return mouse_button(button, ttbox::core::output::kActClick);
+}
+
 bool OutputBackend::send(const OutputAction& action) {
     if (!backend_) return false;
     // 行为与原 AiboxHidOutput 一致：整帧写入（含零移动帧=复位帧）；

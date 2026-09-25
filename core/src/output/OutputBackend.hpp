@@ -129,6 +129,11 @@ public:
     const Params& params() const { return params_; }
 
     bool send(const OutputAction& action) override;
+    // ---- 按键注入（自动扳机用；button 是**位掩码**，见 IHidOutput.hpp）----
+    // 语义：只做转发，Gate 判定在各后端内部（与 mouse_move 一致）。
+    // 掩码 → 协议编号的转换在这里做，后端实现只认编号（与 usb-proxy BUTTON_CMD 对齐）。
+    bool mouse_button(uint8_t button, uint8_t action) override;
+    bool mouse_click(uint8_t button) override;
 
     BackendHealth health() const;
     const char* backend_name() const;

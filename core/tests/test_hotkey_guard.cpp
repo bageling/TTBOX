@@ -288,15 +288,37 @@ int main() {
         }
     }
 
-    // Case9 越界位掩码被掩掉（只保留鼠标五键低 5 位）
+    // Case9 越界/负数的 toggle 键一律归 0（永不翻转）
+    //
+    // ★ 2026-09-25 改口径：原先是"掩低 5 位"（250 & 0x1F = 26）。那个写法对正数无害，
+    //   但对**负数**会绕回成"任意键"：`-1 & 0x1F = 31` = 左|右|中|侧1|侧2 全中 ⇒
+    //   按任何一个键都能翻转热键保护（fail-open）。统一改成「越界一律 0 = 永不命中」，
+    //   与 aim_profiles 的 hotkey 同一口径（sanitize_hotkey_bits）。
     {
         auto res = ttbox::core::json_parse(
             R"({"mouse":{"hotkey_guard":{"enabled":true,"toggle_hotkey":250}}})");
         check(res.ok, "Case9 越界 toggle 可解析");
         if (res.ok) {
             const auto q = ttbox::core::RuntimeProfile::from_json(res.value);
-            check(q.mouse.hotkey_guard.toggle_hotkey == (250 & 0x1F),
-                  "Case9 toggle_hotkey 只取低 5 位");
+            check(q.mouse.hotkey_guard.toggle_hotkey == 0,
+                  "Case9 越界 toggle_hotkey 归 0（永不翻转）");
+        }
+        // ★ 真正要挡的是负数：掩低 5 位会变成 31 = 任意键都能翻转
+        auto neg = ttbox::core::json_parse(
+            R"({"mouse":{"hotkey_guard":{"enabled":true,"toggle_hotkey":-1}}})");
+        check(neg.ok, "Case9b 负数 toggle 可解析");
+        if (neg.ok) {
+            const auto q = ttbox::core::RuntimeProfile::from_json(neg.value);
+            check(q.mouse.hotkey_guard.toggle_hotkey == 0,
+                  "Case9b 负数 toggle 必须为 0（掩低5位会变 31 = 任意键都翻转）");
+        }
+        // 合法单键不受影响
+        auto ok1 = ttbox::core::json_parse(
+            R"({"mouse":{"hotkey_guard":{"enabled":true,"toggle_hotkey":16}}})");
+        if (ok1.ok) {
+            const auto q = ttbox::core::RuntimeProfile::from_json(ok1.value);
+            check(q.mouse.hotkey_guard.toggle_hotkey == 16,
+                  "Case9c 合法键位（侧2=16）保持不变");
         }
     }
 

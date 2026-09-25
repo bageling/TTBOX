@@ -310,6 +310,8 @@ void handle_cmd_connection(int fd) {
             if (action == kActDown || action == kActClick) next |= bit;
             else if (action == kActUp) next &= static_cast<uint8_t>(~bit);
             g_state.button_mask.store(next);
+            // 通知注入节拍：按键状态变了，就算这一拍没有位移也要发一份报告给主机。
+            g_state.button_seq.fetch_add(1, std::memory_order_release);
             break;
         }
 
@@ -812,13 +814,18 @@ struct InjectSrv {
 static InjectSrv g_inject_srv;
 
 static void* inject_loop(void*) {
+    // 本拍已投递过的按键序号（只在本线程内使用，无需原子）。
+    uint64_t last_button_seq = g_state.button_seq.load(std::memory_order_acquire);
     while (g_inject_srv.running.load()) {
         ::usleep(kInjectPeriodUs);
+        // 按键序号：AI 扳机每发一次 BUTTON_CMD 就 +1 ⇒ 变了就说明有"纯按键"报告要发。
+        const uint64_t button_seq = g_state.button_seq.load(std::memory_order_acquire);
+        const bool button_pending = (button_seq != last_button_seq);
         // 绝大多数拍子里根本没有待投位移 ⇒ 用 3 次原子读提前退出。
         // 否则每 1ms 都要拿 layout_mutex 拷一份 HidMouseDescriptor（而物理报告那条路
         // 1kHz 也在抢这把锁）—— 省掉的是纯开销，不改变任何行为。
         if (g_state.pending_dx.load() == 0 && g_state.pending_dy.load() == 0 &&
-            g_state.pending_wheel.load() == 0) {
+            g_state.pending_wheel.load() == 0 && !button_pending) {
             continue;
         }
         if (!g_state.mouse_control_enabled.load()) continue;
@@ -841,7 +848,10 @@ static void* inject_loop(void*) {
         if (!desc.usable()) continue;
 
         const InjectStep st = take_step();
-        if (st.dx == 0 && st.dy == 0 && st.wheel == 0) continue;  // 无位移 ⇒ 不发空报告
+        // 无位移 **且** 按键没变化 ⇒ 不发空报告（保持原行为）。
+        // 按键变了就必须发：这份报告里 X/Y=0、buttons 带着新的按下/抬起状态，
+        // 否则 AI 扳机的点击永远到不了主机。
+        if (st.dx == 0 && st.dy == 0 && st.wheel == 0 && !button_pending) continue;
 
         uint8_t buf[64];
         uint32_t len = 0;
@@ -857,6 +867,7 @@ static void* inject_loop(void*) {
             add_pending(g_state.pending_wheel, st.wheel);
             continue;
         }
+        last_button_seq = button_seq;   // 这一拍的按键状态已经送到主机
         g_state.inject_count.fetch_add(1);
         g_state.last_move_ts_us.store(now_us());
         layout_summary_maybe();

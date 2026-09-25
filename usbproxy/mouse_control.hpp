@@ -100,6 +100,12 @@ struct MouseControlState {
     // 物理按钮掩码（来自物理报告解析 / BUTTON_CMD）
     std::atomic<uint8_t> button_mask{0};
 
+    // 按键**注入**序号：每收到一次 BUTTON_CMD（AI 扳机）就 +1。
+    // 为什么需要它：inject_loop 原本只在"有位移"时才构造报告，而一次点击往往不带位移
+    // ⇒ 按下/抬起根本不会形成报告发给主机（表现为"扳机开了但游戏里没开枪"）。
+    // 有了序号，inject_loop 就能认出"按键变了、必须发一份纯按键报告"。
+    std::atomic<uint64_t> button_seq{0};
+
     // 事件订阅者连接（event.sock）
     std::mutex subscribers_mutex;
     std::vector<int> subscribers;

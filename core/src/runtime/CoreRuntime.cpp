@@ -2,6 +2,7 @@
 #include "runtime/CoreRuntime.hpp"
 #include "common/FrameRateMeter.hpp"
 #include "common/Logger.hpp"
+#include "output/AiboxHidOutput.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -178,6 +179,14 @@ bool CoreRuntime::start(std::string* error) {
     if (auto* backend = dynamic_cast<output::OutputBackend*>(output_.get())) {
         backend->set_button_source(mouse_reader_.button_source());
         backend->set_config_source(runtime_config_);
+    } else if (auto* aibox = dynamic_cast<output::AiboxHidOutput*>(output_.get())) {
+        // ★ 2026-09-25 补：兜底后端也要绑按键源。AiboxHidOutput **不是** OutputBackend，
+        //   所以上面那个 dynamic_cast 永远失败 ⇒ 它的 button_source_ 一直是 nullptr
+        //   ⇒ 输出层的热键二次防线等于没有，只剩 AimThread 一层。
+        //   （AiboxHidOutput::send 已改成"没绑按键源就拒绝注入"，这里必须跟上，
+        //    否则改成 fail-closed 之后兜底路径会一个 count 都发不出去。）
+        aibox->set_button_source(mouse_reader_.button_source());
+        aibox->set_config_source(runtime_config_);
     }
 
     // ④ AimThread（仅 gates.aim）。

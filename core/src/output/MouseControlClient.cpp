@@ -32,6 +32,19 @@ std::vector<uint8_t> MouseControlClient::encode_move(uint32_t request_id, int32_
     return out;
 }
 
+std::vector<uint8_t> MouseControlClient::encode_button(uint32_t request_id, uint8_t button,
+                                                       uint8_t action) {
+    std::vector<uint8_t> out;
+    out.reserve(10);
+    put_u16(out, 0x4F50);
+    out.push_back(1);          // version
+    out.push_back(5);          // type = BUTTON_CMD（与 usb-proxy mouse_control.hpp 对齐）
+    put_u32(out, request_id);
+    out.push_back(button);     // 按钮**编号** 1..8（1=左键）
+    out.push_back(action);     // 1=down 2=up 3=click
+    return out;
+}
+
 bool MouseControlClient::connect(std::string* error) {
 #if defined(_WIN32)
     if (error) *error = "Windows 不支持 Unix SOCK_SEQPACKET";
@@ -59,6 +72,7 @@ MouseControlTelemetry MouseControlClient::telemetry() const {
     t.socket_write_ok = socket_write_ok_.load(std::memory_order_relaxed);
     t.socket_write_fail = socket_write_fail_.load(std::memory_order_relaxed);
     t.send_count = send_count_.load(std::memory_order_relaxed);
+    t.button_count = button_count_.load(std::memory_order_relaxed);
     t.last_dx = last_dx_.load(std::memory_order_relaxed);
     t.last_dy = last_dy_.load(std::memory_order_relaxed);
     t.last_wheel = last_wheel_.load(std::memory_order_relaxed);
@@ -109,6 +123,45 @@ bool MouseControlClient::send_move(int32_t dx, int32_t dy, int32_t wheel, std::s
         return false;
     }
     return record_success();
+#endif
+}
+
+bool MouseControlClient::send_button(uint8_t button, uint8_t action, std::string* error) {
+    if (button < 1 || button > 8) {
+        if (error) *error = "按钮编号超出 1..8";
+        return false;
+    }
+#if defined(_WIN32)
+    (void)action; if (error) *error = "Windows 不支持 Unix socket"; return false;
+#else
+    if (fd_ < 0 && !connect(error)) return false;
+    const auto packet = encode_button(next_request_id_, button, action);
+    auto finish = [&]() {
+        ++next_request_id_;
+        if (next_request_id_ == 0) next_request_id_ = 1;
+        socket_write_ok_.fetch_add(1, std::memory_order_relaxed);
+        button_count_.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    };
+    auto do_send = [&]() -> ssize_t {
+        return ::send(fd_, packet.data(), packet.size(), MSG_NOSIGNAL);
+    };
+    ssize_t n = do_send();
+    if (n != static_cast<ssize_t>(packet.size())) {
+        socket_write_fail_.fetch_add(1, std::memory_order_relaxed);
+        if (error) *error = std::strerror(errno);
+        disconnect();
+        // 与 send_move 同款：首帧失败多为 usb-proxy 刚重启 ⇒ 断线重连后立刻重发一次。
+        if (connect(error)) {
+            n = do_send();
+            if (n == static_cast<ssize_t>(packet.size())) return finish();
+            socket_write_fail_.fetch_add(1, std::memory_order_relaxed);
+            if (error) *error = std::strerror(errno);
+            disconnect();
+        }
+        return false;
+    }
+    return finish();
 #endif
 }
 

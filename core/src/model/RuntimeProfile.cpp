@@ -70,6 +70,16 @@ uint32_t sanitize_capture_roi(uint32_t v) {
     return (v > 0 && v < kMinCaptureRoiPx) ? 0u : v;
 }
 
+// 热键位掩码合法范围（1=left 2=right 4=middle 8=back 16=forward，可组合）。
+// ★ 2026-09-25 修：此前直接 static_cast<uint8_t>(obj_int(...))，负数会绕回成 255
+//   （如 -1 ⇒ 0xFF），而命中判据是 `buttons & hotkey != 0` ⇒ 255 对**任意**物理键成立
+//   ⇒ 按任何键都瞄准（热键闸门 fail-open）。这里改成「越界一律 0（永不命中）」= fail-closed。
+//   hotkey2 允许 0（=不使用副键），所以 0 本身要原样保留。
+uint8_t sanitize_hotkey_bits(int64_t v) {
+    if (v < 0 || v > 0x1F) return 0;  // 负数 / 超出 5 个位 ⇒ 永不命中
+    return static_cast<uint8_t>(v);
+}
+
 int64_t obj_int(const JsonValue& o, const char* key, int64_t def) {
     const JsonValue* v = o.find(key);
     return (v && v->is_number()) ? v->as_int(def) : def;
@@ -1153,11 +1163,12 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         }
         // 热键保护（hotkey_guard）解析：缺字段一律取"保守默认"（enabled=false ⇒ 不翻转、位图原样透传），
         // 故旧配置/旧预设文件加载后行为与本功能加入前完全一致（向后兼容）。
-        // toggle_hotkey 只取低 5 位（鼠标五键位图：左1 右2 中4 侧8 侧16），越界位一律掩掉。
+        // toggle_hotkey 只取鼠标五键位图（左1 右2 中4 侧8 侧16）的合法子集，
+        // 越界/负数一律夹成 0（永不翻转）而不是掩成 31 —— 掩成 31 会让**任意键**都能翻转保护。
         if (const JsonValue* hg = m->find("hotkey_guard"); hg && hg->is_object()) {
             p.mouse.hotkey_guard.enabled = obj_bool(*hg, "enabled", false);
             p.mouse.hotkey_guard.toggle_hotkey =
-                static_cast<uint8_t>(obj_int(*hg, "toggle_hotkey", 4) & 0x1F);
+                sanitize_hotkey_bits(obj_int(*hg, "toggle_hotkey", 4));
         }
         if (const JsonValue* ha = m->find("head_aim"); ha && ha->is_object()) {
             auto obj_num2 = [&](const char* k, double d) {
@@ -1218,8 +1229,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             for (const auto& j : aps->as_array()) {
                 if (!j.is_object()) continue;
                 aim::AimHotkeyProfile ap;
-                ap.hotkey = static_cast<uint8_t>(obj_int(j, "hotkey", 2));
-                ap.hotkey2 = static_cast<uint8_t>(obj_int(j, "hotkey2", 0));
+                ap.hotkey = sanitize_hotkey_bits(obj_int(j, "hotkey", 2));
+                ap.hotkey2 = sanitize_hotkey_bits(obj_int(j, "hotkey2", 0));
                 ap.hotkey_mode = aim::mouse_hotkey_mode_from_string(obj_str(j, "hotkey_mode", "any").c_str());
                 ap.offset_x = static_cast<float>(obj_num(j, "offset_x", 0.5));
                 ap.offset_y = static_cast<float>(obj_num(j, "offset_y", 0.5));
@@ -1252,8 +1263,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             // sensitivity / fov_scale 取结构体默认 1.0 = 不影响全局量 ⇒ 与老代码等价。
             // 偏移直接取上面已解析的全局瞄准点，保证"平铺 offset_x/offset_y"只有一个入口。
             aim::AimHotkeyProfile ap;
-            ap.hotkey = static_cast<uint8_t>(obj_int(*m, "aim_hotkey", 2));
-            ap.hotkey2 = static_cast<uint8_t>(obj_int(*m, "aim_hotkey2", 0));
+            ap.hotkey = sanitize_hotkey_bits(obj_int(*m, "aim_hotkey", 2));
+            ap.hotkey2 = sanitize_hotkey_bits(obj_int(*m, "aim_hotkey2", 0));
             ap.hotkey_mode =
                 aim::mouse_hotkey_mode_from_string(obj_str(*m, "aim_hotkey_mode", "any").c_str());
             ap.offset_x = p.mouse.aim_point.offset_x;

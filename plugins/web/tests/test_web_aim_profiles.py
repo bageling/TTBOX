@@ -222,6 +222,28 @@ def test_empty_aim_profiles_list_writes_nothing(web_mod, monkeypatch):
     assert 'aim_profiles' not in out['mouse']
 
 
+def test_empty_aim_profiles_does_not_silently_clear_inference_class_filter(web_mod, monkeypatch):
+    """★ 同一个空数组哨兵，两侧必须同解。
+
+    2026-09-25 修：mouse 段把 `[]` 当"未提交"（保留旧档表），inference 段却挂的是
+    `profiles is not None` ⇒ 当成"已提交"，把 class_filter 写成 []，而 core 侧
+    `TargetSelector.cpp` 空 class_filter = **不过滤 = 全类别放行**。
+    净效果：档表纹丝不动，用户已排除的类别却全都回来了。
+    """
+    monkeypatch.setattr(web_mod, '_get_runtime_profile',
+                        lambda: json.loads(json.dumps(_base_profile())))
+    out = web_mod.web_body_to_profile({'aim_profiles': []})
+    assert 'aim_profiles' not in out['mouse'], 'mouse 段：空表不应覆盖旧档'
+    # 推理侧同样必须"没提交"，不能偷偷写 class_filter
+    assert 'class_filter' not in (out.get('inference') or {}), \
+        'inference 段：空表不能把类别过滤清成 []（= core 侧全类别放行）'
+    # 合并到既有配置后，旧的类别过滤必须原样保留
+    merged = web_mod._deep_merge_profile(
+        {'mouse': {'aim_profiles': [{'hotkey': 2, 'class_filter': [0, 1]}]},
+         'inference': {'class_filter': [0, 1]}}, out)
+    assert merged['inference']['class_filter'] == [0, 1]
+
+
 # ===========================================================================
 # 4. 目标类别：推理侧收全档并集（否则档 2 要用的类别在推理阶段就被丢）
 # ===========================================================================
@@ -352,3 +374,58 @@ def test_html_key_bits_table_matches_backend():
     assert m, 'index.html 缺少 AIM_HOTKEY_BITS 常量'
     pairs = dict(re.findall(r"(\w+)\s*:\s*(\d+)", m.group(1)))
     assert pairs == {'left': '1', 'right': '2', 'middle': '4', 'back': '8', 'forward': '16'}
+
+
+# ===========================================================================
+# 热键掩码必须做「域校验」，不能只判 == 0
+#
+# 2026-09-25 修：validate_aim_profiles 原来只判 `hk == 0`，于是 hotkey=-1/32/255
+# 全都放行。core 侧 static_cast<uint8_t>(-1) = 255，而命中判据是
+# `ap.hotkey != 0 && (buttons & ap.hotkey) != 0` ⇒ 255 对**任意**物理键成立
+# ⇒ 按左键/右键/中键/侧键都会瞄准，热键闸门形同虚设（fail-open，比拒绝更危险）。
+# 下面两条把「非法值必须被拒」和「core 侧不再绕回」都钉住。
+# ===========================================================================
+
+
+def test_hotkey_out_of_domain_values_are_rejected():
+    """★ 反向锁：-1 / 32 / 255 这类越界掩码必须被拒，
+    否则 core 侧会绕回成 255，命中判据对任意键成立。"""
+    web = _load()
+    for bad in (-1, 32, 255, 64, 0x20):
+        with pytest.raises(web.ConfigValidationError):
+            web.validate_aim_profiles([{'hotkey': bad, 'hotkey_mode': 'any'}])
+        with pytest.raises(web.ConfigValidationError):
+            web.validate_aim_profiles([{'hotkey': 'right', 'hotkey2': bad,
+                                        'hotkey_mode': 'all'}])
+
+
+def test_combined_hotkey_mask_is_rejected_because_panel_cannot_roundtrip_it():
+    """组合掩码（3 = 左|右）core 能用，但面板 `_bits_to_hotkey(3)` 返回空串、
+    会被 `or 'right'` 静默显示成右键 ⇒ 用户下一次保存就真的变成 2。
+    "能存但不能显示"就是静默漂移，面板这一层直接拒掉，不给它进网。"""
+    web = _load()
+    with pytest.raises(web.ConfigValidationError):
+        web.validate_aim_profiles([{'hotkey': 3, 'hotkey_mode': 'any'}])
+    # 五个合法单键仍然全部可用
+    for good in ('left', 'right', 'middle', 'back', 'forward'):
+        out = web.validate_aim_profiles([{'hotkey': good, 'hotkey_mode': 'any'}])
+        assert out[0]['hotkey'] == web.HOTKEY_BITS[good]
+
+
+def test_core_dict_clamps_out_of_domain_hotkey():
+    """写入 core 的那一层也要夹住（validate 之外的第二条防线）。"""
+    web = _load()
+    d = web._aim_profile_core_dict({'hotkey': -1, 'hotkey2': 999})
+    assert d['hotkey'] in web.AIM_PROFILE_VALID_BITS
+    assert d['hotkey2'] in web.AIM_PROFILE_VALID_BITS or d['hotkey2'] == 0
+
+
+def test_core_runtime_profile_sanitizes_hotkey_bits():
+    """core 侧 RuntimeProfile 必须把负数/越界热键夹成 0（永不命中），
+    而不是靠 static_cast<uint8_t> 绕回成 255（fail-open）。"""
+    src = pathlib.Path(REPO_ROOT / 'core' / 'src' / 'model' / 'RuntimeProfile.cpp').read_text(encoding='utf-8')
+    assert 'sanitize_hotkey_bits' in src, 'core 缺少热键掩码消毒函数'
+    # 三个解析点都必须走消毒，不能还留裸强转
+    assert 'static_cast<uint8_t>(obj_int(j, "hotkey"' not in src
+    assert 'static_cast<uint8_t>(obj_int(*m, "aim_hotkey"' not in src
+    assert 'toggle_hotkey", 4) & 0x1F' not in src, 'hotkey_guard 仍在用 & 0x1F（-1 会掩成 31 = 任意键）'

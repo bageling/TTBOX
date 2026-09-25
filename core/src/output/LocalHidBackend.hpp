@@ -29,10 +29,15 @@ public:
 private:
     bool open_if_needed();
     bool write_report(const unsigned char report[9]);
+    bool emit_button_report();  // 只带按键状态变化的报告（dx=dy=wheel=0）
 
     std::string path_;
     int fd_ = -1;
     mutable BackendHealth health_;
+    // 当前按下的按钮掩码。为什么后端自己要存：**每份报告都要带上按键状态** ——
+    // 此前 mouse_move 硬编码 buttons=0 ⇒ 按下左键后只要鼠标一动，报告就把按键写成"全松开"，
+    // 表现为"点了没反应 / 一移动就断"。按键与位移在同一份报告里，必须一起维护。
+    uint16_t button_state_ = 0;
 };
 
 }  // namespace ttbox::core::output

@@ -80,9 +80,12 @@ bool LocalHidBackend::mouse_move(int32_t dx, int32_t dy, int32_t wheel) {
     if (!gate_allows()) return false;
     if (!open_if_needed()) return false;
     // 与 AiboxHidOutput 相同的 9 字节报告：
-    // ReportID=2 + buttons(16bit LE, 置 0) + X(int16 LE) + Y(int16 LE) + wheel + pan
+    // ReportID=2 + buttons(16bit LE) + X(int16 LE) + Y(int16 LE) + wheel + pan
+    // ★ buttons 必须带上**当前按键状态**：写死 0 的话，按下左键后鼠标一动报告就说"已松开"。
     const unsigned char report[9] = {
-        0x02, 0x00, 0x00,
+        0x02,
+        static_cast<unsigned char>(button_state_ & 0xff),
+        static_cast<unsigned char>((button_state_ >> 8) & 0xff),
         static_cast<unsigned char>(dx & 0xff), static_cast<unsigned char>((dx >> 8) & 0xff),
         static_cast<unsigned char>(dy & 0xff), static_cast<unsigned char>((dy >> 8) & 0xff),
         static_cast<unsigned char>(wheel & 0xff), 0x00};
@@ -98,11 +101,42 @@ bool LocalHidBackend::mouse_move(int32_t dx, int32_t dy, int32_t wheel) {
     return ok;
 }
 
+// 按键注入：button 是**协议编号**（1=左 … 5=前），映射成报告里的位掩码。
+// 只发"状态变化"的那一份报告（按下 / 松开各一份），不 sleep ——
+// 按压时长由调用方（AimThread 扳机）用 down→up 两条命令控制，后端不阻塞控制线程。
 bool LocalHidBackend::mouse_button(uint8_t button, uint8_t action) {
-    // 本机 gadget 当前只注入移动（与 AiboxHidOutput 行为一致：不改按钮状态）。
-    // 保留接口：需要按钮输出时在此按 gadget report 填充 button 位。
-    (void)button; (void)action;
-    return gate_allows() ? true : false;
+    if (button < 1 || button > 16) return false;
+    const uint16_t bit = static_cast<uint16_t>(1u << (button - 1));
+    if (action == kActDown) {
+        button_state_ |= bit;
+    } else if (action == kActUp) {
+        button_state_ &= static_cast<uint16_t>(~bit);
+    } else if (action == kActClick) {
+        // 一次完整点击：按下 → 抬起，两份报告连发（本机 gadget 路径非生产主链路，
+        // 生产走 usb_proxy，按压时长由调用方拆成 down/up 两条命令）。
+        button_state_ |= bit;
+        (void)emit_button_report();
+        button_state_ &= static_cast<uint16_t>(~bit);
+    } else {
+        return false;
+    }
+    return emit_button_report();
+}
+
+bool LocalHidBackend::emit_button_report() {
+    if (!gate_allows()) return false;
+    if (!open_if_needed()) return false;
+    const unsigned char report[9] = {
+        0x02,
+        static_cast<unsigned char>(button_state_ & 0xff),
+        static_cast<unsigned char>((button_state_ >> 8) & 0xff),
+        0, 0, 0, 0, 0, 0};
+    if (!write_report(report)) {
+        ++health_.send_fail;
+        return false;
+    }
+    ++health_.send_ok;
+    return true;
 }
 
 bool LocalHidBackend::mouse_click(uint8_t button) {

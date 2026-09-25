@@ -1,5 +1,6 @@
 // AiboxHidOutput.cpp — AIBOX 兼容鼠标报告写入 /dev/hidg0
 #include "output/AiboxHidOutput.hpp"
+#include "output/OutputGate.hpp"
 #include "model/RuntimeProfile.hpp"
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -25,23 +26,11 @@ bool AiboxHidOutput::send(const OutputAction& a) {
 #if defined(_WIN32)
     (void)a; return false;
 #else
-    // 静态总闸：未显式启用时不写入真实鼠标 Gadget。
-    if (!enabled_) return false;
-    // 配置实时保险门（每次发送重新判定，改热键/总开关即时生效，无需重启）：
-    //   1) mouse.enabled 为总开关；
-    //   2) 放行掩码 = **所有瞄准档位键位的并集**，全部来自用户配置，不写死任何键位。
-    //      ★ 必须是并集而不是某一档：选档只认命中的那一档，但 usb 报告什么时候来取决于
-    //      玩家按了哪个键 —— 只看某一档会把其它档的键位整条拦掉（表现为"换个键就不瞄了"）。
-    //      并集为 0 时视为配置缺失，直接拒绝注入（fail-closed）。
-    if (config_source_) {
-        auto p = config_source_->snapshot();
-        if (!p) return false;
-        if (!p->mouse.enabled) return false;
-        const uint16_t mask = aim::aim_hotkey_mask(p->mouse);
-        if (mask == 0) return false;  // 配置缺失 → 禁止注入
-        if (button_source_ && (button_source_->load(std::memory_order_acquire) & mask) == 0) return false;
-    } else if (button_source_) {
-        // 无配置源时无从得知用户热键 → 禁止注入（fail-closed，不猜默认键）。
+    // 静态总闸 + 配置实时保险门：判据已抽到 OutputGate.hpp 的 output_gate_allows()，
+    // 与 IOutputBackend::gate_allows **共用同一份**（此前两处各写一遍然后漂移：
+    // 本侧缺「标定模式」豁免、且按键源没绑时直接放行 = fail-open）。
+    // 改配置/热键后无需重启即时生效，因为判据每次发送都重读快照。
+    if (!output_gate_allows(OutputGateInputs{enabled_, config_source_, button_source_})) {
         return false;
     }
     if (!open_if_needed()) return false;

@@ -212,6 +212,58 @@ int main() {
         check(true, "button/click: 接口可调用不崩溃");
     }
 
+    // ---- 6) 闸门判据必须是**单一权威源**，且缺按键源时 fail-closed ----
+    // 2026-09-25 修：判据原先在 `IOutputBackend::gate_allows` 与 `AiboxHidOutput::send`
+    // 各写一遍，然后漂移了 —— aibox 侧缺「标定模式」豁免，且两侧都在
+    // 「有配置源但按键源没绑」时直接放行（fall-through 到 write）= fail-open，
+    // 热键这道防线只剩 AimThread 一层。现在统一走 OutputGate.hpp 的 output_gate_allows()。
+    {
+        class GateProbe2 final : public IOutputBackend {
+        public:
+            bool connect(std::string*) override { return true; }
+            void disconnect() override {}
+            bool reconnect(std::string*) override { return true; }
+            BackendHealth health() const override { return BackendHealth{}; }
+            bool mouse_move(int32_t, int32_t, int32_t) override { return gate_allows(); }
+            bool mouse_button(uint8_t, uint8_t) override { return gate_allows(); }
+            bool mouse_click(uint8_t b) override { return mouse_button(b, kActClick); }
+            const char* name() const override { return "gate_probe2"; }
+            bool gate() const { return gate_allows(); }
+        };
+        GateProbe2 probe;
+        probe.set_enabled(true);
+
+        RuntimeConfig cfg;
+        auto prof = std::make_shared<RuntimeProfile>();
+        prof->mouse.enabled = true;
+        prof->mouse.aim_profiles.clear();
+        prof->mouse.aim_profiles.push_back(aim::AimHotkeyProfile{});
+        prof->mouse.aim_profiles[0].hotkey = 1;  // left
+        cfg.update(prof);
+        std::atomic<uint16_t> btn{1};
+
+        // (a) 有配置源 + 按键源已绑 + 键按下 → 放行（基线，证明下面的拒绝不是"恒拒"）
+        probe.set_config_source(&cfg);
+        probe.set_button_source(&btn);
+        check(probe.gate(), "gate: 有配置源+有按键源+命中 → 放行（基线）");
+
+        // (b) ★ 有配置源但**按键源没绑** → 必须拒绝。此前这里 fall-through 放行了。
+        probe.set_button_source(nullptr);
+        check(!probe.gate(), "gate: 有配置源但按键源没绑 → fail-closed 拒绝");
+
+        // (c) ★ 标定模式：无视 mouse.enabled 与按键源 → 放行。
+        //     此前 aibox 侧缺这个分支 ⇒ mouse.enabled=false 时跑标定一个 count 都发不出去。
+        prof->mouse.enabled = false;
+        prof->mouse.calibrating = true;
+        cfg.update(prof);
+        check(probe.gate(), "gate: 标定模式无视 mouse.enabled 与按键源 → 放行");
+
+        // (d) 标定结束后恢复：enabled 仍为 false ⇒ 拒（证明 (c) 的放行确由 calibrating 触发）
+        prof->mouse.calibrating = false;
+        cfg.update(prof);
+        check(!probe.gate(), "gate: 标定结束 + mouse.enabled=false → 拒绝");
+    }
+
     if (g_fails == 0) std::printf("test_output_backend: PASS\n");
     else std::printf("test_output_backend: %d FAILED\n", g_fails);
     return g_fails == 0 ? 0 : 1;
