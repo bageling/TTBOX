@@ -13445,14 +13445,19 @@ function bindEvents() {
     }
     const running = !!runtime.running;
     const state2 = runtime.state || "idle";
+    // ★ 不能只用「线程存活」当禁用判据：worker 因异常穿透而死时 running=false 但
+    //   state 停在非终态（如 sampling_x），此时取消按钮曾被禁用 ⇒ 用户点不掉、也没人复位。
+    //   判据改成「后端认为还在进行」：线程活着，或 state 停在非终态。
+    const terminal = ["completed", "failed", "cancelled"].includes(state2);
+    const active = running || (state2 !== "idle" && !terminal);
     if (pill) {
       pill.textContent = running ? `运行中 ${Math.round((runtime.progress || 0) * 100)}%` : calibPhaseLabel(runtime);
     }
     if (startButton) {
-      startButton.disabled = running;
+      startButton.disabled = active;
     }
     if (cancelButton) {
-      cancelButton.disabled = !running;
+      cancelButton.disabled = !active;
     }
     if (bar) {
       bar.style.width = `${Math.round((runtime.progress || 0) * 100)}%`;
@@ -13494,18 +13499,30 @@ function bindEvents() {
       savedPill.textContent = saved.valid ? "已标定" : "未标定";
     }
     if (savedSummary) {
+      // null 一律显示「—」：接口对未知量给 null（不再拿 0.55 / 8.333 这类硬编码默认
+      // 冒充"当前标定"，那既不是标定结果也不是生效值）。
+      const num = (v, digits, unit) => (v == null || v === "" ? "—" : `${Number(v).toFixed(digits)}${unit}`);
       if (saved.valid) {
         const rows = [
-          ["增益 X", `${Number(saved.gain_x_px_per_count || 0).toFixed(3)} px/count`],
-          ["增益 Y", `${Number(saved.gain_y_px_per_count || 0).toFixed(3)} px/count`],
-          ["响应延迟", `${Number(saved.response_delay_ms || 0).toFixed(1)} ms`],
+          ["增益 X", num(saved.gain_x_px_per_count, 3, " px/count")],
+          ["增益 Y", num(saved.gain_y_px_per_count, 3, " px/count")],
+          ["响应延迟", num(saved.response_delay_ms, 1, " ms")],
           ["置信度", saved.confidence != null ? `${Math.round(Number(saved.confidence) * 100)}%` : "—"],
           ["标定时间", saved.calibrated_at || "—"],
           ["模型", saved.model_id || "—"],
         ];
         savedSummary.innerHTML = rows.map(([k, v]) => `<div class="runtime-stat"><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></div>`).join("");
       } else {
-        savedSummary.textContent = "尚未保存标定结果。";
+        // 「未标定」≠「增益未知」：运行配置里的 gain 照样在生效（压枪/拟人化都在用它），
+        // 如实报出来，免得用户以为"没标定就等于没有增益"。
+        const eff = saved.effective || {};
+        const lines = ["尚未保存标定结果（未跑过自动标定，或已清除）。"];
+        if (eff.gain_x_px_per_count != null) {
+          lines.push(`当前运行配置里生效的增益：X ${num(eff.gain_x_px_per_count, 3, "")} / Y ${num(eff.gain_y_px_per_count, 3, "")} px/count。`);
+        } else {
+          lines.push("读不到当前生效增益（推理服务未运行）。");
+        }
+        savedSummary.textContent = lines.join("");
       }
     }
     // 终态后停止持续轮询（下次进入分区/点刷新再拉）

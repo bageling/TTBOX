@@ -65,7 +65,8 @@ def main():
     print(f"== 因子实验: {mode} ==")
     for gain in (0.65, 1.0, 1.5):
         for delay in (30, 60):
-            d = derive_pid_params(gain, gain, delay)
+            # smooth 是必传参数（无默认）：仿真固定用板端实况 9900。
+            d = derive_pid_params(gain, gain, delay, smooth=9900.0)
             kp, kd, predict = d["kp"], d["kd"], d["predict"]
             if mode == "kd_boost":
                 kd = max(8.0, min(60.0, kp * (1.2 + delay / 80.0)))

@@ -3786,6 +3786,11 @@ CALIB_AMPLITUDES = (8.0, -8.0, 16.0, -16.0, 24.0, -24.0, 32.0, -32.0)
 # 是闭环恒等式、与 PID 参数无关 ⇒ 压 PID 不影响测量。kd 按 3×kp 给阻尼。
 CALIB_PID_KP_MAX = 10.0
 CALIB_PID_KD_RATIO = 3.0
+# 推导 PID 时用的 smooth_x：必须是**当前生效值**，不能写死（见 _calib_live_smooth）。
+# 默认值与 core 侧一致（RuntimeProfile.cpp:872 obj_num(*m,"smooth_x",9900.0)）；
+# 上限取面板可调范围上限（index.html NUMERIC_RANGE_LIMITS.controller_smooth=[0,9999]）。
+CALIB_DEFAULT_SMOOTH_X = 9900.0
+CALIB_MAX_SMOOTH_X = 9999.0
 # 单个样本的最低信号门槛：count 太少 ⇒ 分母接近 0，比值被噪声主导；
 # 位移太少 ⇒ 被检测噪声（实测静止抖动 ±0.05px）淹没。
 CALIB_MIN_COUNTS = 6
@@ -4032,8 +4037,34 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def _calib_live_smooth(prof: dict) -> float:
+    """读 live 的 smooth_x 并夹到合法区间。
+
+    ★ 2026-09-25 修复的核心：`derive_pid_params` 的 smooth 必须传**当前生效值**。
+    旧实现三个调用点都没传、一律走默认 9900，而面板把 Smooth 暴露成可调项
+    （范围 [0,9999]，面板说明自己写着"0 = 完全不削"）。smooth≠9900 时 kp_scale 全错：
+    **smooth=0 推导出的 kp 强 100 倍（环路发散）、9990 弱 10 倍（迟钝漂移）**。
+    板端历史上真的用过 9990，不是理论风险。
+
+    越界时**夹取而不是抛错**：smooth 是 core 侧不校验的配置项（RuntimeProfile.cpp:872
+    只填默认），一个手改坏的配置不该让整轮标定白跑；夹取后 kp_scale 仍在合法范围。
+    """
+    raw = (prof.get('mouse') or {}).get('smooth_x')
+    try:
+        smooth = float(raw)
+    except (TypeError, ValueError):
+        return CALIB_DEFAULT_SMOOTH_X
+    return max(0.0, min(CALIB_MAX_SMOOTH_X, smooth))
+
+
+def _calib_derive_pid(gain_x: float, gain_y: float, delay_ms: float) -> dict:
+    """按实测 gain/延迟 + **当前 live smooth** 推导 PID（留档与写回共用同一份结果）。"""
+    prof = _get_runtime_profile()
+    return derive_pid_params(gain_x, gain_y, delay_ms, smooth=_calib_live_smooth(prof))
+
+
 def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
-    """自动调参核心：按标定实测 gain + 延迟推导整组 PID 参数并写回。
+    """自动调参核心：按标定实测 gain + 延迟 + **当前 smooth** 推导整组 PID 并写回。
 
     不同客户场景（屏幕灵敏度/DPI/系统延迟/游戏内灵敏度）→ 实测 gain/延迟不同
     → 推导出不同的最佳 KP/KD/predict。只动 kp/kd/predict_x 这三个，
@@ -4041,14 +4072,15 @@ def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
     （pid1.cpp 参考默认 0），自动调参不该覆盖业主手设的值。
     """
     try:
+        prof = _get_runtime_profile()
+        if not prof:
+            return False, '读取 RuntimeProfile 失败'
         pid = derive_pid_params(
             float(calib.get('mouse_gain_x_px_per_count') or 0),
             float(calib.get('mouse_gain_y_px_per_count') or 0),
             float(calib.get('mouse_response_delay_ms') or 0),
+            smooth=_calib_live_smooth(prof),
         )
-        prof = _get_runtime_profile()
-        if not prof:
-            return False, '读取 RuntimeProfile 失败'
         mo = prof.setdefault('mouse', {})
         mo['kp_x'] = pid['kp']
         mo['kp_y'] = pid['kp']
@@ -4330,10 +4362,10 @@ def _calib_worker() -> None:
             'capture': {'crop_size': int((_get_runtime_profile().get('preview') or {}).get('roi_w') or 320)},
             'rounds': len(axis_observations[CalibrationAxis.X]) + len(axis_observations[CalibrationAxis.Y]),
         }
-        # 自动调参：按实测 gain/延迟推导 KP/KD/predict（pid1 体系，见
+        # 自动调参：按实测 gain/延迟 + 当前 smooth 推导 KP/KD/predict（pid1 体系，见
         # ttbox_motion/calibration.derive_pid_params + core/tools/pid_sim 仿真验证）
         try:
-            calib['pid_params'] = derive_pid_params(gain_x, gain_y, delay_ms)
+            calib['pid_params'] = _calib_derive_pid(gain_x, gain_y, delay_ms)
         except Exception:
             calib['pid_params'] = {}
         ok, detail = _write_calibration(calib)
@@ -4353,6 +4385,15 @@ def _calib_worker() -> None:
             progress=1.0 if ok else 0.98,
             phase='completed' if ok else 'error',
         )
+    except Exception as exc:
+        # ★ 2026-09-25 补：此前只有 finally、没有 except。线程内任何未预期异常
+        #   （最典型：标定中途 core 重启/掉线 ⇒ _get_runtime_profile() 抛
+        #   CoreUnavailableError）会穿透线程，而 finally 只清偏置/恢复 PID，
+        #   **不落终态** ⇒ status 永远停在 running、state 停在非终态 ⇒ 面板 pill
+        #   假装"运行中 N%"、取消按钮被禁用（disabled = !running，此时 running=False）、
+        #   且永远 800ms 轮询。用户点不掉，只能重启 web。
+        _calib_set(state='failed', status='failed', phase='error', ready=False,
+                   reason=f'标定异常：{exc!r}')
     finally:
         try:
             prof = _get_runtime_profile()
@@ -4413,35 +4454,49 @@ def _calibration_payload() -> dict:
             'dropped_sample_count': _cal['dropped_sample_count'],
             'error': '' if _cal['status'] != 'failed' else _cal['reason'],
         }
-    calib = _read_calibration()
-    # 旧后端字段名 → 前端契约（gain_x_px_per_count / response_delay_ms）
-    if calib:
-        calib = {
-            'valid': bool(calib.get('valid')),
-            'gain_x_px_per_count': calib.get('mouse_gain_x_px_per_count', 0.55),
-            'gain_y_px_per_count': calib.get('mouse_gain_y_px_per_count', 0.55),
-            'response_delay_ms': calib.get('mouse_response_delay_ms', 8.333),
-            'confidence': calib.get('confidence', 0),
-            'model_id': calib.get('model_id', ''),
-            'calibrated_at': calib.get('calibrated_at', ''),
-            'capture_width': (calib.get('capture') or {}).get('crop_size', 0),
-            'capture_height': (calib.get('capture') or {}).get('crop_size', 0),
-            'crop_size': (calib.get('capture') or {}).get('crop_size', 0),
-        }
-    else:
-        # 保持 Web 契约：空标定时也返回全 10 字段（而非只有 valid），数值精度对齐 float32
-        calib = {
-            'valid': False,
-            'gain_x_px_per_count': 0.550000011920929,
-            'gain_y_px_per_count': 0.550000011920929,
-            'response_delay_ms': 8.333000183105469,
-            'confidence': 0.0,
-            'model_id': '',
-            'calibrated_at': '',
-            'capture_width': 0,
-            'capture_height': 0,
-            'crop_size': 0,
-        }
+    record = _read_calibration()
+    # ★ 2026-09-25 修复：gain 一律取**当前生效值**（RuntimeProfile 的 mouse 段），
+    #   留档文件 calibration.json 只回答"标定过没有 + 元信息"。
+    #   旧实现直接拿留档当"当前标定"，而板端实测 calibration.json **根本不存在** ⇒
+    #   接口返回硬编码的 0.55 / 8.333ms 冒充当前标定，与 core 真实在用的 0.65 不一致。
+    #   两个真源必然漂移（profile 被别的路径改过、或 _calib_apply_gain 写失败时）。
+    eff = {}
+    try:
+        emo = (_get_runtime_profile().get('mouse')) or {}
+        for key in ('gain_x_px_per_count', 'gain_y_px_per_count'):
+            try:
+                eff[key] = round(float(emo[key]), 4)
+            except (KeyError, TypeError, ValueError):
+                pass
+    except Exception:
+        # core 离线：生效值未知。如实留空，**绝不**拿留档或默认值冒充生效值。
+        pass
+
+    def _rec(key, default=None, prefix=''):
+        if not record:
+            return default
+        node = record
+        for part in prefix.split(':') if prefix else []:
+            node = (node or {}).get(part) or {}
+        return node.get(key, default)
+
+    # 保持 Web 契约：始终返回全 10 字段（未知的给 None，不再造假数字）
+    calib = {
+        'valid': bool(record.get('valid')) if record else False,
+        'gain_x_px_per_count': eff.get('gain_x_px_per_count',
+                                       _rec('mouse_gain_x_px_per_count')),
+        'gain_y_px_per_count': eff.get('gain_y_px_per_count',
+                                       _rec('mouse_gain_y_px_per_count')),
+        'response_delay_ms': _rec('mouse_response_delay_ms'),
+        'confidence': _rec('confidence', 0),
+        'model_id': _rec('model_id', ''),
+        'calibrated_at': _rec('calibrated_at', ''),
+        'capture_width': _rec('crop_size', 0, prefix='capture'),
+        'capture_height': _rec('crop_size', 0, prefix='capture'),
+        'crop_size': _rec('crop_size', 0, prefix='capture'),
+        # 生效值单列一份：面板可在"未标定"时如实展示"当前运行配置里的增益"
+        'effective': eff,
+    }
     return {'runtime': runtime, 'calibration': calib}
 
 
@@ -4475,9 +4530,9 @@ def update_auto_calibration():
     if ok:
         ok2, detail2 = _calib_apply_gain(calib)
         detail = detail + '；' + detail2
-        # 手动填增益同样联动自动调参（同一推导函数，保证行为一致）
+        # 手动填增益同样联动自动调参（同一推导函数 + 同一 live smooth，保证行为一致）
         try:
-            calib['pid_params'] = derive_pid_params(gain_x, gain_y, delay)
+            calib['pid_params'] = _calib_derive_pid(gain_x, gain_y, delay)
         except Exception:
             calib['pid_params'] = {}
         if ok2 and calib.get('pid_params'):
@@ -4514,7 +4569,10 @@ def start_auto_calibration():
 
 @app.post('/api/control/calibration/cancel')
 def cancel_auto_calibration():
-    _calib_set(status='idle', phase='cancelled', ready=False, reason='cancelled')
+    # 无条件落终态 `cancelled`：worker 还活着时它会在 1~2 秒内自己退出并补一次同样的
+    # state（幂等）；worker 已因异常穿透而死、state 停在非终态时（见 _calib_worker 的
+    # except 注释），**只有这里能复位** —— 否则面板会永远以为在标定、且取消按钮被禁用。
+    _calib_set(state='cancelled', status='idle', phase='cancelled', ready=False, reason='cancelled')
     try:
         prof = _get_runtime_profile()
         prof.setdefault('mouse', {})['calibrating'] = False
