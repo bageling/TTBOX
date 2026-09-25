@@ -5238,6 +5238,9 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
             <button id="controlSectionTabPid" class="control-section-tab is-active" type="button" data-control-section-target="control-section-pid" aria-selected="true">
               <span>01</span>PID
             </button>
+            <button id="controlSectionTabCalib" class="control-section-tab" type="button" data-control-section-target="control-section-calib" aria-selected="false">
+              <span>02</span>自动标定
+            </button>
           </nav>
 
           <div class="control-section-stack">
@@ -5266,6 +5269,48 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                   <div class="module-title"><strong>目标锁定</strong></div>
                   <div class="field-grid compact">
                     <label class="field"><span class="field-label">丢失宽限 ms</span><input id="controller_selector_lost_grace_ms" data-config type="number" step="1"><span class="field-hint">目标短暂丢失后继续保持锁定的毫秒数；越大越不容易丢锁，过大可能粘住错误目标。</span></label>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section id="control-section-calib" class="control-section" data-control-section hidden>
+              <div class="assist-grid control-group-grid">
+                <article class="module-tile calib-run-tile">
+                  <div class="module-title">
+                    <h3>自动标定</h3>
+                    <span id="calibStatusPill" class="pill">未运行</span>
+                  </div>
+                  <p class="field-hint">对着画面里静止的目标跑一轮（约 15 秒）：自动测出每 count 移动的像素数（gain）与响应延迟，并按结果换算 Kp / Kd / 预判。标定期间会临时使用温和的 PID 参数（不影响测量），结束自动恢复或应用推导值。</p>
+                  <div class="hardware-actions">
+                    <button id="calibStartButton" class="ghost-button" type="button">开始标定</button>
+                    <button id="calibCancelButton" class="danger-button" type="button" disabled>取消</button>
+                    <button id="calibRefreshButton" class="ghost-button" type="button">刷新状态</button>
+                  </div>
+                  <div class="setup-progress-track" aria-hidden="true">
+                    <span id="calibProgressBar" style="width: 0%"></span>
+                  </div>
+                  <p id="calibPhaseText" class="setup-message">准备就绪后点「开始标定」。需要画面里有稳定目标（检测框持续出现）。</p>
+                  <pre id="calibFitsLog" class="hardware-log" hidden></pre>
+                  <pre id="calibTraceLog" class="hardware-log">—</pre>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <h3>已保存的标定结果</h3>
+                    <span id="calibSavedPill" class="pill">未标定</span>
+                  </div>
+                  <div id="calibSavedSummary" class="license-summary">尚未保存标定结果。</div>
+                  <div class="hardware-actions">
+                    <button id="calibClearButton" class="danger-button" type="button">清除标定结果</button>
+                  </div>
+                  <p class="field-hint">手动填写增益（换灵敏度 / 换游戏后微调）：</p>
+                  <div class="field-grid compact">
+                    <label class="field"><span class="field-label">增益 X（px/count）</span><input id="calibManualGainX" type="number" step="0.01" min="0.01"><span class="field-hint">1 个注入 count 移动多少像素；标定结果里有参考值。</span></label>
+                    <label class="field"><span class="field-label">增益 Y（px/count）</span><input id="calibManualGainY" type="number" step="0.01" min="0.01"><span class="field-hint">一般与 X 接近。</span></label>
+                    <label class="field"><span class="field-label">响应延迟 ms</span><input id="calibManualDelay" type="number" step="0.5" min="0"><span class="field-hint">没有就用标定结果里的值；只影响推导的 Kd / 预判。</span></label>
+                  </div>
+                  <div class="hardware-actions">
+                    <button id="calibManualApplyButton" class="ghost-button" type="button">按手动增益换算参数</button>
                   </div>
                 </article>
               </div>
@@ -6712,6 +6757,7 @@ const state = {
   currentVersion: "",
   activePageId: "home-page",
   activeControlSectionId: "control-section-pid",
+  calibKeepPolling: false,
   activeAssistSectionId: "assist-section-recoil",
   navigationLockedToLicense: false,
   licenseStatusLoaded: false,
@@ -13353,6 +13399,227 @@ function bindEvents() {
     renderUpdateResult(result);
     showToast(result.update_available ? "发现可用更新" : "当前已是最新");
   }));
+
+  // ── 自动标定（/api/control/calibration）────────────────────────────
+  const CALIB_PHASE_LABELS = {
+    idle: "未运行",
+    preparing: "准备标定环境",
+    stabilize_x: "等待目标稳定（X 轴）",
+    sampling_x: "注入偏置采样（X 轴）",
+    analyzing_x: "拟合 X 轴增益",
+    stabilize_y: "等待目标稳定（Y 轴）",
+    sampling_y: "注入偏置采样（Y 轴）",
+    analyzing_y: "拟合 Y 轴增益",
+    validating: "校验测量结果",
+    applying: "写入参数",
+    completed: "标定完成",
+    cancelled: "已取消",
+    failed: "标定失败",
+  };
+  const calibTraceLines = [];
+
+  function calibPhaseLabel(payload) {
+    const phase = payload && payload.phase;
+    if (phase === "done" || phase === "saved") {
+      return "已保存";
+    }
+    return CALIB_PHASE_LABELS[phase] || phase || "未知";
+  }
+
+  function renderCalibration(payload) {
+    if (!payload) {
+      return;
+    }
+    const runtime = payload.runtime || {};
+    const saved = payload.calibration || {};
+    const pill = $("calibStatusPill");
+    const bar = $("calibProgressBar");
+    const phaseText = $("calibPhaseText");
+    const traceLog = $("calibTraceLog");
+    const startButton = $("calibStartButton");
+    const cancelButton = $("calibCancelButton");
+    const savedPill = $("calibSavedPill");
+    const savedSummary = $("calibSavedSummary");
+    if (!pill || !bar) {
+      return;
+    }
+    const running = !!runtime.running;
+    const state2 = runtime.state || "idle";
+    if (pill) {
+      pill.textContent = running ? `运行中 ${Math.round((runtime.progress || 0) * 100)}%` : calibPhaseLabel(runtime);
+    }
+    if (startButton) {
+      startButton.disabled = running;
+    }
+    if (cancelButton) {
+      cancelButton.disabled = !running;
+    }
+    if (bar) {
+      bar.style.width = `${Math.round((runtime.progress || 0) * 100)}%`;
+    }
+    if (phaseText) {
+      const parts = [calibPhaseLabel(runtime)];
+      if (running && runtime.total_rounds) {
+        parts.push(`第 ${runtime.round || 0}/${runtime.total_rounds} 轮（${runtime.current_axis ? runtime.current_axis.toUpperCase() : ""}轴）`);
+      }
+      if (runtime.valid_sample_count) {
+        parts.push(`有效样本 ${runtime.valid_sample_count}${runtime.dropped_sample_count ? `（丢弃 ${runtime.dropped_sample_count}）` : ""}`);
+      }
+      if (!running && runtime.reason && runtime.reason !== "not_running") {
+        parts.push(String(runtime.reason));
+      }
+      phaseText.textContent = parts.join(" · ");
+    }
+    if (traceLog) {
+      const line = [
+        new Date().toLocaleTimeString(),
+        `phase=${runtime.phase || "-"}`,
+        `state=${state2}`,
+        running ? `round=${runtime.round || 0}/${runtime.total_rounds || 0}` : "",
+        running ? `amp=${runtime.amplitude_px != null ? runtime.amplitude_px.toFixed(1) : "-"}px` : "",
+        `valid=${runtime.valid_sample_count || 0}`,
+        runtime.reason && runtime.reason !== "not_running" ? `reason=${runtime.reason}` : "",
+      ].filter(Boolean).join("  ");
+      const last = calibTraceLines[calibTraceLines.length - 1];
+      if (line !== last) {
+        calibTraceLines.push(line);
+        if (calibTraceLines.length > 60) {
+          calibTraceLines.shift();
+        }
+      }
+      traceLog.textContent = calibTraceLines.join("\n") || "—";
+      traceLog.scrollTop = traceLog.scrollHeight;
+    }
+    if (savedPill) {
+      savedPill.textContent = saved.valid ? "已标定" : "未标定";
+    }
+    if (savedSummary) {
+      if (saved.valid) {
+        const rows = [
+          ["增益 X", `${Number(saved.gain_x_px_per_count || 0).toFixed(3)} px/count`],
+          ["增益 Y", `${Number(saved.gain_y_px_per_count || 0).toFixed(3)} px/count`],
+          ["响应延迟", `${Number(saved.response_delay_ms || 0).toFixed(1)} ms`],
+          ["置信度", saved.confidence != null ? `${Math.round(Number(saved.confidence) * 100)}%` : "—"],
+          ["标定时间", saved.calibrated_at || "—"],
+          ["模型", saved.model_id || "—"],
+        ];
+        savedSummary.innerHTML = rows.map(([k, v]) => `<div class="runtime-stat"><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></div>`).join("");
+      } else {
+        savedSummary.textContent = "尚未保存标定结果。";
+      }
+    }
+    // 终态后停止持续轮询（下次进入分区/点刷新再拉）
+    if (["completed", "failed", "cancelled"].includes(state2) && !running) {
+      state.calibKeepPolling = false;
+    }
+    // 轴拟合结果（运行中/结束时都能看，独立展示避免与轨迹日志互相污染）
+    const fitsLog = $("calibFitsLog");
+    const fits = runtime.axis_fits || {};
+    const fitRows = ["x", "y"].map((axis) => {
+      const fit = fits[axis];
+      if (!fit) {
+        return null;
+      }
+      const status = fit.converged ? "✓" : `✗ ${fit.failure_reason || ""}`;
+      return `${axis.toUpperCase()} 轴：gain=${Number(fit.gain_px_per_count || 0).toFixed(3)} px/count · 延迟=${Number(fit.response_delay_ms || 0).toFixed(1)} ms · 一致性=${Math.round((fit.consistency || 0) * 100)}% · 样本=${fit.sample_count || 0} ${status}`;
+    }).filter(Boolean);
+    if (fitsLog) {
+      fitsLog.hidden = fitRows.length === 0;
+      fitsLog.textContent = fitRows.join("\n");
+    }
+    scheduleCalibrationPolling(running);
+  }
+
+  let calibPollTimer = null;
+
+  function scheduleCalibrationPolling(running) {
+    const shouldPoll = running || state.calibKeepPolling;
+    if (shouldPoll && calibPollTimer == null) {
+      calibPollTimer = setInterval(async () => {
+        try {
+          const payload = await api("/api/control/calibration");
+          renderCalibration(payload);
+        } catch {
+          // 网络抖动：保持轮询，下一轮再试
+        }
+      }, 800);
+    } else if (!shouldPoll && calibPollTimer != null) {
+      clearInterval(calibPollTimer);
+      calibPollTimer = null;
+    }
+  }
+
+  async function refreshCalibration({ toast = false } = {}) {
+    const payload = await api("/api/control/calibration");
+    renderCalibration(payload);
+    if (toast) {
+      showToast("标定状态已刷新");
+    }
+    return payload;
+  }
+
+  on("calibStartButton", "click", () => runUiAction(async () => {
+    calibTraceLines.length = 0;
+    const traceLog = $("calibTraceLog");
+    if (traceLog) {
+      traceLog.textContent = "—";
+    }
+    const fitsLog = $("calibFitsLog");
+    if (fitsLog) {
+      fitsLog.hidden = true;
+      fitsLog.textContent = "";
+    }
+    await api("/api/control/calibration/start", { method: "POST" });
+    state.calibKeepPolling = true;
+    scheduleCalibrationPolling(true);
+    await refreshCalibration();
+    showToast("标定已启动，过程中请保持目标静止");
+  }));
+
+  on("calibCancelButton", "click", () => runUiAction(async () => {
+    await api("/api/control/calibration/cancel", { method: "POST" });
+    await refreshCalibration();
+    showToast("标定已取消");
+  }));
+
+  on("calibRefreshButton", "click", () => runUiAction(() => refreshCalibration({ toast: true })));
+
+  on("calibClearButton", "click", () => runUiAction(async () => {
+    const confirmed = window.confirm("清除标定结果？增益与推导参数的留档会被删掉（不影响当前 PID 设置）。");
+    if (!confirmed) {
+      return;
+    }
+    await api("/api/control/calibration", { method: "DELETE" });
+    await refreshCalibration();
+    showToast("标定结果已清除");
+  }));
+
+  on("calibManualApplyButton", "click", () => runUiAction(async () => {
+    const gainX = Number($("calibManualGainX") && $("calibManualGainX").value);
+    const gainY = Number($("calibManualGainY") && $("calibManualGainY").value);
+    const delay = Number($("calibManualDelay") && $("calibManualDelay").value) || 0;
+    if (!gainX || gainX <= 0 || !gainY || gainY <= 0) {
+      throw new Error("请填写大于 0 的增益 X / 增益 Y");
+    }
+    await api("/api/control/calibration", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gain_x_px_per_count: gainX,
+        gain_y_px_per_count: gainY,
+        response_delay_ms: delay,
+      }),
+    });
+    await refreshCalibration();
+    showToast("已按手动增益换算并应用 Kp / Kd / 预判");
+  }));
+
+  // 打开「自动标定」分区时拉一次状态（runtime.running 决定是否持续轮询）
+  document.querySelectorAll("[data-control-section-target='control-section-calib']").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      refreshCalibration().catch(() => {});
+    });
+  });
 
   on("installUpdateButton", "click", () => runUiAction(async () => {
     if (!state.updatePlan) {
