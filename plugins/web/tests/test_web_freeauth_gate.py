@@ -250,7 +250,7 @@ def test_update_thin_endpoints(client, web_mod, monkeypatch, tmp_path):
     assert r3.status_code == 503
     assert r3.get_json().get('error') == 'ota_server_not_configured'
     # 非 https scheme 同样 fail-closed（定案：更新器只认 https，不发起下载）
-    monkeypatch.setattr(web_mod, 'OTA_SERVER_URL', 'http://cctv2.top:10046/ota')
+    monkeypatch.setattr(web_mod, 'OTA_SERVER_URL', 'http://cctv2.top:10086/ota')
     r4 = client.post('/api/update/check')
     assert r4.status_code == 503
     assert r4.get_json().get('error') == 'ota_server_not_configured'

@@ -2589,8 +2589,9 @@ def api_ota_install():
 # ★ 单点纪律：本常量与 scripts/ttbox.sh 的 TTBOX_OTA_SERVER_URL 必须同值——
 #   改一处必须同步改另一处；ttbox.sh doctor 会比对两处一致（单测
 #   test_ota_server_url_two_places_in_sync 也在 Windows 侧钉住这条）。
-#   正式服务器（2026-09-19）：cctv2.top，经七牛映射 外网10046→内网443；
-#   地址必须带端口（外网 443 未映射）。值含 example.com（占位）⇒
+#   正式服务器（2026-09-26 起）：cctv2.top，**阿里云 47.104.18.178 安全组直通**，
+#   HTTPS 主入口 10086（旧七牛 38.127.133.6 与 NAT 10015/10046 映射已随机器作废）；
+#   地址必须带端口。值含 example.com（占位）⇒
 #   /api/update/check 仍 fail-closed 503（单测会 patch 回占位值验证这条）。
 OTA_SERVER_URL = 'https://cctv2.top:10086/ota'
 # 任务目录（特权通道，§2.2）：web（User=ttbox）写 JSON，root 更新器经 path 单元消费

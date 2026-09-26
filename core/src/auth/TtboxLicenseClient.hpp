@@ -51,9 +51,12 @@ private:
                       LicenseStatus& out,
                       std::string* err);
 
+    // ★ 2026-09-26：旧服务器 38.127.133.6（七牛，NAT 10015/10039）已宕机，
+    //   现役是阿里云 cctv2.top，HTTPS 主入口 10086。默认值必须跟到新服务器，
+    //   否则任何未配置 cloud.license_base_url 的环境都会打到一个死地址。
     std::string server_url_ = std::getenv("TTBOX_LICENSE_SERVER")
                                   ? std::getenv("TTBOX_LICENSE_SERVER")
-                                  : "http://38.127.133.6:10039";
+                                  : "https://cctv2.top:10086/ttbox";
     std::string app_key_ = std::getenv("TTBOX_APP_KEY")
                                ? std::getenv("TTBOX_APP_KEY")
                                : "ttbox";

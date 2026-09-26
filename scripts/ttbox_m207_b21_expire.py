@@ -30,9 +30,10 @@ import sys
 import time
 import urllib.parse
 
-# ---- 云端（业主自有 SaaS；本机直连不通，必须走本机 HTTP 代理 CONNECT 隧道 + paramiko）----
-CLOUD_HOST = '38.127.133.6'
-CLOUD_PORT = 10015
+# ---- 云端（业主自有 SaaS）----
+# ★ 2026-09-26：旧七牛 38.127.133.6（NAT 10015）已宕机，现役阿里云 47.104.18.178，SSH 直连 22。
+CLOUD_HOST = '47.104.18.178'
+CLOUD_PORT = 22
 CLOUD_USER = 'root'
 # ★ 口令不落库（本仓库可能被公开）。从环境变量取；未设置时在真正连云端那一步明确报错。
 CLOUD_PASS = os.environ.get('TTBOX_CLOUD_PASS', '')

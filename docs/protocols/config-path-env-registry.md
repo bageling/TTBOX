@@ -132,6 +132,7 @@
 | `TTBOX_VER` | 版本号 | 无（必填） | `image/prepare_stage.sh` | 覆盖烘焙出的镜像版本号 | RUNTIME |
 | `TTBOX_HOSTKEY_DIR` | 路径 | 无（必填） | `image/v5_bake.sh`、`steps/04_board_config.sh`、`90_finalize_host.sh` | 注入镜像内 ssh host key 的来源目录（**凭据类**） | RUNTIME |
 | `TTBOX_ROOT_PASS` | 口令 | 无（必填，**禁回落到固定弱口令**） | `image/steps/04_board_config.sh` | 烘焙时设置镜像 root 口令（**凭据类**） | RUNTIME |
+| `TTBOX_EXPECT_VER` | 版本号 | 空（不钉版本） | `image/90_finalize_host.sh`、`image/v5_bake.sh` | 收尾门禁可选开关：钉死「镜像内浇筑版本必须等于此值」（不传则只验 current 指向真 release） | RUNTIME |
 
 ### 2.5 显式登记为 TEST 域（不进 RUNTIME allowlist）
 

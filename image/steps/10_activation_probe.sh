@@ -18,7 +18,7 @@ getent hosts cctv2.top || echo "  [✗] 解析失败"
 echo
 echo "########## 2. TLS 握手通不通 ##########"
 curl -s -o /dev/null -w "  HTTP=%{http_code}  tls=%{time_appconnect}s  total=%{time_total}s\n" \
-     -m 15 -X POST https://cctv2.top:10046/ttbox/api/client/card-login \
+     -m 15 -X POST https://cctv2.top:10086/ttbox/api/client/card-login \
      -H 'Content-Type: application/json' -d '{}' 2>&1
 echo "  （000 = 连不出去；401 = 服务在，只是没签名头 —— 这是期望值）"
 

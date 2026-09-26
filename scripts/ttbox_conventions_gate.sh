@@ -233,6 +233,8 @@ ENV_ALLOW = {
     # 其中凭据类两个（ROOT_PASS / HOSTKEY_DIR）明文只留项目外目录、不入镜像与文档，
     # 且 V5 起禁止回落固定弱口令 —— 见 image/steps/04_board_config.sh 开头注释。
     "TTBOX_STAGE_DIR", "TTBOX_VER", "TTBOX_HOSTKEY_DIR", "TTBOX_ROOT_PASS",
+    # 2026-09-26 登记：90_finalize_host.sh 收尾门禁的可选「钉版本」开关（升版重烤用）
+    "TTBOX_EXPECT_VER",
     # 2026-09-22 回流板端 dtb 修复脚本时登记（TEST 钩子：覆盖 DTB 期望哈希与报告路径）
     "TTBOX_DTB_SRC", "TTBOX_DTB_FIX_TEST", "TTBOX_DTB_REPORT",
     "TTBOX_DTB_GOOD_SHA", "TTBOX_DTB_BAD_SHA",

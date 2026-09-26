@@ -10,7 +10,7 @@ echo "  /etc/fake-hwclock.data 内容: $(cat /etc/fake-hwclock.data 2>/dev/null 
 echo "  ⇒ 若无/为构建日，首次开机系统时间 = $(cat /etc/fake-hwclock.data 2>/dev/null || echo 2024-10-22)"
 echo "  LE 证书有效期（cctv2.top）: 2026-06-20 ~ 2026-12-18"
 echo "  ⇒ 时钟停在 2024/2025 时，curl/requests 报 certificate is not yet valid，HTTPS 全断"
-echo "  可用校时通道: systemd-timesyncd(NTP/UDP123) ；云激活走 TCP 10046"
+echo "  可用校时通道: systemd-timesyncd(NTP/UDP123) ；云激活走 TCP 10086"
 ls -l /etc/systemd/system/systemd-timesyncd.service.d/ 2>/dev/null || echo "  timesyncd 无 drop-in"
 
 hr; echo "[B] 模型是否随镜像出厂（core 健康的前提）"

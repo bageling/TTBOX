@@ -30,7 +30,7 @@
 #   4b) 字符串表三档门禁（T1.15 待补 ③，§7）：
 #         (a) 第三方域名 `antszy|blpro|blpt` == 0            → 硬 FAIL
 #         (b) 凭据非空默认字面量 `client_secret_ = "..."` == 0 → 硬 FAIL（源码级）
-#         (c) 自有端点 `38.127.133.6` 登记值                 → ★不判 FAIL（详见 §7 (c) 档）
+#         (c) 自有端点 `cctv2.top` 登记值                     → ★不判 FAIL（详见 §7 (c) 档）
 #   4c) usbproxy 预编译二进制「诚实性」（T1.15 验收⑧ / A30，§11）：
 #         .sha256 一致 + 旧目录字面量 == 0 为硬门禁；「可重建」为可选（较重，opt-in），
 #         且**必须在临时副本里重建**（Makefile 的 clean 会删掉入库件）
@@ -122,7 +122,7 @@ esac
 #   （Ed25519 自包含验签）+ LicenseDaemon + LicenseCard + ed25519_verify 属无条件
 #   CORE_SOURCES，AUTH 门控**不再**决定"有无授权"，只决定"有无**在线**客户端"。
 #   AUTH=ON 会把在线授权层（TtboxLicenseClient/HttpClient + OpenSSL）编进产物 ⇒ 三个后果：
-#     甲 · 产物内出现自有端点字面量（38.127.133.6）与在线授权代码路径 ⇒ §7 (c) 档
+#     甲 · 产物内出现自有端点字面量（cctv2.top）与在线授权代码路径 ⇒ §7 (c) 档
 #          由 M1/M2 期望 0 变成 ==1，出货形态与声明不符；
 #     乙 · 新增 NEEDED（libcrypto/libssl）⇒ 破坏 A32「随包 ELF 运行期依赖闭集」；
 #     丙 · 编译定义变 ⇒ 不同源 ⇒ 与既有指纹锚（如 `d20b25da…`）**不可比**（§13 配置向量）。
@@ -328,13 +328,15 @@ if [ "${CRED_N}" != "0" ]; then
 fi
 
 # (c) 自有端点计数：M1 期望 0；T2.x 允许 ==1；>1 告警；★ 不判 FAIL（tasks.md:160 ⑤）
-#     38.127.133.6:10039 = **我方自有的**授权服务器、合法默认端点，**不是缺陷**。
-#     M1 = NullClient 不接入 ⇒ IP 字面量随 ODR-use 消失 ⇒ 期望 0。
+#     ★ 2026-09-26：自有端点从旧 IP `38.127.133.6:10039`（七牛，已宕机）换成域名
+#       `cctv2.top:10086`（阿里云，安全组直通）。扫描对象随之改为域名。
+#       cctv2.top = **我方自有的**授权/OTA 服务器、合法默认端点，**不是缺陷**（不在 (a) 档第三方名单里）。
+#     M1 = NullClient 不接入 ⇒ 端点字面量随 ODR-use 消失 ⇒ 期望 0。
 #     ★ 不得把 `==1` 设成 M1 门禁（T2.x 装回在线客户端后会出现 ==1，届时会误 FAIL）。
-ENDPOINT_N="$(strings -a "$PRODUCT" | grep -c '38\.127\.133\.6' || true)"
+ENDPOINT_N="$(strings -a "$PRODUCT" | grep -c 'cctv2\.top' || true)"
 if [ "${ENDPOINT_N}" -gt 1 ] 2>/dev/null; then
-  echo "[release][WARN] §7(c) 自有端点 38.127.133.6 出现 ${ENDPOINT_N} 次（>1 告警；不判 FAIL）：" >&2
-  strings -a "$PRODUCT" | grep '38\.127\.133\.6' | head -3 >&2
+  echo "[release][WARN] §7(c) 自有端点 cctv2.top 出现 ${ENDPOINT_N} 次（>1 告警；不判 FAIL）：" >&2
+  strings -a "$PRODUCT" | grep 'cctv2\.top' | head -3 >&2
 fi
 STRINGS_GATE="third=${THIRD_N}/ip=${ENDPOINT_N}/cred=${CRED_N}"
 echo "[release] 字符串表三档门禁通过：${STRINGS_GATE}（a)第三方=0 ✅ (b)凭据字面量=0 ✅ (c)自有端点=${ENDPOINT_N}〔M1 期望 0，登记不判 FAIL〕"
