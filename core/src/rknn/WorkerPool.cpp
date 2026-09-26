@@ -234,6 +234,16 @@ void InferenceWorker::apply_runtime_profile() {
 
     decoder_->apply_runtime(prof->inference, prof->fov);
     geometry_filter_.set_config(prof->geometry_filter);
+    // 准星找色参数：随 profile 一起热更新（不每帧读快照）。
+    // 关掉时把命中清掉，避免沿用上一轮的「命中」让扳机一直停手。
+    stop_detect_params_.enabled = prof->mouse.trigger2.stop_detect_enabled;
+    stop_detect_params_.color_id = prof->mouse.trigger2.stop_detect_color_id;
+    stop_detect_params_.tolerance = prof->mouse.trigger2.stop_detect_tolerance;
+    stop_detect_params_.range_px = prof->mouse.trigger2.stop_detect_range;
+    stop_detect_params_.interval_frames = prof->mouse.trigger2.stop_detect_interval > 0
+                                              ? prof->mouse.trigger2.stop_detect_interval
+                                              : 1;
+    if (!stop_detect_params_.enabled) stop_detect_hit_ = false;
     const uint32_t rw = prof->capture.width;
     const uint32_t rh = prof->capture.height;
     const uint32_t fw = params_.frame_w, fh = params_.frame_h;
@@ -446,6 +456,23 @@ void InferenceWorker::loop() {
                 task.target_width = task.target.x2 - task.target.x1;
                 task.target_height = task.target.y2 - task.target.y1;
             }
+            // 准星找色：只在**这一侧**能看到像素（任务不传图像），算好的 bool 随任务带走。
+            // 准星恒在画面几何中心（crop 只决定送给模型的区域，不移动准星）。
+            // 按 interval 节流：取色要读 25 个像素，不必每帧做；未检测的帧沿用上次结果。
+            if (stop_detect_params_.enabled) {
+                const int interval = stop_detect_params_.interval_frames > 0
+                                         ? stop_detect_params_.interval_frames : 1;
+                if (stop_detect_last_frame_ == 0 ||
+                    seq - stop_detect_last_frame_ >= static_cast<uint32_t>(interval)) {
+                    stop_detect_last_frame_ = seq;
+                    stop_detect_hit_ = aim::crosshair_probe_hit(
+                        frame->data.get(), frame->info,
+                        static_cast<float>(params_.frame_w) * 0.5f,
+                        static_cast<float>(params_.frame_h) * 0.5f,
+                        stop_detect_params_);
+                }
+            }
+            task.stop_detect_hit = stop_detect_params_.enabled ? stop_detect_hit_ : false;
             params_.aim_mailbox->offer(static_cast<std::size_t>(id_), std::move(task));
             stats_.published.fetch_add(1);
             // 瞬时帧率采样（滚动窗口）：3 个 worker 合计即为真实推理帧率。

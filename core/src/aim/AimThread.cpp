@@ -528,9 +528,14 @@ void AimThread::loop() {
                         }
                     }
                 }
-                // 急停检测（准星颜色）在采集侧，core 侧拿不到该信号 ⇒ 恒真（= 不启用）。
-                // 面板打开 stop_detect_enabled 时要知道：它是"就绪但未接线"，不是真在判色。
-                tin.stop_detect_found = true;
+                // 急停检测（准星颜色）：判色在**有帧的那一侧**（推理 worker，CrosshairProbe），
+                // 结果经 AimTargetTask.stop_detect_hit 带过来 —— 任务只含小型检测结果、不传图像，
+                // 本线程拿不到像素，只能消费这个 bool。
+                // 语义（TriggerController 第 269 行）：found=true 才允许开火（找到准星=可以打）。
+                // 未开启时该门不生效，沿用原来的恒真。
+                tin.stop_detect_found = frame_profile->mouse.trigger2.stop_detect_enabled
+                                            ? task.stop_detect_hit
+                                            : true;
                 trig_cmd = trigger_.update(frame_profile->mouse, tin);
 
                 // ---- 按下/抬起：拆成两条命令，绝不在控制线程里 sleep ----

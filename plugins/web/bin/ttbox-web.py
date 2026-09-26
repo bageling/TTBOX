@@ -863,6 +863,15 @@ CTRL_BLOCKS = [
         ('enabled', 'b', False), ('amp_x', 'n', 0.10), ('amp_y', 'n', 0.10),
         ('freq', 'n', 1.0), ('smooth', 'n', 0.50),
     ]),
+    # 贝塞尔弧线（2026-09-26 接线）：只暴露 warp 用法真正读到的字段。
+    #   generation / segments 是 path1/path2 拆点列那套用的，主链走 warp_error 不读它们
+    #   ⇒ 刻意不进表（不补默认值，由 Core 结构体默认兜住），免得面板摆一堆无效开关。
+    ('bezier', 'bezier', [
+        ('enabled', 'b', False), ('curvature', 'n', 0.20),
+        ('linear_threshold', 'n', 45.0), ('peak_min', 'n', 0.20), ('peak_max', 'n', 0.60),
+        ('dir_up', 'b', True), ('dir_down', 'b', True),
+        ('dir_left', 'b', False), ('dir_right', 'b', False), ('min_move', 'n', 0.10),
+    ]),
     ('vc', 'vertical_correction', [
         ('enabled', 'b', True), ('no_target', 'b', False), ('strength', 'n', 1.0),
         ('horiz', 'n', 0.0), ('delay_ms', 'n', 0.0), ('max_down_distance', 'n', 0.0),

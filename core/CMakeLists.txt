@@ -692,6 +692,11 @@ if(TTBOX_CORE_BUILD_TESTS)
   target_link_libraries(test_bezier_trajectory PRIVATE ttbox_core)
   add_test(NAME test_bezier_trajectory COMMAND test_bezier_trajectory)
 
+  # 准星找色（CrosshairProbe：RGB/BGR/RGBA/NV12 取色 + 容差 + 半径 + 红色环绕 + fail-closed）
+  add_executable(test_crosshair_probe tests/test_crosshair_probe.cpp)
+  target_link_libraries(test_crosshair_probe PRIVATE ttbox_core)
+  add_test(NAME test_crosshair_probe COMMAND test_crosshair_probe)
+
   # C6：TargetSelector 防横跳压力测试（交叉/抖动/消失/排序翻转）
   add_executable(test_selector_stress tests/test_selector_stress.cpp)
   target_link_libraries(test_selector_stress PRIVATE ttbox_core)

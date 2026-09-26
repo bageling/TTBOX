@@ -28,6 +28,7 @@
 #include "capture/V4L2Capture.hpp"
 #include "model/Decoder.hpp"
 #include "model/ModelAdapter.hpp"
+#include "mouse/CrosshairProbe.hpp"
 #include "model/RuntimeProfile.hpp"
 #include "pipeline/AimTargetMailbox.hpp"
 #include "rga/RgaProcessor.hpp"
@@ -150,6 +151,12 @@ private:
     WorkerStats stats_;
     // A-8：热更新跟踪（避免每帧重复设置）
     std::shared_ptr<const RuntimeProfile> applied_profile_;
+    // 准星找色（急停检测）：参数随 profile 热更新缓存，结果按 interval 节流后跨帧沿用。
+    // 取色必须放在有帧的一侧 —— AimTargetMailbox 只传小型检测结果、不传图像，
+    // AimThread 拿不到像素，只能消费这里算好的 bool。
+    aim::CrosshairProbeParams stop_detect_params_;
+    bool stop_detect_hit_ = false;
+    uint64_t stop_detect_last_frame_ = 0;
     // 最近一次预处理失败原因（面板「最后错误」用）。锁只在失败路径偶尔取，
     // 成功路径不碰，不影响热路径。
     mutable std::mutex preprocess_err_mu_;

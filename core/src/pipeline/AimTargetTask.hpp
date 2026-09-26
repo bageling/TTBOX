@@ -18,6 +18,9 @@ struct AimTargetTask {
     float target_height = 0.0f;
     bool crosshair_detected = false;
     AimPoint crosshair{};
+    // 准星找色（急停检测）结果：由**有帧的一侧**（推理 worker）算好带过来。
+    // AimThread 拿不到像素，只能消费这个 bool。未开启时恒 false（= 没检测到要停手）。
+    bool stop_detect_hit = false;
     std::vector<DetectionBox> detections;
 };
 }
