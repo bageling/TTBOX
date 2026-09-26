@@ -34,7 +34,11 @@ sleep 1
 bash "$REPO/image/20_mount.sh" || die "20_mount.sh 失败"
 mountpoint -q "$IMG" || die "/mnt/img 未挂载"
 [ -f "$IMG/etc/os-release" ]              || die "镜像 /etc/os-release 不存在"
-[ -d "$IMG/opt/ttbox/releases/1.5.21" ]   || die "镜像里没有 releases/1.5.21 —— 挂错盘了"
+# ★ 只验「有浇筑过的发布树」，不钉具体版本号（升版后旧硬编码会误判挂错盘）
+[ -d "$IMG/opt/ttbox/releases" ]          || die "镜像里没有 releases/ —— 挂错盘了"
+[ -L "$IMG/opt/ttbox/current" ]           || die "镜像里 current 不是软链 —— 还没浇筑过"
+# 期望版本（可选）：由调用方经 TTBOX_VER / TTBOX_EXPECT_VER 传入，传给 90 门禁钉版本
+export TTBOX_EXPECT_VER="${TTBOX_EXPECT_VER:-${TTBOX_VER:-}}"
 echo "  身份: $(head -1 "$IMG/etc/os-release")"
 echo "  current -> $(readlink "$IMG/opt/ttbox/current")"
 echo "  改前 root 口令字段: $(awk -F: '$1=="root"{print substr($2,1,24)}' "$IMG/etc/shadow")"

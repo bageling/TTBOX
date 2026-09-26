@@ -41,7 +41,14 @@ if mountpoint -q "$IMG_ROOT"; then
         'test -z "$(find "$IMG_ROOT/etc/ttbox" "$IMG_ROOT/var/lib/ttbox" \( -type f -o -type d \) -perm -o+w -print -quit)"'
     chk "无残留 __pycache__"             'test -z "$(find "$IMG_ROOT/opt/ttbox" -name "__pycache__" -print -quit)"'
     chk "无宿主 /root/ttbox-image 副本落进镜像" 'test ! -e "$IMG_ROOT/root/ttbox-image"'
-    chk "current 指向 1.5.21"            '[ "$(readlink "$IMG_ROOT/opt/ttbox/current")" = releases/1.5.21 ]'
+    # ★ 不钉死某个版本号（1.5.21 是 V5 当时的版本，硬编码会让每次升版都假红）。
+    #   真门禁是「current 指向一个确实浇筑完成的 release」；要钉版本就传 TTBOX_EXPECT_VER。
+    CUR_VER="$(readlink "$IMG_ROOT/opt/ttbox/current" | sed 's#^releases/##')"
+    chk "current 指向已浇筑的 releases/${CUR_VER:-<空>}" \
+        '[ -n "$CUR_VER" ] && [ -d "$IMG_ROOT/opt/ttbox/releases/$CUR_VER" ] && [ -f "$IMG_ROOT/opt/ttbox/releases/$CUR_VER/RELEASE_MANIFEST.json" ]'
+    if [ -n "${TTBOX_EXPECT_VER:-}" ]; then
+        chk "浇筑版本 == 期望 $TTBOX_EXPECT_VER" '[ "$CUR_VER" = "$TTBOX_EXPECT_VER" ]'
+    fi
     HK_DIR="${TTBOX_HOSTKEY_DIR:-}"
     HK_DST_SHA="$(sha256sum "$IMG_ROOT/etc/ssh/ssh_host_ed25519_key" 2>/dev/null | cut -d" " -f1)"
     HK_SRC_SHA="$(sha256sum "${HK_DIR}/ssh_host_ed25519_key" 2>/dev/null | cut -d" " -f1)"
