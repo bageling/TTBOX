@@ -20,7 +20,7 @@ DST="/mnt/c/Users/Administrator/Downloads/ubuntu-22.04-preinstalled-server-arm64
 PASS="$(cat "$KEYS/root-password.txt")"
 export TTBOX_HOSTKEY_DIR="$KEYS"
 
-STEP_RC_04=999; STEP_RC_05=999; FIN_RC=999; FSCK_RC=999
+STEP_RC_04B=999; STEP_RC_04=999; STEP_RC_05=999; FIN_RC=999; FSCK_RC=999
 die() { echo; echo "!! $*"; echo "!! 停在当前阶段，未回写；$WORK 与挂载现场保留，可直接复跑（04 幂等）。"; exit 1; }
 
 echo "################ V5 烘焙开始 @ $(date -Is) ################"
@@ -64,6 +64,17 @@ install -m 0644 "$KEYS/ssh_host_ed25519_key.pub" "$IMG/root/_bake/hostkeys/"
 install -m 0644 "$KEYS/ssh_host_rsa_key.pub"     "$IMG/root/_bake/hostkeys/"
 ls -l "$IMG/root/_bake/hostkeys" | sed 's/^/  /'
 
+# ---------------------------------------------------------------- P1.5
+# ★ 2026-09-26 补：04b 是「出厂即可用」那一步（写 /opt/ttbox/config/default.json 的
+#   cloud 段、预置 ttbox 可写目录）。此前它不在 v5_bake 链里 ⇒ **改了
+#   image/factory/cloud.default.json 重烤也不生效**（实测：授权地址换 10086 后镜像里
+#   仍是旧的 10046）。补进来后每次重烤都会刷新出厂凭据与运行时目录。
+echo
+echo "===== P1.5 应用 04b_delivery_parity.sh（云端凭据 / 运行时目录）====="
+chroot "$IMG" /bin/bash /root/_bake/steps/04b_delivery_parity.sh
+STEP_RC_04B=$?
+echo "  >>> rc(04b) = $STEP_RC_04B"
+
 # ---------------------------------------------------------------- P2
 echo
 echo "===== P2 应用 04_board_config.sh（SSH 启用 / 固定 host key / 强口令）====="
@@ -98,8 +109,8 @@ echo "  存档指纹                      = $(cat "$KEYS/hostkey-fingerprint.txt
 echo "  shadow 里不再有明文口令残留？(应只见 \$6\$ 哈希) $(awk -F: '$1=="root"{print substr($2,1,3)}' "$IMG/etc/shadow")"
 
 # ---------------------------------------------------------------- 门禁
-if [ "$STEP_RC_04" != "0" ] || [ "$STEP_RC_05" != "0" ]; then
-    die "04/05 未全绿（rc04=$STEP_RC_04 rc05=$STEP_RC_05）—— 按门禁不回写"
+if [ "$STEP_RC_04B" != "0" ] || [ "$STEP_RC_04" != "0" ] || [ "$STEP_RC_05" != "0" ]; then
+    die "04b/04/05 未全绿（rc04b=$STEP_RC_04B rc04=$STEP_RC_04 rc05=$STEP_RC_05）—— 按门禁不回写"
 fi
 
 # ---------------------------------------------------------------- P4
@@ -140,6 +151,6 @@ echo "  [✓] 指纹文件  : $DST.sha256"
 # ---------------------------------------------------------------- P7
 echo
 echo "################ V5 烘焙完成 @ $(date -Is) ################"
-echo "  rc(04)=$STEP_RC_04  rc(05)=$STEP_RC_05  rc(90)=$FIN_RC  rc(99)=$FSCK_RC"
+echo "  rc(04b)=$STEP_RC_04B  rc(04)=$STEP_RC_04  rc(05)=$STEP_RC_05  rc(90)=$FIN_RC  rc(99)=$FSCK_RC"
 echo "  自检日志: /root/selfcheck.txt（并已由 90 归档到 image/artifacts/）"
 exit 0
