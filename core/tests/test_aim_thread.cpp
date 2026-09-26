@@ -359,6 +359,61 @@ TEST(aim_thread_trigger_stays_silent_when_disabled) {
     CHECK(!thread.status().trigger_active);
 }
 
+// 贝塞尔弧线接线：`BezierTrajectory` 此前**三层全死**（无人 include / MouseProfile 无成员 /
+// 配置不解析）⇒ 开了也没人跑。这条用例锁的是集成层：开启后同一段帧的输出必须真的变了。
+// 模块级性质（只加垂直分量、偏移 ∝ 距离、误差趋零时归零）在 test_bezier_trajectory Case13~15。
+namespace {
+std::pair<int64_t, int64_t> run_aim_frames(bool bezier_on) {
+    AimTargetMailbox mailbox(1);
+    auto output = std::make_shared<CountingHidOutput>();
+    auto profile = std::make_shared<ttbox::core::RuntimeProfile>();
+    ttbox::core::RuntimeConfig config;
+    std::atomic<uint16_t> buttons{0x02};
+
+    profile->mouse.enabled = true;
+    profile->mouse.aim_profiles[0].hotkey = 0x02;
+    profile->mouse.bezier.enabled = bezier_on;
+    profile->mouse.bezier.curvature = 0.5f;    // 放大弧线，便于断言看出差异
+    profile->mouse.output_deadzone = 0.0f;
+    profile->mouse.smooth_x = 0.0f;
+    profile->mouse.smooth_y = 0.0f;
+    profile->mouse.kp_x = 1.0f;
+    profile->mouse.kp_y = 1.0f;
+    config.update(profile);
+
+    AimThread thread;
+    thread.start(&mailbox, output, 1000, &config, &buttons);
+    for (uint64_t f = 1; f <= 20; ++f) {
+        AimTargetTask t;
+        t.frame_number = f;
+        t.timestamp_us = 1000ULL * f;
+        t.frame_width = 1280;
+        t.frame_height = 720;
+        t.has_target = true;
+        t.target = calib_box();
+        t.aim_point = {600.0f, 240.0f};
+        t.detections.push_back(calib_box());
+        mailbox.offer(0, t);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    thread.stop();
+    return {output->sum_x(), output->sum_y()};
+}
+}  // namespace
+
+// ★ 为什么比的是**方向比值**而不是位移绝对值：
+//   每帧控制误差方向基本一致 ⇒ sum_y/sum_x ≈ 单帧输出方向，与"实际跑到几帧"无关；
+//   而绝对值会随线程取帧抖动变化（曾据此写出"关着也判不同"的**假阳性**用例 ——
+//   反向验证时它照样绿，等于没锁住任何东西）。弧线加的是垂直分量 ⇒ 方向偏转最明显。
+TEST(aim_thread_bezier_warp_changes_output_when_enabled) {
+    const auto off = run_aim_frames(false);
+    const auto on = run_aim_frames(true);
+    CHECK(off.first != 0 && off.second != 0);   // 两轴都有输出（防 0 分母 / 0==0 弱断言）
+    const double r_off = static_cast<double>(off.second) / static_cast<double>(off.first);
+    const double r_on = static_cast<double>(on.second) / static_cast<double>(on.first);
+    CHECK(std::fabs(r_on - r_off) > 0.05);      // ★ 接线后输出方向真的偏了
+}
+
 int main() {
     std::printf("=== ttbox_core tests (aim_thread) ===\n");
     const int failed = ::ttbox_test::run_all();

@@ -208,6 +208,53 @@ public:
     BezierDirection direction() const { return dir_; }
     float peak() const { return peak_; }
 
+    // ------------------------------------------------------------------
+    // 误差域弧线整形（2026-09-26 接线用的入口；对标 HEX `safety.lua` 的 Bezier:warp）
+    //
+    // 与 path1/path2 的区别：**不拆帧**。path* 是把一次位移拆成 N 段让调用方逐帧发，
+    // 那套用法要跨帧排队，会与 PID 闭环抢输出（延迟到位 / 叠加）。
+    // 这里改成在**误差域**加一个垂直于误差方向的偏移量，逐帧算、当帧生效：
+    //   · 路径效果一样是"弧线靠近"而不是直线贴上去；
+    //   · 偏移量 ∝ 距离 ⇒ 误差趋零时偏移也趋零，**不引入稳态残差**；
+    //   · 不改总位移方向的大小（只加垂直分量）⇒ 闭环收敛性不变。
+    // 距离 ≤ linear_threshold 时直接原样返回（近距离不绕路，省开销也避免抖）。
+    //
+    // @param dx,dy    本帧控制误差（像素域）
+    // @param target_id 当前目标 id（切换时重新抽签 + 重置）
+    // @param key_active 生效键是否按下（上升沿重新抽签：这一枪往左飘、下一枪往右飘）
+    struct WarpOut {
+        float dx = 0.0f;
+        float dy = 0.0f;
+        bool active = false;   // 本帧是否真的施加了弧线
+    };
+    WarpOut warp_error(float dx, float dy, int target_id, bool key_active) {
+        WarpOut out{dx, dy, false};
+        if (!cfg_.enabled) { last_target_id_ = target_id; return out; }
+        const float dist = std::sqrt(dx * dx + dy * dy);
+        if (dist <= cfg_.linear_threshold || dist < 1.0f) { last_target_id_ = target_id; return out; }
+
+        // 目标切换 ⇒ 重新抽签（新的一次瞄准过程，方向可以换）
+        if (target_id != last_target_id_) {
+            last_target_id_ = target_id;
+            rollOnce(true);
+            rollOnce(false);   // 造一次上升沿，强制抽新方向/弓高
+        } else {
+            rollOnce(key_active);
+        }
+
+        // 垂直单位向量（基于当前误差方向）
+        const float px = -dy / dist;
+        const float py = dx / dist;
+        // 方向抽签决定往哪一侧偏（up/left 取负，down/right 取正）
+        const float sign = (dir_ == BezierDirection::kUp || dir_ == BezierDirection::kLeft) ? -1.0f : 1.0f;
+        // 偏移 ∝ 距离 × 曲率 × 弓高抽签 ⇒ 越接近目标越收敛，稳态归零
+        const float off = dist * cfg_.curvature * 0.5f * peak_ * sign;
+        out.dx = dx + px * off;
+        out.dy = dy + py * off;
+        out.active = true;
+        return out;
+    }
+
     // 测试用：固定种子 ⇒ 抽签序列可复现。生产不调用即为默认种子。
     void set_seed(uint32_t seed) { rng_ = seed ? seed : 0x9E3779B9u; }
 
@@ -215,6 +262,7 @@ public:
         key_active_ = false;
         dir_ = BezierDirection::kRight;
         peak_ = 0.4f;
+        last_target_id_ = -1;
     }
 
 private:
@@ -239,6 +287,7 @@ private:
     }
 
     BezierTrajectoryConfig cfg_{};
+    int last_target_id_ = -1;   // warp_error 用：目标切换即重新抽签
     bool key_active_ = false;
     BezierDirection dir_ = BezierDirection::kRight;
     float peak_ = 0.4f;

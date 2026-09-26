@@ -608,6 +608,12 @@ struct MouseProfile {
     // 默认 enabled=false ⇒ 不开时 AimThread 不跑扳机，输出链与加入前逐字节一致。
     TriggerConfig trigger;                  // 自动扳机 v7.26
     Trigger2Config trigger2;                // BB 扳机 2.0
+    // ---- 贝塞尔弧线（2026-09-26 接线）----
+    // 此前 `BezierTrajectory` 与它的配置**三层全死**：无人 include、MouseProfile 无成员、
+    // 配置不解析。接线走 HEX(`safety.lua`) 验证过的 **warp 用法**：在**误差域**加一个
+    // 垂直于误差方向的弧线偏移（逐帧生效、不跨帧拆队列）⇒ 不破坏 PID 闭环。
+    // （模块里 path1/path2 的"拆点列逐帧发"是 BB 原版用法，留给开环拉枪场景，本次不接。）
+    BezierTrajectoryConfig bezier;
     HotkeyGuardConfig hotkey_guard;         // 热键保护（按 toggle_hotkey 切换「热键挂起」）
     AimPointProfile aim_point;
     float lost_grace_ms = 78.0f;                // 目标丢失宽限期

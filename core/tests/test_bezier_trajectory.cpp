@@ -267,6 +267,54 @@ int main() {
         check_near(sa, sb, 1e-6f, "Case12 同种子 ⇒ 抽签序列完全一致");
     }
 
+    // ---- Case13~15：误差域弧线整形 warp_error（2026-09-26 接线入口）----
+    // 锁的是"接进 PID 闭环后不能破坏收敛"的三条性质，不是弧线好不好看。
+    // Case13 关闭 / 近距离 ⇒ 原样返回（不绕路）
+    {
+        BezierTrajectory bz;
+        bz.configure(make_cfg());
+        bz.set_seed(2026);
+        BezierTrajectory off;
+        BezierTrajectoryConfig c = make_cfg();
+        c.enabled = false;
+        off.configure(c);
+
+        const auto a = off.warp_error(80.0f, 0.0f, 1, true);
+        check(!a.active && a.dx == 80.0f && a.dy == 0.0f, "Case13 关闭 ⇒ 原样返回");
+
+        const auto b = bz.warp_error(10.0f, 0.0f, 1, true);   // 10 < linear_threshold 45
+        check(!b.active && b.dx == 10.0f && b.dy == 0.0f, "Case13 近距离（≤阈值）⇒ 不绕路");
+    }
+    // Case14 远距 ⇒ 只加**垂直**分量（与误差点积为 0 ⇒ 不改变沿误差方向的分量）
+    {
+        BezierTrajectory bz;
+        bz.configure(make_cfg());
+        bz.set_seed(7);
+        const float dx = 120.0f, dy = 0.0f;
+        const auto w = bz.warp_error(dx, dy, 1, true);
+        check(w.active, "Case14 远距 ⇒ 弧线生效");
+        // 垂直分量：dx 不变（误差在 X 方向 ⇒ 偏移只落在 Y）
+        check(std::fabs(w.dx - dx) < 1e-4f, "Case14 沿误差方向的分量不变");
+        check(std::fabs(w.dy) > 1.0f, "Case14 垂直方向确实加了偏移");
+    }
+    // Case15 ★ 偏移 ∝ 距离 ⇒ 误差趋零时偏移也趋零（不引入稳态残差）
+    {
+        BezierTrajectory bz;
+        bz.configure(make_cfg());
+        bz.set_seed(7);
+        const auto w1 = bz.warp_error(120.0f, 0.0f, 1, true);
+        bz.reset();
+        bz.set_seed(7);
+        const auto w2 = bz.warp_error(240.0f, 0.0f, 1, true);
+        // 同一抽签下，距离翻倍 ⇒ 偏移也翻倍（比值恒定）
+        const float r1 = std::fabs(w1.dy) / 120.0f;
+        const float r2 = std::fabs(w2.dy) / 240.0f;
+        check(std::fabs(r1 - r2) < 1e-5f, "Case15 偏移/距离 比值恒定（∝ 距离）");
+        // 距离降到阈值内 ⇒ 偏移归零 ⇒ 稳态不会残留一个侧向常量
+        const auto w3 = bz.warp_error(5.0f, 0.0f, 1, true);
+        check(!w3.active && w3.dy == 0.0f, "Case15 误差趋零 ⇒ 偏移归零（无稳态残差）");
+    }
+
     std::printf("== failures=%d ==\n", failures);
     return failures == 0 ? 0 : 1;
 }

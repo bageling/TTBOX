@@ -48,6 +48,7 @@ void AimThread::reset_runtime_state() {
     trigger_.reset();
     trigger_release_btn_ = 0;
     trigger_release_at_ms_ = 0;
+    bezier_.reset();
     last_injection_allowed_ = false;
     display_smooth_x1_.reset();
     display_smooth_y1_.reset();
@@ -111,6 +112,7 @@ void AimThread::loop() {
             AntiOvershootConfig anti_over_cfg;      // 抗过冲
             SpeedAdaptiveKpConfig speed_kp_cfg;     // 速度自适应 Kp
             GlobalWaveConfig global_wave_cfg;       // 全局正弦扰动
+            BezierTrajectoryConfig bezier_cfg;      // 贝塞尔弧线（误差域整形，默认关）
             float kp_x = 0.0f, kp_y = 0.0f, kd_x = 0.0f, kd_y = 0.0f;
             AimPointProfile aim_point;
             LockConfirmConfig lock_confirm_cfg;  // 目标锁定确认（ENTER/HOLD，第2项）
@@ -265,6 +267,7 @@ void AimThread::loop() {
                 anti_over_cfg = frame_profile->mouse.anti_overshoot;
                 speed_kp_cfg = frame_profile->mouse.speed_adaptive_kp;
                 global_wave_cfg = frame_profile->mouse.global_wave;
+                bezier_cfg = frame_profile->mouse.bezier;
                 pid_x_.configure(kp_x, kd_x, frame_profile->mouse.predict_x,
                                  frame_profile->mouse.rate_x, frame_profile->mouse.smooth_x);
                 pid_y_.configure(kp_y, kd_y, frame_profile->mouse.predict_y,
@@ -420,6 +423,18 @@ void AimThread::loop() {
                                                frame_profile->mouse.vfov, frame_profile->mouse.move_speed_y);
                         fov_mode_active = true;
                     }
+                }
+                // ---- 贝塞尔弧线（误差域整形，2026-09-26 接线）----
+                // 此前 BezierTrajectory 三层全死（无人 include / MouseProfile 无成员 / 配置不解析）。
+                // 接线走 HEX `safety.lua` 验证过的 warp 用法：**不拆帧**，只在误差上加垂直分量，
+                // 偏移量 ∝ 距离 ⇒ 误差趋零时自动归零，不引入稳态残差、不改闭环收敛性。
+                // 只影响"靠近路径的形状"（弧线而非直线），默认关 ⇒ 与接线前逐字节一致。
+                if (bezier_cfg.enabled) {
+                    bezier_.configure(bezier_cfg);   // 每周期重读（改配置即时生效）
+                    const auto bw = bezier_.warp_error(control_x, control_y,
+                                                       selected.target_id, injection_allowed);
+                    control_x = bw.dx;
+                    control_y = bw.dy;
                 }
                 // pid1.cpp P_PID 直接消费控制域误差（像素域）。
                 // FOV 模式：fov_out 已是 count 域最终移动量，直接作为控制器输出（旁路 kp×err）。

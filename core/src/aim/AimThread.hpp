@@ -22,6 +22,7 @@
 #include "mouse/PersonalTrajectoryShader.hpp"
 #include "mouse/RecoilController.hpp"
 #include "mouse/TriggerController.hpp"
+#include "mouse/BezierTrajectory.hpp"
 // BB 对标第二批（2026-09-24）：两代提前量 / 拟人化链 / 抗过冲 / 速度自适应 Kp / 全局正弦
 #include "mouse/LeadPredictor.hpp"
 #include "mouse/HumanizeShaper.hpp"
@@ -155,6 +156,7 @@ private:
     // 自动扳机（BB 两套状态机）。此前全仓无人 include ⇒ 面板开关是死的、点击发不出去。
     // 决策在这里产出，注入走 output_->mouse_button（按下/抬起两条命令，不在控制线程里 sleep）。
     TriggerController trigger_;
+    BezierTrajectory bezier_;  // 贝塞尔弧线（误差域整形；默认关 ⇒ 与接线前逐字节一致）
     uint8_t trigger_release_btn_ = 0;      // 待抬起的键位掩码（0 = 无）
     uint32_t trigger_release_at_ms_ = 0;   // 抬起时刻（now_ms 时基）
     uint64_t trigger_fire_count_ = 0;

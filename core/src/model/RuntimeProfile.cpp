@@ -744,6 +744,21 @@ JsonValue RuntimeProfile::to_json() const {
     tg2.set("stop_detect_range", JsonValue::number(static_cast<double>(mouse.trigger2.stop_detect_range)));
     tg2.set("stop_detect_interval", JsonValue::number(static_cast<double>(mouse.trigger2.stop_detect_interval)));
     m.set("trigger2", std::move(tg2));
+    // 贝塞尔弧线（误差域整形；2026-09-26 接线）
+    JsonValue bz = JsonValue::object();
+    bz.set("enabled", JsonValue::boolean(mouse.bezier.enabled));
+    bz.set("generation", JsonValue::number(static_cast<double>(mouse.bezier.generation)));
+    bz.set("segments", JsonValue::number(static_cast<double>(mouse.bezier.segments)));
+    bz.set("linear_threshold", JsonValue::number(static_cast<double>(mouse.bezier.linear_threshold)));
+    bz.set("curvature", JsonValue::number(static_cast<double>(mouse.bezier.curvature)));
+    bz.set("peak_min", JsonValue::number(static_cast<double>(mouse.bezier.peak_min)));
+    bz.set("peak_max", JsonValue::number(static_cast<double>(mouse.bezier.peak_max)));
+    bz.set("dir_up", JsonValue::boolean(mouse.bezier.dir_up));
+    bz.set("dir_down", JsonValue::boolean(mouse.bezier.dir_down));
+    bz.set("dir_left", JsonValue::boolean(mouse.bezier.dir_left));
+    bz.set("dir_right", JsonValue::boolean(mouse.bezier.dir_right));
+    bz.set("min_move", JsonValue::number(static_cast<double>(mouse.bezier.min_move)));
+    m.set("bezier", std::move(bz));
     // 热键保护（hotkey_guard）：按一次 toggle_hotkey 切换「热键挂起」。
     // 挂起状态本身是运行时状态（AimThread 成员），**不落盘**；这里只持久化配置。
     JsonValue hg = JsonValue::object();
@@ -1160,6 +1175,23 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
             p.mouse.trigger2.stop_detect_tolerance = static_cast<int>(obj_int(*tg, "stop_detect_tolerance", 60));
             p.mouse.trigger2.stop_detect_range = static_cast<int>(obj_int(*tg, "stop_detect_range", 80));
             p.mouse.trigger2.stop_detect_interval = static_cast<int>(obj_int(*tg, "stop_detect_interval", 10));
+        }
+        // 贝塞尔弧线（2026-09-26 接线）：缺字段一律取结构体默认（enabled=false ⇒ 不改误差）。
+        if (const JsonValue* bz = m->find("bezier"); bz && bz->is_object()) {
+            auto& c = p.mouse.bezier;
+            const JsonValue* en = bz->find("enabled");
+            c.enabled = (en && en->is_bool()) ? en->as_bool(false) : false;
+            c.generation = static_cast<int>(obj_int(*bz, "generation", 1));
+            c.segments = static_cast<float>(obj_num(*bz, "segments", 10.0));
+            c.linear_threshold = static_cast<float>(obj_num(*bz, "linear_threshold", 45.0));
+            c.curvature = static_cast<float>(obj_num(*bz, "curvature", 0.2));
+            c.peak_min = static_cast<float>(obj_num(*bz, "peak_min", 0.2));
+            c.peak_max = static_cast<float>(obj_num(*bz, "peak_max", 0.6));
+            c.dir_up = obj_bool(*bz, "dir_up", true);
+            c.dir_down = obj_bool(*bz, "dir_down", true);
+            c.dir_left = obj_bool(*bz, "dir_left", false);
+            c.dir_right = obj_bool(*bz, "dir_right", false);
+            c.min_move = static_cast<float>(obj_num(*bz, "min_move", 0.1));
         }
         // 热键保护（hotkey_guard）解析：缺字段一律取"保守默认"（enabled=false ⇒ 不翻转、位图原样透传），
         // 故旧配置/旧预设文件加载后行为与本功能加入前完全一致（向后兼容）。
