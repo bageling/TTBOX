@@ -62,11 +62,11 @@ def request(req_type: str, params: dict | None = None, timeout: float = DEFAULT_
             # ★ port 解析失败（空串/尾随空格/非数字）是配置错误，要给结构化错误，
             #   不能穿透成未处理异常（对照 api_v1.py 同名实现捕获 ValueError）。
             try:
-                target = (host, int(port))
+                port_num = int(port)
             except ValueError:
-                target = None
-            if target is None:
                 raise ValueError(f'非法 TTBOX_IPC_TCP 端口: {port!r}')
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            target = (host, port_num)
         else:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             target = base
@@ -84,6 +84,9 @@ def request(req_type: str, params: dict | None = None, timeout: float = DEFAULT_
             if not chunk:
                 break
             buf += chunk
+            # 防御：对端异常回包无换行时不要无限吃内存（正常响应远小于此）
+            if len(buf) > (16 << 20):
+                return {'status': 3, 'error': 'IPC 响应超长（>16MB）'}
         if not buf:
             return {'status': 3, 'error': 'IPC 无响应（Core 未运行?）'}
         return json.loads(buf.decode())
@@ -91,6 +94,9 @@ def request(req_type: str, params: dict | None = None, timeout: float = DEFAULT_
         # ★ 必须在 OSError 之前：socket.timeout 是 OSError 子类（3.10 起 = TimeoutError），
         #   排在后面就是死代码，超时永远被误报成"无法连接"。
         return {'status': 3, 'error': 'IPC 响应超时'}
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        # 对照 api_v1.py 同名实现：Core 返回非 UTF-8/非 JSON 时给结构化错误而非 500
+        return {'status': 3, 'error': 'IPC 响应非合法 JSON'}
     except (FileNotFoundError, ConnectionRefusedError, AttributeError, OSError):
         return {'status': 3, 'error': '无法连接 Core IPC'}
     finally:
