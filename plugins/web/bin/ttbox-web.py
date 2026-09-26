@@ -2575,7 +2575,7 @@ def api_ota_install():
 #   正式服务器（2026-09-19）：cctv2.top，经七牛映射 外网10046→内网443；
 #   地址必须带端口（外网 443 未映射）。值含 example.com（占位）⇒
 #   /api/update/check 仍 fail-closed 503（单测会 patch 回占位值验证这条）。
-OTA_SERVER_URL = 'https://cctv2.top:10046/ota'
+OTA_SERVER_URL = 'https://cctv2.top:10086/ota'
 # 任务目录（特权通道，§2.2）：web（User=ttbox）写 JSON，root 更新器经 path 单元消费
 OTA_JOBS_DIR = '/var/lib/ttbox/ota/jobs'
 OTA_UPDATER_PATH = '/opt/ttbox/current/scripts/ttbox_ota_updater.py'

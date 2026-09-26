@@ -24,14 +24,14 @@ GET {OTA_SERVER_URL}/latest?current=<当前版本>
 
 ### 响应（200，JSON）
 
-现役服务器（2026-09-19 上线）：`OTA_SERVER_URL = https://cctv2.top:10046/ota`，
+现役服务器（2026-09-19 上线）：`OTA_SERVER_URL = https://cctv2.top:10086/ota`，
 经七牛映射「外网 10046 → 内网 443」，**地址必须带端口**（外网 443 未映射）。
 
 ```json
 {
   "latest_version": "1.5.0",
-  "package_url": "https://cctv2.top:10046/ota/pkgs/ttbox-update-1.5.0.tgz",
-  "sign_url": "https://cctv2.top:10046/ota/pkgs/ttbox-update-1.5.0.tgz.sign.json"
+  "package_url": "https://cctv2.top:10086/ota/pkgs/ttbox-update-1.5.0.tgz",
+  "sign_url": "https://cctv2.top:10086/ota/pkgs/ttbox-update-1.5.0.tgz.sign.json"
 }
 ```
 

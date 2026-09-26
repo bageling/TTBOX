@@ -8,7 +8,7 @@
 #   `ttbox.sh doctor` 会比对两处是否漂移。
 #   正式服务器（2026-09-19）：cctv2.top，经七牛映射 外网10046→内网443。
 #   地址必须带端口（外网 443 没有映射，不带端口的 https://cctv2.top/… 在外网不通）。
-OTA_SERVER_URL="https://cctv2.top:10046/ota"
+OTA_SERVER_URL="https://cctv2.top:10086/ota"
 
 set -euo pipefail
 
