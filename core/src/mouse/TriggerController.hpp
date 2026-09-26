@@ -52,6 +52,12 @@ struct TriggerCmd {
     bool recoil_simple = false;
     bool recoil_adv = false;
     bool recoil_crosshair = false;
+    // 压枪联动偏移（px）：目标框高度 × trigger.y_offset，由 AimThread 叠到瞄准点上。
+    // 为什么在这里算：扳机才知道「这一枪打没打」，压枪模块只在扳机开火后才需要这份偏移。
+    float recoil_y_offset_px = 0.0f;
+    // 这一枪是哪套扳机打的：移动节流（trigger2.move_throttle_frames）只对 2.0 生效，
+    // 两套共用同一个 TriggerCmd，不标来源的话会误伤 v7.26。
+    bool fired_by_trigger2 = false;
 
     bool any() const { return fire; }
 };
@@ -66,6 +72,7 @@ struct TriggerInput {
     uint16_t hotkey_bits = 0;       // 当前物理按键位图（位掩码，见文件头）
     bool center_covered = true;     // 准星中心是否被任一检测框覆盖
     bool stop_detect_found = true;  // 中心是否命中指定准星颜色（急停检测）
+    float target_height_px = 0.0f;  // 锁定目标框高度（px，压枪联动偏移换算用）
 };
 
 // 自动扳机 v7.26（按住长键 + 点按激活 → 连发 / 计数）
@@ -116,7 +123,10 @@ public:
             tap_prev_ = tap_now;
         }
         if (!activated_) return cmd;
-        aim_range_active_ = cfg.with_aim;
+        // 附带自瞄的置信度门（trigger.aim_confidence）：随扳机一起开的那份自瞄，
+        // 只跟把握到这个数以上的目标。0 或负 = 不设这道门（沿用旧行为）。
+        aim_range_active_ = cfg.with_aim &&
+                            (cfg.aim_confidence <= 0.0f || in.target_conf >= cfg.aim_confidence);
 
         // ---- 计数模式打满即收工 ----
         if (!cfg.rifle_mode && shot_count_ >= cfg.click_count) {
@@ -203,6 +213,11 @@ private:
             cmd.recoil_simple = true;
             cmd.recoil_adv = true;
             cmd.recoil_crosshair = true;
+        }
+        // 联动偏移（trigger.y_offset）：压枪量按「目标框高度 × 比例」换算，
+        // 目标越大压得越多 —— 远处小目标自动少压。比例 0 时不产生偏移。
+        if (cfg.recoil_enabled && cfg.y_offset > 0.0f) {
+            cmd.recoil_y_offset_px = in.target_height_px * cfg.y_offset;
         }
         shot_count_++;
         last_fire_ms_ = in.now_ms;
@@ -327,6 +342,7 @@ private:
         cmd.button = cfg.fire_button;
         cmd.count = cfg.fire_count > 1 ? cfg.fire_count : 1;
         cmd.press_duration_ms = cfg.press_duration;
+        cmd.fired_by_trigger2 = true;
         if (cfg.with_simple_recoil) cmd.recoil_simple = true;
         if (cfg.with_adv_recoil) cmd.recoil_adv = true;
         fired_ = true;

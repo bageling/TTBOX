@@ -5522,9 +5522,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     <div class="field-grid compact assist-field-pair">
                       <label class="field">联动偏移比例<input id="trigger_y_offset" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">压枪量按目标框高度的这个比例换算。</span></label>
                     </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="trigger_status_log" data-config type="checkbox"> 输出开火状态日志</label>
-                    </div>
                   </div>
                 </article>
                 <article class="module-tile">
@@ -5572,10 +5569,6 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                     </div>
                     <div class="check-field">
                       <label class="check-line"><input id="trigger2_with_crosshair" data-config type="checkbox"> 中心须被目标框覆盖</label>
-                    </div>
-                    <div class="check-field">
-                      <label class="check-line"><input id="trigger2_lite_mode" data-config type="checkbox"> 精简模式</label>
-                      <span class="field-hint">跳过部分判定，低配机更省算力。</span>
                     </div>
                     <div class="check-field">
                       <label class="check-line"><input id="trigger2_with_simple_recoil" data-config type="checkbox"> 联动简易压枪</label>
@@ -5764,6 +5757,19 @@ html[data-ui-brand="xcsh"] textarea:focus-visible {
                       <label class="field">每秒摆几次<input id="global_wave_freq" data-config type="number" min="0" step="0.1"><span class="field-hint">摆动频率，1 = 每秒来回一次。</span></label>
                       <label class="field">平滑<input id="global_wave_smooth" data-config type="number" min="0" max="0.99" step="0.01"><span class="field-hint">0 为不平滑。</span></label>
                     </div>
+                  </div>
+                </article>
+                <article class="module-tile">
+                  <div class="module-title">
+                    <strong>远近手感曲线</strong>
+                    <label class="switch"><input id="personal_motion_enabled" data-config type="checkbox"><span></span></label>
+                  </div>
+                  <div class="assist-section-body">
+                    <div class="field-hint">让准星在离目标远的时候走得快一点、贴近的时候走得慢一点（更接近真人的手感）。默认关，关着的时候完全不影响输出。</div>
+                    <div class="field-grid compact assist-field-pair">
+                      <label class="field">曲线强度<input id="personal_motion_curve_blend" data-config type="number" min="0" max="1" step="0.05"><span class="field-hint">0 = 完全不按曲线走（跟关着一样），1 = 完全按曲线。想只要一点点效果就填 0.3~0.5。</span></label>
+                    </div>
+                    <div class="field-hint">内置曲线是「贴着目标时 0.75 倍，离 128 像素以上 1.25 倍」，中间平滑过渡。要自己画曲线得改配置文件里的 knots（面板没做编辑器）。</div>
                   </div>
                 </article>
                 <article class="module-tile">
@@ -6556,6 +6562,10 @@ const BB_CTRL_MODULES = [
     ["freq", "n", 1.0],
     ["smooth", "n", 0.5],
   ]],
+  ["personal_motion", [
+    ["enabled", "b", false],
+    ["curve_blend", "n", 1.0],
+  ]],
   ["bezier", [
     ["enabled", "b", false],
     ["curvature", "n", 0.2],
@@ -6615,7 +6625,6 @@ const BB_CTRL_MODULES = [
     ["press_duration", "n", 50.0],
     ["recoil_enabled", "b", true],
     ["y_offset", "n", 0.8],
-    ["status_log", "b", false],
   ]],
   ["trigger2", [
     ["enabled", "b", false],
@@ -6638,7 +6647,6 @@ const BB_CTRL_MODULES = [
     ["precision_range", "n", 10.0],
     ["precision_frames", "i", 5],
     ["retarget_reset_ms", "n", 1000.0],
-    ["lite_mode", "b", false],
     ["stop_detect_enabled", "b", false],
     ["stop_detect_color_id", "i", 2],
     ["stop_detect_tolerance", "n", 60.0],
@@ -6683,7 +6691,7 @@ const BB_SECTION_MODULES = {
   "assist-section-recoil": ["recoil_bb", "vc"],
   "assist-section-trigger": ["trigger", "trigger2"],
   "assist-section-lead": ["lead1", "lead2"],
-  "assist-section-humanize": ["humanize", "anti_overshoot", "speed_adaptive_kp", "global_wave", "bezier"],
+  "assist-section-humanize": ["humanize", "anti_overshoot", "speed_adaptive_kp", "global_wave", "personal_motion", "bezier"],
   "assist-section-selector": ["selector"],
 };
 

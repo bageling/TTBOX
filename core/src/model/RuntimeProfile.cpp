@@ -113,8 +113,7 @@ bool RuntimeProfile::validate(std::string* error) const {
         mouse.hfov, mouse.vfov, mouse.move_speed_x, mouse.move_speed_y,
         mouse.aim_point.aim_offset_x, mouse.aim_point.aim_offset_y,
         mouse.aim_point.offset_x, mouse.aim_point.offset_y,
-        mouse.personal_motion.curve_blend, mouse.personal_motion.speed_blend,
-        mouse.personal_motion.reaction_blend, mouse.personal_motion.max_reaction_delay_ms,
+        mouse.personal_motion.curve_blend,
         inference.confidence, inference.iou,
         fov.center_x, fov.center_y, fov.radius,
     };
@@ -308,11 +307,7 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "trigger2.confidence 超出 [0,1]";
         return false;
     }
-    if (mouse.personal_motion.curve_blend < 0.0f || mouse.personal_motion.curve_blend > 1.0f ||
-        mouse.personal_motion.speed_blend < 0.0f || mouse.personal_motion.speed_blend > 1.0f ||
-        mouse.personal_motion.reaction_blend < 0.0f || mouse.personal_motion.reaction_blend > 1.0f ||
-        mouse.personal_motion.max_reaction_delay_ms < 0.0f ||
-        mouse.personal_motion.max_reaction_delay_ms > 1000.0f) {
+    if (mouse.personal_motion.curve_blend < 0.0f || mouse.personal_motion.curve_blend > 1.0f) {
         if (error) *error = "personal_motion 混合参数超出范围";
         return false;
     }
@@ -488,9 +483,8 @@ JsonValue RuntimeProfile::to_json() const {
     JsonValue pm = JsonValue::object();
     pm.set("enabled", JsonValue::boolean(mouse.personal_motion.enabled));
     pm.set("curve_blend", JsonValue::number(static_cast<double>(mouse.personal_motion.curve_blend)));
-    pm.set("speed_blend", JsonValue::number(static_cast<double>(mouse.personal_motion.speed_blend)));
-    pm.set("reaction_blend", JsonValue::number(static_cast<double>(mouse.personal_motion.reaction_blend)));
-    pm.set("max_reaction_delay_ms", JsonValue::number(static_cast<double>(mouse.personal_motion.max_reaction_delay_ms)));
+    // ★ speed_blend / reaction_blend / max_reaction_delay_ms 已从配置里删掉（2026-09-26）：
+    //   PersonalMotion 只读 enabled / curve_blend，那三个从头到尾没人读，属死参数。
     JsonValue knots = JsonValue::array();
     for (const float knot : mouse.personal_motion.knots) {
         knots.push_back(JsonValue::number(static_cast<double>(knot)));
@@ -777,7 +771,7 @@ JsonValue RuntimeProfile::to_json() const {
     m.set("aim_offset_y", JsonValue::number(static_cast<double>(mouse.aim_point.aim_offset_y)));
     m.set("offset_x", JsonValue::number(static_cast<double>(mouse.aim_point.offset_x)));
     m.set("offset_y", JsonValue::number(static_cast<double>(mouse.aim_point.offset_y)));
-    m.set("switch_delay_ms", JsonValue::number(static_cast<double>(mouse.aim_point.switch_delay_ms)));
+    // switch_delay_ms 已删（尸体字段，见 MouseTypes.hpp 的说明）；老配置里带着会被忽略。
     m.set("lost_grace_ms", JsonValue::number(static_cast<double>(mouse.lost_grace_ms)));
     m.set("switch_hysteresis", JsonValue::number(static_cast<double>(mouse.switch_hysteresis)));
     m.set("switch_cooldown_ms", JsonValue::number(static_cast<double>(mouse.switch_cooldown_ms)));
@@ -917,9 +911,8 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         if (const JsonValue* pm = m->find("personal_motion"); pm && pm->is_object()) {
             p.mouse.personal_motion.enabled = obj_bool(*pm, "enabled", false);
             p.mouse.personal_motion.curve_blend = static_cast<float>(obj_num(*pm, "curve_blend", 1.0));
-            p.mouse.personal_motion.speed_blend = static_cast<float>(obj_num(*pm, "speed_blend", 1.0));
-            p.mouse.personal_motion.reaction_blend = static_cast<float>(obj_num(*pm, "reaction_blend", 0.7));
-            p.mouse.personal_motion.max_reaction_delay_ms = static_cast<float>(obj_num(*pm, "max_reaction_delay_ms", 250.0));
+            // speed_blend / reaction_blend / max_reaction_delay_ms 已删（core 从不读）；
+            // 老配置里带着这几个键也无妨 —— 反序列化只认在用的键，多余的被忽略。
             if (const JsonValue* knots = pm->find("knots"); knots && knots->is_array()) {
                 for (const auto& item : knots->as_array()) {
                     if (item.is_number() && p.mouse.personal_motion.knots.size() < 32) {
@@ -1219,7 +1212,6 @@ RuntimeProfile RuntimeProfile::from_json(const JsonValue& v) {
         p.mouse.aim_point.aim_offset_y = static_cast<float>(obj_num(*m, "aim_offset_y", 0.0));
         p.mouse.aim_point.offset_x = static_cast<float>(obj_num(*m, "offset_x", 0.5));
         p.mouse.aim_point.offset_y = static_cast<float>(obj_num(*m, "offset_y", 0.5));
-        p.mouse.aim_point.switch_delay_ms = static_cast<int>(obj_int(*m, "switch_delay_ms", 30));
         p.mouse.lost_grace_ms = static_cast<float>(obj_num(*m, "lost_grace_ms", 78.0));
         p.mouse.switch_hysteresis = static_cast<float>(obj_num(*m, "switch_hysteresis", 0.5));
         // 选靶四项机制（默认 0/false，见 MouseProfile 注释）

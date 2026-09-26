@@ -48,6 +48,8 @@ void AimThread::reset_runtime_state() {
     trigger_.reset();
     trigger_release_btn_ = 0;
     trigger_release_at_ms_ = 0;
+    trigger_recoil_offset_px_ = 0.0f;
+    trigger_throttle_frames_ = 0;
     bezier_.reset();
     last_injection_allowed_ = false;
     display_smooth_x1_.reset();
@@ -436,6 +438,14 @@ void AimThread::loop() {
                     control_x = bw.dx;
                     control_y = bw.dy;
                 }
+                // ---- 扳机压枪联动偏移（trigger.y_offset，2026-09-26 接线）----
+                // 面板早就有这一格，但 core 从不读它（假开关）。语义：开火后把瞄准点
+                // 往下压「目标框高 × 比例」，目标越近（框越大）压得越多。
+                // 单位与 control_y 同为像素 ⇒ 直接进 PID，走的是正式输出链（不是旁路）。
+                if (trigger_recoil_offset_px_ != 0.0f) {
+                    control_y += trigger_recoil_offset_px_;
+                    trigger_recoil_offset_px_ = 0.0f;   // 只在开火的下一帧生效一次
+                }
                 // pid1.cpp P_PID 直接消费控制域误差（像素域）。
                 // FOV 模式：fov_out 已是 count 域最终移动量，直接作为控制器输出（旁路 kp×err）。
                 trace_smith_dx = 0.0f; trace_smith_dy = 0.0f;
@@ -536,6 +546,8 @@ void AimThread::loop() {
                 tin.stop_detect_found = frame_profile->mouse.trigger2.stop_detect_enabled
                                             ? task.stop_detect_hit
                                             : true;
+                // 压枪联动偏移的换算基数（trigger.y_offset = 框高的比例）
+                tin.target_height_px = selected.valid ? (selected.box.y2 - selected.box.y1) : 0.0f;
                 trig_cmd = trigger_.update(frame_profile->mouse, tin);
 
                 // ---- 按下/抬起：拆成两条命令，绝不在控制线程里 sleep ----
@@ -552,6 +564,14 @@ void AimThread::loop() {
                     const float hold_ms = trig_cmd.press_duration_ms > 1.0f
                                               ? trig_cmd.press_duration_ms : 10.0f;
                     trigger_release_at_ms_ = now_ms32 + static_cast<uint32_t>(hold_ms);
+                    // 压枪联动偏移：下一帧叠进 control_y（本帧的 control 已经算完了）
+                    trigger_recoil_offset_px_ = trig_cmd.recoil_y_offset_px;
+                    // 移动节流：只有 2.0 那套有这个参数，开火后若干帧不发位移（防开火抖动）
+                    if (trig_cmd.fired_by_trigger2 &&
+                        frame_profile->mouse.trigger2.move_throttle_frames > 0) {
+                        trigger_throttle_frames_ =
+                            frame_profile->mouse.trigger2.move_throttle_frames;
+                    }
                 }
             } else {
                 trigger_.reset();
@@ -667,6 +687,16 @@ void AimThread::loop() {
             if (!injection_allowed) {
                 move_x = 0;
                 move_y = 0;
+            }
+            // ---- 扳机移动节流（trigger2.move_throttle_frames，2026-09-26 接线）----
+            // 开火后这几帧不送位移，压掉扣扳机那一下的抖动。★★ 位移不是丢掉：
+            // 退回 remainder，节流过后再顺着发出来（否则每次开火都吃掉一截位移）。
+            if (trigger_throttle_frames_ > 0 && (move_x != 0 || move_y != 0)) {
+                remainder_x_ += static_cast<float>(move_x);
+                remainder_y_ += static_cast<float>(move_y);
+                move_x = 0;
+                move_y = 0;
+                --trigger_throttle_frames_;
             }
             output_->send(output::OutputAction{move_x, move_y, 0, 0, task.frame_number, task.timestamp_us});
             // ---- 第13阶段：链路诊断采样（默认关闭；开启后每 N 帧输出一次完整链路）----

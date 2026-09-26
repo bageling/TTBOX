@@ -863,6 +863,13 @@ CTRL_BLOCKS = [
         ('enabled', 'b', False), ('amp_x', 'n', 0.10), ('amp_y', 'n', 0.10),
         ('freq', 'n', 1.0), ('smooth', 'n', 0.50),
     ]),
+    # 个人动作曲线：core 一直在用（AimThread 的 personal_gain），但面板**从来没有控件**
+    #   （此前只有几行手写搬运，UI 缺）⇒ 只能手改 json。本轮补成表驱动 + 卡片。
+    #   只暴露 PersonalMotion 真正读的两个字段（enabled / curve_blend）；
+    #   speed_blend / reaction_blend / max_reaction_delay_ms core 从不读，不进表。
+    ('personal_motion', 'personal_motion', [
+        ('enabled', 'b', False), ('curve_blend', 'n', 1.0),
+    ]),
     # 贝塞尔弧线（2026-09-26 接线）：只暴露 warp 用法真正读到的字段。
     #   generation / segments 是 path1/path2 拆点列那套用的，主链走 warp_error 不读它们
     #   ⇒ 刻意不进表（不补默认值，由 Core 结构体默认兜住），免得面板摆一堆无效开关。
@@ -892,7 +899,9 @@ CTRL_BLOCKS = [
         ('first_delay_min', 'n', 20.0), ('first_delay_max', 'n', 30.0),
         ('rifle_mode', 'b', True), ('rifle_interval', 'n', 50.0), ('click_count', 'i', 50),
         ('click_key', 'key', 1), ('press_duration', 'n', 50.0),
-        ('recoil_enabled', 'b', True), ('y_offset', 'n', 0.8), ('status_log', 'b', False),
+        ('recoil_enabled', 'b', True), ('y_offset', 'n', 0.8),
+        # ★ status_log（输出开火状态日志）已从面板撤掉：core 没有任何实现消费它，
+        #   摆着就是"点了没反应"的假开关。配置键保留在结构体里，但不再搬运。
     ]),
     # BB 扳机 2.0
     ('trigger2', 'trigger2', [
@@ -904,7 +913,9 @@ CTRL_BLOCKS = [
         ('press_duration', 'n', 50.0), ('move_throttle_frames', 'i', 2),
         ('precision_enabled', 'b', False), ('precision_range', 'n', 10.0),
         ('precision_frames', 'i', 5), ('retarget_reset_ms', 'n', 1000.0),
-        ('lite_mode', 'b', False), ('stop_detect_enabled', 'b', False),
+        # ★ lite_mode（精简模式）已从面板撤掉：core 侧没有"跳过部分判定"的实现，
+        #   属于空开关。配置键保留在结构体里，但不再搬运。
+        ('stop_detect_enabled', 'b', False),
         ('stop_detect_color_id', 'i', 2), ('stop_detect_tolerance', 'n', 60.0),
         ('stop_detect_range', 'n', 80.0), ('stop_detect_interval', 'i', 10),
     ]),
@@ -1654,11 +1665,8 @@ def profile_to_web(prof: dict) -> dict:
         'head_aim_head_height_fraction': head_aim.get('head_height_fraction', 0.28),
         'head_aim_safe_inset_fraction': head_aim.get('safe_inset_fraction', 0.12),
         'head_aim_max_lag_px': head_aim.get('max_lag_px', 1.25),
-        'personal_motion_enabled': personal_motion.get('enabled', False),
-        'personal_motion_curve_blend': personal_motion.get('curve_blend', 1.0),
-        'personal_motion_speed_blend': personal_motion.get('speed_blend', 1.0),
-        'personal_motion_reaction_blend': personal_motion.get('reaction_blend', 0.7),
-        'personal_motion_max_reaction_delay_ms': personal_motion.get('max_reaction_delay_ms', 250),
+        # personal_motion 改由 CTRL_BLOCKS 表驱动搬运（键名规则一致：前缀_字段），
+        # 这里不再手写（手写与表并存会互相覆盖，且容易漏同步）。
     }
     # ---- BB 对标新模块（2026-09-24）：Core 子对象 → 面板扁平键 ----
     # 缺字段补 Core 结构体默认值（表里的第三列），保证面板首次打开显示的就是 Core 的实际值。

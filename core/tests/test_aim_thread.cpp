@@ -31,6 +31,7 @@ public:
         std::lock_guard<std::mutex> lk(mu_);
         sum_x_ += a.move_x;
         sum_y_ += a.move_y;
+        if (a.move_x == 0 && a.move_y == 0) ++zero_frames_;
         ++frames_;
         return true;
     }
@@ -45,6 +46,7 @@ public:
     int64_t sum_x() { std::lock_guard<std::mutex> lk(mu_); return sum_x_; }
     int64_t sum_y() { std::lock_guard<std::mutex> lk(mu_); return sum_y_; }
     uint64_t frames() { std::lock_guard<std::mutex> lk(mu_); return frames_; }
+    uint64_t zero_frames() { std::lock_guard<std::mutex> lk(mu_); return zero_frames_; }
     uint64_t button_down() { std::lock_guard<std::mutex> lk(mu_); return down_; }
     uint64_t button_up() { std::lock_guard<std::mutex> lk(mu_); return up_; }
     uint8_t last_button() { std::lock_guard<std::mutex> lk(mu_); return last_button_; }
@@ -55,6 +57,7 @@ private:
     uint64_t frames_ = 0;
     uint64_t down_ = 0;
     uint64_t up_ = 0;
+    uint64_t zero_frames_ = 0;   // 零位移帧（移动节流的判据）
     uint8_t last_button_ = 0;
 };
 
@@ -412,6 +415,98 @@ TEST(aim_thread_bezier_warp_changes_output_when_enabled) {
     const double r_off = static_cast<double>(off.second) / static_cast<double>(off.first);
     const double r_on = static_cast<double>(on.second) / static_cast<double>(on.first);
     CHECK(std::fabs(r_on - r_off) > 0.05);      // ★ 接线后输出方向真的偏了
+}
+
+// ── 扳机联动两项（2026-09-26 接线）：trigger.y_offset 与 trigger2.move_throttle_frames ──
+// 这两格面板早就有，但 core 从不读（配置键在 core/src 里 0 消费点）。
+namespace {
+struct TriggerLinkageResult {
+    int64_t sum_x = 0;
+    int64_t sum_y = 0;
+    uint64_t zero_frames = 0;
+    uint64_t fires = 0;
+};
+
+// y_offset：压枪联动偏移（目标框高 × 比例）；throttle：开火后不发位移的帧数
+TriggerLinkageResult run_trigger_linkage(float y_offset, int throttle) {
+    AimTargetMailbox mailbox(1);
+    auto output = std::make_shared<CountingHidOutput>();
+    auto profile = std::make_shared<ttbox::core::RuntimeProfile>();
+    ttbox::core::RuntimeConfig config;
+    // ★ 必须按住 hotkey（0x02）：Hotkey Gate 会把未按下热键的输出整帧归零，
+    //   buttons=0 时 sum_y 恒 0，用例就成了"比两个 0"（假绿）。
+    std::atomic<uint16_t> buttons{0x02};
+
+    profile->mouse.enabled = true;
+    profile->mouse.aim_profiles[0].hotkey = 0x02;
+    profile->mouse.trigger.enabled = true;
+    profile->mouse.trigger.key1 = 0;
+    profile->mouse.trigger.key2 = 0;
+    profile->mouse.trigger.key3 = 0;
+    profile->mouse.trigger.rifle_mode = true;
+    profile->mouse.trigger.rifle_interval = 20.0f;
+    profile->mouse.trigger.confidence = 0.0f;
+    profile->mouse.trigger.dist_threshold = 10000.0f;
+    profile->mouse.trigger.crosshair_check = false;
+    profile->mouse.trigger.click_key = 0x01;
+    profile->mouse.trigger.press_duration = 4.0f;
+    profile->mouse.trigger.recoil_enabled = true;
+    profile->mouse.trigger.y_offset = y_offset;
+    profile->mouse.trigger2.enabled = (throttle > 0);
+    profile->mouse.trigger2.key1 = 0;
+    profile->mouse.trigger2.key2 = 0;
+    profile->mouse.trigger2.fire_button = 0x01;
+    profile->mouse.trigger2.confidence = 0.0f;
+    profile->mouse.trigger2.first_err = 10000.0f;
+    profile->mouse.trigger2.move_throttle_frames = throttle;
+    profile->mouse.output_deadzone = 0.0f;
+    config.update(profile);
+
+    AimThread thread;
+    thread.start(&mailbox, output, 1000, &config, &buttons);
+    for (uint64_t f = 1; f <= 30; ++f) {
+        AimTargetTask t;
+        t.frame_number = f;
+        t.timestamp_us = 1000ULL * f;
+        t.frame_width = 1280;
+        t.frame_height = 720;
+        t.has_target = true;
+        t.target = calib_box();
+        t.aim_point = {600.0f, 240.0f};
+        t.detections.push_back(calib_box());
+        mailbox.offer(0, t);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    thread.stop();
+    return TriggerLinkageResult{output->sum_x(), output->sum_y(), output->zero_frames(),
+                                thread.status().trigger_fire_count};
+}
+}  // namespace
+
+// y_offset：开火后瞄准点要额外往下压「框高 × 比例」⇒ 输出的 Y 分量必须变多。
+// 比的是 sum_y 的**差值**（同一段帧、同样配置，只改这一格），不是绝对值绝对值会随
+// 取帧抖动漂 —— 那是上一轮写贝塞尔用例时踩过的假阳性。
+TEST(aim_thread_trigger_y_offset_adds_downward_bias) {
+    const auto off = run_trigger_linkage(0.0f, 0);
+    const auto on = run_trigger_linkage(1.0f, 0);
+    CHECK(off.fires > 0);            // 前提：两边都真的开了枪（否则比的是空跑）
+    CHECK(on.fires > 0);
+    CHECK(on.sum_y > off.sum_y);     // ★ 比例 1.0 ⇒ 下压更多
+}
+
+// move_throttle_frames：开火后若干帧不送位移（防扣扳机抖动）。
+// ★ 同时锁「位移不丢」：节流帧的位移退回 remainder，所以累计位移不该被吃掉一大截。
+TEST(aim_thread_trigger2_move_throttle_suspends_output) {
+    const auto off = run_trigger_linkage(0.0f, 0);
+    const auto on = run_trigger_linkage(0.0f, 4);
+    CHECK(on.fires > 0);
+    CHECK(on.zero_frames > off.zero_frames);   // ★ 节流 ⇒ 零位移帧变多
+    // 只锁「链路没被锁死」：节流结束后必须继续有输出。
+    // ★ 不去断言"总位移量级守恒" —— 节流改变的是闭环行为（误差多存在几帧，PID 后续
+    //   输出轨迹整体不同），总量本就不该相等；位移不丢是由"退回 remainder"保证的，
+    //   那属于实现细节，靠代码注释与人工复核，不靠这条集成用例。
+    CHECK(off.sum_y != 0);
+    CHECK(on.sum_y != 0);
 }
 
 int main() {

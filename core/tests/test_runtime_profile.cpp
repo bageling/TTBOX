@@ -201,10 +201,9 @@ TEST(runtime_profile_personal_motion_roundtrip) {
     RuntimeProfile p;
     p.mouse.personal_motion.enabled = true;
     p.mouse.personal_motion.curve_blend = 0.8f;
-    p.mouse.personal_motion.speed_blend = 0.6f;
-    p.mouse.personal_motion.reaction_blend = 0.7f;
-    p.mouse.personal_motion.max_reaction_delay_ms = 250.0f;
     p.mouse.personal_motion.knots = {0.1f, 0.4f, 0.9f};
+    // speed_blend / reaction_blend / max_reaction_delay_ms 已删（core 从不读），
+    // 往返只验在用的字段。
 
     auto parsed = json_parse(p.to_json().dump());
     CHECK(parsed.ok);
@@ -212,9 +211,6 @@ TEST(runtime_profile_personal_motion_roundtrip) {
     RuntimeProfile q = RuntimeProfile::from_json(parsed.value);
     CHECK(q.mouse.personal_motion.enabled);
     CHECK_EQ(q.mouse.personal_motion.curve_blend, 0.8f);
-    CHECK_EQ(q.mouse.personal_motion.speed_blend, 0.6f);
-    CHECK_EQ(q.mouse.personal_motion.reaction_blend, 0.7f);
-    CHECK_EQ(q.mouse.personal_motion.max_reaction_delay_ms, 250.0f);
     CHECK_EQ(q.mouse.personal_motion.knots.size(), 3u);
 }
 

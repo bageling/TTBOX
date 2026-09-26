@@ -91,7 +91,8 @@ struct AimPointProfile {
     float aim_offset_x = 0.0f;  // crop 系 px（crop 中心 + 偏移 = 准星）
     float aim_offset_y = 0.0f;
     std::vector<ClassOffset> class_offsets;
-    int switch_delay_ms = 30;   // 类别偏移切换延迟（未启用前仅记录）
+    // ★ switch_delay_ms 已删（2026-09-26）：全仓只有序列化在搬它，没有任何消费者，
+    //   面板也没有对应控件 —— 属于"看着像配置、其实没人读"的尸体字段。
     HeadAimConfig head_aim;     // 头部瞄准约束（第3项）
 };
 
@@ -537,10 +538,10 @@ struct LockConfirmConfig {
 struct PersonalMotionConfig {
     bool enabled = false;
     float curve_blend = 1.0f;
-    float speed_blend = 1.0f;
-    float reaction_blend = 0.7f;
-    float max_reaction_delay_ms = 250.0f;
-    std::vector<float> knots;
+    // ★ speed_blend / reaction_blend / max_reaction_delay_ms 已删（2026-09-26）：
+    //   PersonalMotion::scale 从头到尾只读 enabled / curve_blend / knots，
+    //   那三个参数既不显示也不参与计算，留着只会让人以为调了有用。
+    std::vector<float> knots;  // 空 ⇒ 用 PersonalMotion::default_knots() 的内置曲线
 };
 
 // 鼠标配置（RuntimeProfile.mouse，与模型彻底分离）
