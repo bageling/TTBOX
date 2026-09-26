@@ -93,7 +93,7 @@
   [✓] 全部 .py 编译通过（54 个）
 
 =========== E. 制品完整性（对照 RELEASE_MANIFEST.json 全量 sha256） ===========
-  版本=1.5.54  git_sha=9fc62ef61287d58e94bcb0276c4fe08e249ae68a
+  版本=1.5.54  git_sha=7b2d2e953da4a58340f1cdbaf3129075997a1c92
   逐文件比对 154 项
   [✓] 154 项全部一致
 
@@ -132,7 +132,7 @@
   [✓] 整棵 /opt/ttbox 无 world-writable（实体文件/目录）
 
 =========== F2. 开箱可用性（激活凭据 / 可写目录）——独立重读，与 04b 的写入不复用 ===========
-  cloud 段: license_base_url=https://cctv2.top:10046/ttbox, app_key=ttbox, app_secret=bc4e…4ede
+  cloud 段: license_base_url=https://cctv2.top:10086/ttbox, app_key=ttbox, app_secret=bc4e…4ede
   [✓] 云端凭据权限 = root:ttbox 0640
   [✓] 云端凭据世界不可读（secret 不外泄）
   [✓] ttbox 身份可读云端凭据（web 要读）
