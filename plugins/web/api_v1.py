@@ -29,6 +29,7 @@ import os
 import re
 import socket
 import sys
+import threading
 import time
 import uuid
 from typing import Any, Callable
@@ -79,6 +80,11 @@ MODEL_ID_RE = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 # Core status -> HTTP 状态码（1=BAD_REQUEST 2=NOT_FOUND 3=INTERNAL 4=UNSUPPORTED）
 CORE_STATUS_HTTP = {1: 400, 2: 404, 3: 502, 4: 501}
 CORE_STATUS_CODE = {1: 'BAD_REQUEST', 2: 'NOT_FOUND', 3: 'CORE_INTERNAL', 4: 'UNSUPPORTED'}
+
+# 配置读-改-写（GET_CONFIG → 深合并 → SET_CONFIG）是三步非原子操作：
+# 两个并发 PUT 各自 GET 到同一份 base，后提交的会把先提交的整棵覆盖（丢更新）。
+# 本模块内用一把进程内锁把整段 RMW 串行化（与 ttbox-web.py 的 _CFG_WRITE_LOCK 各管各的模块）。
+_CONFIG_RW_LOCK = threading.Lock()
 
 
 def timeout_for(req_type: str) -> float:
@@ -268,19 +274,21 @@ def put_config():
     patch = copy.deepcopy(patch)
     patch.pop('model_id', None)
 
-    current = ipc_call('GET_CONFIG')
-    if current.get('unreachable'):
-        return _unreachable(str(current.get('error') or 'Core 不可达'))
-    if current.get('status') != 0:
-        return _from_core(current)
+    # RMW 全程持锁：GET 到 SET 之间不允许第二个并发写插进来，否则丢更新。
+    with _CONFIG_RW_LOCK:
+        current = ipc_call('GET_CONFIG')
+        if current.get('unreachable'):
+            return _unreachable(str(current.get('error') or 'Core 不可达'))
+        if current.get('status') != 0:
+            return _from_core(current)
 
-    data = current.get('data') if isinstance(current.get('data'), dict) else {}
-    base = data.get('runtime_profile')
-    if not isinstance(base, dict):
-        base = {}
+        data = current.get('data') if isinstance(current.get('data'), dict) else {}
+        base = data.get('runtime_profile')
+        if not isinstance(base, dict):
+            base = {}
 
-    merged = _deep_merge(base, patch)
-    return _forward('SET_CONFIG', {'profile': merged})
+        merged = _deep_merge(base, patch)
+        return _forward('SET_CONFIG', {'profile': merged})
 
 
 @api_v1.post('/runtime/<action>')
@@ -639,7 +647,10 @@ def capabilities():
 # 刻意不放 plugins/web/static/：那个目录会随版本整体覆盖，
 # 放 config 目录可以跨部署保留用户的手工调整。
 # ====================================================================
-UI_CUSTOM_PATH = os.environ.get('TTBOX_UI_CUSTOM_CSS', '/opt/ttbox/config/ui-custom.css')
+# 路径走 paths.py 单源（尊重 TTBOX_CONFIG_DIR），不再硬编码 /opt/ttbox/config；
+# TTBOX_UI_CUSTOM_CSS 仍可整体覆盖。
+UI_CUSTOM_PATH = os.environ.get(
+    'TTBOX_UI_CUSTOM_CSS', _ttbox_paths.config_dir() + '/ui-custom.css')
 UI_CUSTOM_MAX = 200_000  # 200KB 上限，防止误粘贴把磁盘写满
 
 # 设计器开关（默认关闭）：TTBOX_ENABLE_DESIGNER=1 才放行编辑器页面与写操作。
@@ -669,17 +680,32 @@ def _read_ui_custom() -> str:
 
 
 def _write_ui_custom(css: str) -> None:
-    """原子写：先写临时文件再 rename，避免写一半断电把样式文件写坏。"""
+    """原子写：先写临时文件再 rename，避免写一半断电把样式文件写坏。
+
+    临时文件名带随机后缀：两个并发写共用固定 .tmp 名会互相踩（A rename 后
+    B 还在往已被挪走的 tmp 写）。0600：CSS 里可能带用户不愿公开的自定义内容。
+    """
     path = UI_CUSTOM_PATH
-    tmp = path + '.tmp'
+    tmp = f'{path}.{uuid.uuid4().hex[:8]}.tmp'
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    with open(tmp, 'w', encoding='utf-8') as f:
-        f.write(css)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(css)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            pass  # Windows 开发机上 chmod 语义不同，尽力而为
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+        except OSError:
+            pass
 
 
 @api_v1.get('/designer/css')

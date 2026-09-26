@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 # 云端 expire_at 的固定时区：北京时间 UTC+8（契约钉死，不做本地时区推断）
@@ -57,7 +58,8 @@ class CloudSessionStore:
             os.makedirs(d, mode=0o700, exist_ok=True)
             doc = dict(session)
             doc['updated_at'] = int(time.time())
-            tmp = f'{self.path}.tmp.{os.getpid()}'
+            tmp = (f'{self.path}.tmp.{os.getpid()}.'
+                   f'{uuid.uuid4().hex[:8]}')
             fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
             try:
                 os.write(fd, json.dumps(doc, ensure_ascii=False).encode('utf-8'))

@@ -60,9 +60,16 @@ public:
             if (!has_aim_time_) {
                 has_aim_time_ = true;
                 last_aim_ms_ = ctx.now_ms;
+                // ★ 2026-09-26：抽样区间应是 [delay−rand, delay+rand]，
+                //   旧实现 lo + rand*(lo+hi) ⇒ 上界实际是 2×delay（delay=100,rand=50
+                //   时抽到 [50,250] 而非 [50,150]），均值也整体偏大 rand/2。
                 const float lo = cfg.delay_ms - cfg.delay_random_ms;
-                const float span = cfg.delay_ms + cfg.delay_random_ms;
-                delay_cached_ = (lo > 0.0f ? lo : 0.0f) + rand_unit() * span;
+                const float hi = cfg.delay_ms + cfg.delay_random_ms;
+                if (lo > 0.0f) {
+                    delay_cached_ = lo + rand_unit() * (hi - lo);
+                } else {
+                    delay_cached_ = rand_unit() * hi;
+                }
             }
             const float aim_timer = static_cast<float>(ctx.now_ms - last_aim_ms_);
             if (aim_timer < delay_cached_) {

@@ -164,6 +164,20 @@ bool RuntimeProfile::validate(std::string* error) const {
         if (error) *error = "mouse.kp 不能为负";
         return false;
     }
+    // ★ 2026-09-26（第四轮审计）：kd 为负 = 阻尼变正反馈；smooth 是"削弱倍率"
+    //   （smoothTerm 的 outputScale = 10000 - smooth），≥10000 输出恒 0 / 反向、
+    //   负值把输出放大逾万倍 —— 旧实现两者都完全不校验，SET_CONFIG 可注入。
+    if (mouse.kd_x < 0.0f || mouse.kd_y < 0.0f) {
+        if (error) *error = "mouse.kd 不能为负";
+        return false;
+    }
+    if (mouse.smooth_x < 0.0f || mouse.smooth_x > 9999.0f ||
+        mouse.smooth_y < 0.0f || mouse.smooth_y > 9999.0f) {
+        // 面板 Smooth 滑条范围 [0,9999]（0=完全不削）；≥10000 时削弱倍率 ≤0，
+        // 输出恒 0（=10000）或反向（>10000）。
+        if (error) *error = "mouse.smooth 必须在 [0,9999]";
+        return false;
+    }
     if (mouse.hfov <= 0.0f || mouse.hfov >= 180.0f ||
         mouse.vfov <= 0.0f || mouse.vfov >= 180.0f) {
         if (error) *error = "mouse.hfov/vfov 必须在 (0,180)";

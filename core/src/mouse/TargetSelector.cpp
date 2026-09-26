@@ -137,7 +137,12 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             if (t.active) {
                             t.lost_frames++;
                             // 宽限耗尽 → 放弃激活（不立即删 track，允许后续重建）
-                            if (t.lost_frames * 7 >= static_cast<uint32_t>(cfg.lost_grace_ms + 7)) {
+                            // ★ 2026-09-26：按真实时间判定（last_seen_ms 距今），
+                            //   旧实现 lost_frames*7 隐含 143fps 假设 —— 60fps 时
+                            //   实际宽限放大 2.4 倍、30fps 放大 4.7 倍，"打幽灵"
+                            //   的时长完全不受 lost_grace_ms 控制。回绕安全比较。
+                            if (static_cast<uint32_t>(now_ms - t.last_seen_ms) >=
+                                static_cast<uint32_t>(cfg.lost_grace_ms)) {
                                 t.active = false;
                                 active_track_ = -1;
                             }
@@ -198,7 +203,9 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             for (auto& t : tracks_) {
                 if (t.active) {
                     t.lost_frames++;
-                    if (t.lost_frames * 7 >= static_cast<uint32_t>(cfg.lost_grace_ms + 7)) {
+                    // 同上：按真实时间判定宽限（回绕安全），不再用 帧数×7ms
+                    if (static_cast<uint32_t>(now_ms - t.last_seen_ms) >=
+                        static_cast<uint32_t>(cfg.lost_grace_ms)) {
                         t.active = false;
                         active_track_ = -1;
                     }
@@ -256,8 +263,11 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
             }
             // 激活 track 未匹配：丢失宽限
             at->lost_frames++;
+            // ★ 2026-09-26：同上按真实时间判定（回绕安全），帧率偏离 143fps 时
+            //   旧口径的宽限失真最大 8.6 倍。
             const bool grace_exhausted =
-                at->lost_frames * 7 >= static_cast<uint32_t>(cfg.lost_grace_ms + 7);
+                static_cast<uint32_t>(now_ms - at->last_seen_ms) >=
+                static_cast<uint32_t>(cfg.lost_grace_ms);
             if (grace_exhausted) {
                 at->active = false;
                 active_track_ = -1;
@@ -288,10 +298,12 @@ std::vector<TargetSelector::Candidate> TargetSelector::collect_candidates(
         //   此时若还拦，会把正常跟踪一起挡死 —— 一律放行。
         if (cands.size() < 2) return false;
         if (cfg.switch_cooldown_ms > 0.0f && has_switch_) {
-            const long long since =
-                static_cast<long long>(now_ms) - static_cast<long long>(last_switch_ms_);
-            // since < 0 = 时钟回退（发生即视为冷却未过，保守不切）
-            if (since < 0 || since < static_cast<long long>(cfg.switch_cooldown_ms)) return true;
+            // ★ 2026-09-26：无符号回绕安全比较。now_ms 是 uint32 时基（V4L2 单调钟，
+            //   约 49.7 天回绕），旧实现有符号相减在回绕后恒为巨大负数 ⇒ 冷却永不解除，
+            //   而 last_switch_ms_ 只在第 3 层成功时更新（封锁本身阻止更新）⇒ 不可
+            //   自愈死锁，只有重启能救。无符号差值对回绕天然正确。
+            const uint32_t since = now_ms - last_switch_ms_;
+            if (since < static_cast<uint32_t>(cfg.switch_cooldown_ms)) return true;
         }
         if (cfg.switch_hysteresis > 0.0f && last_locked_dist_sq_ > 0.0f) {
             const float k = 1.0f + cfg.switch_hysteresis;

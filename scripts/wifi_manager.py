@@ -663,6 +663,17 @@ def _fallback_result() -> dict[str, Any]:
     return result
 
 
+def _write_psk_file(password: str) -> str:
+    """把 PSK 写进 0600 临时 passwd-file（nmcli passwd-file 消费）。
+    ★ 2026-09-26（第四轮审计）：密码放 argv 会经 /proc/<pid>/cmdline 泄漏给
+    同机所有本地用户（--wait 期间存活最长 40s）。全部改走 passwd-file。"""
+    fd, path = tempfile.mkstemp(prefix="ttbox-nmcli-psk-", text=True)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(f"802-11-wireless-security.psk:{password}\n")
+    return path
+
+
 def connect_wifi(ssid: str, password: str = "") -> dict[str, Any]:
     ssid = str(ssid or "").strip()
     password = str(password or "")
@@ -682,10 +693,12 @@ def connect_wifi(ssid: str, password: str = "") -> dict[str, Any]:
     connection = _user_connection_name(ssid)
     _delete_connection(connection)
     _delete_wifi_connections_for_ssid(ssid)
+    # ★ 密码经 passwd-file 下发，不再出现在 argv（/proc/cmdline 可读）
+    psk_file = _write_psk_file(password) if password else ""
     try:
         args = ["--wait", "40", "device", "wifi", "connect", ssid, "ifname", iface, "name", connection]
-        if password:
-            args.extend(["password", password])
+        if psk_file:
+            args.extend(["passwd-file", psk_file])
         _run_nmcli(args, timeout=45, check=True)
         _run_nmcli(
             [
@@ -710,6 +723,11 @@ def connect_wifi(ssid: str, password: str = "") -> dict[str, Any]:
         fallback = _fallback_result()
         raise WifiError(f"连接 {ssid} 失败，已尝试回到默认 Wi-Fi（{', '.join(DEFAULT_SSIDS)}）: {exc}", {"fallback": fallback}) from exc
     finally:
+        if psk_file:
+            try:
+                os.unlink(psk_file)
+            except OSError:
+                pass
         _start_wifi_bootstrap()
 
 
@@ -763,6 +781,10 @@ def _ensure_ap_connection(ssid: str, password: str) -> None:
             "wifi-sec.psk-flags",
             "0",
             "wifi-sec.psk",
+            # ★ 残留说明（第四轮审计）：nmcli connection modify 无 passwd-file 机制，
+            #   PSK 经 argv 短暂暴露是 nmcli 的平台限制；热点密码本就是设备本机的
+            #   /etc/NetworkManager/system-connections 明文存量（0600），风险边界不变。
+            # 用户自设的 client 密码已在 connect_wifi 改走 passwd-file。
             password,
             "ipv4.method",
             "shared",

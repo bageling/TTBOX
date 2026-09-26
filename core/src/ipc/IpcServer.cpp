@@ -83,6 +83,23 @@ bool set_recv_timeout_ms(int fd, int timeout_ms) {
 #endif
 }
 
+// 设置发送超时（毫秒）。★ 2026-09-26（第四轮审计）：此前只有 SO_RCVTIMEO ——
+//   客户端连上、发一条请求后不再 read，大响应（GET_PREVIEW 数百 KB base64）会
+//   填满 TCP 发送缓冲，sock_send 永久阻塞 ⇒ 连接线程永不退出、槽位耗尽、
+//   stop() 排空无限期挂起（关机挂死）。SO_SNDTIMEO 平台语义与 SO_RCVTIMEO 相同。
+bool set_send_timeout_ms(int fd, int timeout_ms) {
+#if defined(_WIN32)
+    DWORD ms = static_cast<DWORD>(timeout_ms);
+    return ::setsockopt(static_cast<SOCKET>(fd), SOL_SOCKET, SO_SNDTIMEO,
+                        reinterpret_cast<const char*>(&ms), sizeof(ms)) == 0;
+#else
+    struct timeval tv {};
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    return ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) == 0;
+#endif
+}
+
 #if defined(_WIN32)
 // MSVC 无 ssize_t：Windows 分支统一用 long long 语义的别名。
 using ssize_t = long long;
@@ -260,7 +277,7 @@ void sock_close(int fd) { ::close(fd); }
 
 #endif  // _WIN32
 
-std::string read_line(int fd, bool* ok) {
+std::string read_line(int fd, bool* ok, size_t max_line = 65536) {
     std::string buf;
     char tmp[4096];
     *ok = true;
@@ -278,8 +295,8 @@ std::string read_line(int fd, bool* ok) {
             buf.resize(pos);
             break;
         }
-        if (buf.size() > 65536) {
-            *ok = false;  // 超长请求，防滥用
+        if (buf.size() > max_line) {
+            *ok = false;  // 超长行，防滥用
             break;
         }
     }
@@ -389,9 +406,10 @@ void IpcServer::stop() {
     }
 
     // ---- 排空在途连接线程（防 use-after-free，见 hpp conn_fds_ 注释）----
-    // 持锁 shutdown 所有 fd，唤醒卡在 read_line/sock_recv 的线程；随后通过
-    // 条件变量等到列表真正清空。这里没有“超时后继续析构”的逃生口：只要
-    // 连接线程仍会访问 this，IpcServer 就必须活着。
+    // 持锁 shutdown 所有 fd，唤醒卡在 read_line/sock_send 的线程；随后通过
+    // 条件变量等到列表真正清空。没有"超时后继续析构"的逃生口（连接线程仍会
+    // 访问 this）—— 但 SO_SNDTIMEO/SO_RCVTIMEO 保证卡住的线程最迟 5s 自行退出，
+    // 所以这里的等待有界。仍保留周期性日志：万一真挂住，至少看得见卡在排空。
     {
         std::unique_lock<std::mutex> lk(conn_fds_mutex_);
         for (int fd : conn_fds_) {
@@ -401,7 +419,23 @@ void IpcServer::stop() {
             ::shutdown(fd, SHUT_RDWR);
 #endif
         }
-        conn_fds_cv_.wait(lk, [this] { return conn_fds_.empty(); });
+        int waited_s = 0;
+        while (!conn_fds_.empty()) {
+            if (conn_fds_cv_.wait_for(lk, std::chrono::seconds(10)) ==
+                std::cv_status::timeout) {
+                waited_s += 10;
+                TTBOX_LOG_WARN("IPC 排空等待中: 仍有 " +
+                               std::to_string(conn_fds_.size()) + " 个连接未退出 (" +
+                               std::to_string(waited_s) + "s)");
+                for (int fd : conn_fds_) {
+#if defined(_WIN32)
+                    ::shutdown(static_cast<SOCKET>(fd), SD_BOTH);
+#else
+                    ::shutdown(fd, SHUT_RDWR);
+#endif
+                }
+            }
+        }
     }
     active_connections_.store(0, std::memory_order_release);
 
@@ -483,6 +517,8 @@ void IpcServer::accept_loop() {
 // 关 fd 并释放槽位（槽位归还见 accept_loop 里线程收尾段）。
 // ★ 客户端侧的超时在 ipc_request 里设；两侧共用 set_recv_timeout_ms（平台语义差异见其注释）。
 constexpr int kServerRecvTimeoutMs = 5000;
+// ★ 发送超时（第四轮审计）：防"客户端收响应"卡死连接线程（见 set_send_timeout_ms 注释）。
+constexpr int kServerSendTimeoutMs = 5000;
 
 void IpcServer::handle_connection(int fd) {
     // ★ 2026-09-23 复核发现：accept 出来的 fd 此前没有任何超时，对端连上不发数据就会永久
@@ -490,6 +526,9 @@ void IpcServer::handle_connection(int fd) {
     //   所有新连接被立刻关闭，表现为客户端「连接成功却读不到响应」，IPC 等同不可用。
     if (!set_recv_timeout_ms(fd, kServerRecvTimeoutMs)) {
         IPCDBG("[IPC-SRV] fd=%d 设置接收超时失败 sockerr=%d\n", fd, sock_last_error());
+    }
+    if (!set_send_timeout_ms(fd, kServerSendTimeoutMs)) {
+        IPCDBG("[IPC-SRV] fd=%d 设置发送超时失败 sockerr=%d\n", fd, sock_last_error());
     }
     bool ok = false;
     std::string request_text = read_line(fd, &ok);
@@ -509,6 +548,13 @@ void IpcServer::handle_connection(int fd) {
         } else {
             resp = handle_request(parsed.value);
         }
+        response_text = resp.to_json();
+    } else if (!ok && !request_text.empty() && request_text.size() > 65536) {
+        // ★ 超长请求也必须回一个错误包：旧实现静默断开，客户端只能干等超时
+        //   且错误与真实原因（请求超长）不符。
+        IpcResponse resp;
+        resp.status = IpcError::kBadRequest;
+        resp.error = "请求超过 64KB 上限";
         response_text = resp.to_json();
     } else {
         // 空/异常连接：无需响应。这条是「客户端连接成功却读不到响应」的关键分支：
@@ -929,17 +975,34 @@ bool ipc_request(const std::string& socket_path, const std::string& request_json
     std::string payload = request_json;
     if (payload.empty() || payload.back() != '\n') payload.push_back('\n');
 
-    ssize_t sent = sock_send(fd, payload.data(), payload.size());
-    IPCDBG("[IPC-CLI] fd=%d send n=%lld/%zu sockerr=%d\n", fd, static_cast<long long>(sent),
+    // ★ 2026-09-26（第四轮审计）：SOCK_STREAM 允许任意短写，大 payload（大卡信封 /
+    //   超大 SET_CONFIG）只 send 一次会把半截 JSON 当成功 —— 与服务端同一口径：
+    //   循环发到完整或明确断连。
+    ssize_t sent_total = 0;
+    while (sent_total < static_cast<ssize_t>(payload.size())) {
+        const ssize_t n = sock_send(fd, payload.data() + sent_total,
+                                    payload.size() - static_cast<size_t>(sent_total));
+        if (n <= 0) break;
+        sent_total += n;
+    }
+    IPCDBG("[IPC-CLI] fd=%d send n=%lld/%zu sockerr=%d\n", fd, static_cast<long long>(sent_total),
            payload.size(), sock_last_error());
-    if (sent <= 0) {
+    if (sent_total <= 0) {
         if (error) *error = "发送请求失败";
+        sock_close(fd);
+        return false;
+    }
+    if (sent_total < static_cast<ssize_t>(payload.size())) {
+        if (error) *error = "发送请求不完整（" + std::to_string(sent_total) + "/" +
+                            std::to_string(payload.size()) + "）";
         sock_close(fd);
         return false;
     }
 
     bool ok = false;
-    response = read_line(fd, &ok);
+    // ★ 响应读取上限 8MB：GET_PREVIEW 的大 base64 响应轻松超过 64KB，
+    //   旧实现复用请求的 64KB 上限读响应 ⇒ 高画质预览必然"读取响应失败"。
+    response = read_line(fd, &ok, 8u * 1024 * 1024);
     IPCDBG("[IPC-CLI] fd=%d read ok=%d bytes=%zu\n", fd, ok ? 1 : 0, response.size());
     sock_close(fd);
     if (!ok) {

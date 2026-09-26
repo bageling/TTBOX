@@ -61,6 +61,7 @@ class HeartbeatWorker:
         self._lock = threading.Lock()
         self._stop_evt = threading.Event()
         self._thread: threading.Thread | None = None
+        self._expired_sent = False   # 403 权威否定已发过 on_expired（恢复成功后复位）
         self._state: dict = {
             'online': False,
             'last_ok_at': 0.0,
@@ -133,10 +134,24 @@ class HeartbeatWorker:
             except CloudLicenseError as e:
                 if e.status == 401:
                     # token 过期 ⇒ 用落盘 card_key 自动重登（P0-4）
-                    if self._login_again():
+                    login = self._login_again()
+                    if login is True:
                         fail_since = None
                         backoff = _BACKOFF_BASE_S
-                        continue  # 立即用新 token 补一次心跳
+                        # ★ 2026-09-26（第四轮审计）：重登成功也不能全速补打 ——
+                        #   服务端对新 token 也持续 401（token 校验回归/时钟漂移签名
+                        #   过窗）时，旧实现是无 sleep 热循环，对云端自我 DoS。
+                        self._sleep(_BACKOFF_BASE_S)
+                        continue  # 用新 token 补一次心跳
+                    if login == 'network':
+                        # 网络异常 ≠ 权威否定：按网络类失败退避，不烧任何配额
+                        now = time.time()
+                        if fail_since is None:
+                            fail_since = now
+                        self._set_state(error='token 过期重登遇网络异常')
+                        self._sleep(self._backoff_or_interval(backoff, interval, True))
+                        backoff = min(backoff * 2, _BACKOFF_CAP_S)
+                        continue
                     self._set_state(error='token 已过期，重新登录失败')
                     self._sleep(self._backoff_or_interval(backoff, interval, True))
                     backoff = min(backoff * 2, _BACKOFF_CAP_S)
@@ -145,16 +160,32 @@ class HeartbeatWorker:
                     msg = e.message or ''
                     # 会话级失效（会话行被置 invalid）⇒ 先试重登自愈；失败/超限才锁。
                     if _is_session_loss(msg) and recover_left > 0:
-                        if self._login_again():
+                        login = self._login_again()
+                        if login is True:
                             fail_since = None
                             backoff = _BACKOFF_BASE_S
                             recover_left -= 1
+                            self._sleep(_BACKOFF_BASE_S)   # 防热循环（同 401 分支）
                             continue  # 立即用新 token 补一次心跳
+                        if login == 'network':
+                            # ★ 2026-09-26：瞬时断网 ≠ 权威否定 —— 旧实现把它当
+                            # "重登失败"直接烧光自愈机会并锁死 core，弱网下把本可
+                            # 自愈的会话失效放大成永久锁机。改按网络失败退避重试。
+                            now = time.time()
+                            if fail_since is None:
+                                fail_since = now
+                            self._set_state(error='会话失效恢复中（网络异常），稍后重试')
+                            self._sleep(self._backoff_or_interval(backoff, interval, True))
+                            backoff = min(backoff * 2, _BACKOFF_CAP_S)
+                            continue
                         recover_left = 0
                     # 云端权威否定（到期/禁用/强制下线）⇒ 快路径：回调让 core 立即锁定（D4）
                     fail_since = None
                     self._set_state(online=False, error=msg or '卡密已到期')
-                    if self._on_expired is not None:
+                    # ★ 2026-09-26：on_expired 只发一次（成功恢复后复位）—— 旧实现
+                    #   锁死后每轮心跳仍 403，ACTIVATE_CLOUD{deactivate} 每分钟重发。
+                    if self._on_expired is not None and not self._expired_sent:
+                        self._expired_sent = True
                         try:
                             self._on_expired()
                         except Exception:
@@ -178,6 +209,7 @@ class HeartbeatWorker:
             fail_since = None
             backoff = _BACKOFF_BASE_S
             recover_left = _SESSION_RECOVER_MAX
+            self._expired_sent = False   # 恢复正常 ⇒ 允许下一次权威否定再发 on_expired
             interval = int(result.get('heartbeat_interval') or interval)
             self._set_state(online=True, last_ok_at=time.time(),
                             expire_at=str(sess.get('expire_at') or ''),
@@ -186,7 +218,16 @@ class HeartbeatWorker:
                                         or self._state_timeout()),
                             error='')
             # 云端可下发 interval ⇒ 持久化，重启后立即按新节奏跑
-            upd = dict(sess)
+            # ★ 2026-09-26：sess 是至多一个 interval 之前的旧快照，整体回写会把
+            #   期间面板 card-login 写入的新 token/expire 顶掉（"激活后偶发掉线"）。
+            #   以最新落盘会话为 base 合并节奏字段；token 已变则本轮放弃持久化。
+            fresh = self._session.load()
+            if not isinstance(fresh, dict) or not fresh:
+                fresh = sess
+            if str(fresh.get('client_token') or '') != token:
+                self._sleep(interval)
+                continue
+            upd = dict(fresh)
             upd['heartbeat_interval'] = interval
             upd['heartbeat_timeout'] = self._state_timeout()
             self._session.save(upd)
@@ -196,15 +237,24 @@ class HeartbeatWorker:
     # token 过期自动重登
     # ------------------------------------------------------------------
     def _login_again(self) -> bool:
+        """重新 card-login。返回 True=成功 / False=卡被否定 / 'network'=瞬时网络异常。
+        ★ 2026-09-26：网络失败与权威否定必须区分 —— 调用方（403 会话自愈窗口）
+        把网络异常当"重登失败"会误锁 core。"""
         sess = self._session.load()
         card_key = str(sess.get('card_key') or '')
         if not card_key:
             return False
         try:
             result = self._client.card_login(card_key, self._machine_code())
-        except CloudLicenseError:
+        except CloudLicenseError as e:
+            if e.status == 0:
+                return 'network'
             return False
-        upd = dict(sess)
+        # ★ 以最新落盘会话为 base（面板可能刚写过），整体覆盖前先保住新字段
+        fresh = self._session.load()
+        if not isinstance(fresh, dict) or not fresh:
+            fresh = sess
+        upd = dict(fresh)
         upd.update({
             'card_key': card_key,
             'client_token': result['client_token'],
@@ -215,6 +265,7 @@ class HeartbeatWorker:
             'heartbeat_timeout': result['heartbeat_timeout'],
         })
         self._session.save(upd)
+        self._expired_sent = False
         self._set_state(error='', expire_at=result['expire_at'])
         return True
 
