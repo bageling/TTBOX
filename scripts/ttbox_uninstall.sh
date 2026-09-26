@@ -21,7 +21,8 @@ UNITS=(
     ttbox-ensure.service ttbox-ensure.timer
     ttbox-ota.path ttbox-ota.service
 )
-DIRS=(/opt/ttbox /etc/ttbox /var/lib/ttbox /var/log/ttbox /run/ttbox)
+DIRS=(/opt/ttbox /etc/ttbox /var/lib/ttbox /var/log/ttbox /run/ttbox
+      /run/ttbox-mouse-passthrough /lib/firmware/ttbox)
 
 plan() {
     echo "== 将执行 =="
