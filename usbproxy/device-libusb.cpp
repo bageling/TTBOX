@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "device-libusb.h"
+#include "proxy.h"
 
 libusb_device 			**devs;
 libusb_device_handle 		*dev_handle;
@@ -16,6 +17,8 @@ libusb_hotplug_callback_handle	callback_handle = -1;
 
 struct libusb_device_descriptor		device_device_desc;
 struct libusb_config_descriptor		**device_config_desc;
+// 当前 device_config_desc 持有的条目数（释放上一轮扫描结果用）
+static int device_config_desc_count = 0;
 
 pthread_t hotplug_monitor_thread;
 
@@ -24,9 +27,10 @@ int hotplug_callback(struct libusb_context *ctx __attribute__((unused)),
 			libusb_hotplug_event envet __attribute__((unused)),
 			void *user_data __attribute__((unused))) {
 	printf("Hotplug event: device disconnected, stopping proxy...\n");
-	please_stop_ep0 = true;
-	please_stop_eps = true;
-	kill(0, SIGINT);
+	// ★ 2026-09-26：改走带原子守卫的停机。旧实现无守卫地 kill(0, SIGINT)，
+	//   与端点线程的 LIBUSB_ERROR_NO_DEVICE 断连路径并发时第二发 SIGINT 命中
+	//   usb-proxy.cpp 的 "force exiting" 分支 ⇒ 跳过 UDC/接口清理。
+	stop_proxy_after_physical_disconnect();
 	return 0;
 }
 
@@ -57,8 +61,23 @@ int get_descriptor(libusb_device *device) {
 		return result;
 	}
 
+	// ★ 2026-09-26：扫描循环每秒对所有设备重调本函数，旧实现直接覆盖全局
+	// device_config_desc ⇒ 上一轮 new[] 数组和全部 libusb_get_config_descriptor
+	// 结果失联（线性泄漏，等待目标设备期间最明显）。先释放上一轮再分配。
+	if (device_config_desc) {
+		for (int i = 0; i < device_config_desc_count; i++) {
+			if (device_config_desc[i])
+				libusb_free_config_descriptor(device_config_desc[i]);
+		}
+		delete[] device_config_desc;
+		device_config_desc = NULL;
+		device_config_desc_count = 0;
+	}
+
 	device_config_desc = new struct libusb_config_descriptor *[device_device_desc.bNumConfigurations];
+	device_config_desc_count = device_device_desc.bNumConfigurations;
 	for (int i = 0; i < device_device_desc.bNumConfigurations; i++) {
+		device_config_desc[i] = NULL;
 		result = libusb_get_config_descriptor(device, i, &device_config_desc[i]);
 		if (result != LIBUSB_SUCCESS) {
 			if (verbose_level) {

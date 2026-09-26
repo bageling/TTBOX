@@ -201,13 +201,41 @@ int persist_gadget_config() {
     root["usb_serial"] = c.serial;
     root["usb_configuration"] = c.configuration;
     root["hid_report_desc_hex"] = c.hid_report_desc_hex;
-    std::ofstream ofs(cfg_path, std::ios::trunc);
-    if (!ofs.is_open()) {
-        fprintf(stderr, "persist_gadget_config: cannot open %s\n", cfg_path);
+    // ★ 2026-09-26：原实现直接 trunc 原文件再流式写入 —— 中途崩溃/断电/ENOSPC
+    //   都会留下半截 JSON，下次开机 load_gadget_config 解析失败 ⇒ 设备无法枚举
+    //   （用户视角 = "盒子坏了"）。改为 tmp + fsync + rename 原子落盘（与 Python
+    //   侧 _atomic_json 同一套口径）。
+    const std::string tmp_path = std::string(cfg_path) + ".tmp";
+    {
+        std::ofstream ofs(tmp_path, std::ios::trunc);
+        if (!ofs.is_open()) {
+            fprintf(stderr, "persist_gadget_config: cannot open %s\n", tmp_path.c_str());
+            return -1;
+        }
+        ofs << root.toStyledString();
+        ofs.flush();
+        ofs.close();
+        if (!ofs.good()) {
+            fprintf(stderr, "persist_gadget_config: write %s failed\n", tmp_path.c_str());
+            remove(tmp_path.c_str());
+            return -1;
+        }
+    }
+    // 尽力 fsync（失败不致命，rename 本身已避免半截文件）
+    {
+        FILE* f = fopen(tmp_path.c_str(), "rb");
+        if (f) {
+            fflush(f);
+            fsync(fileno(f));
+            fclose(f);
+        }
+    }
+    if (rename(tmp_path.c_str(), cfg_path) != 0) {
+        fprintf(stderr, "persist_gadget_config: rename %s -> %s failed: %s\n",
+                tmp_path.c_str(), cfg_path, strerror(errno));
+        remove(tmp_path.c_str());
         return -1;
     }
-    ofs << root.toStyledString();
-    ofs.close();
     printf("set-config saved: vid=%04x pid=%04x\n", c.usb_vid, c.usb_pid);
     return 0;
 }
@@ -834,15 +862,6 @@ static void* inject_loop(void*) {
         const int iface = g_state.inject_iface.load();
         if (iface < 0) continue;
 
-        InjectSink sink = nullptr;
-        void* user = nullptr;
-        {
-            std::lock_guard<std::mutex> lk(g_state.inject_sink_mutex);
-            sink = g_state.inject_sinks[iface];
-            user = g_state.inject_sink_users[iface];
-        }
-        if (sink == nullptr) continue;   // 主机侧 IN 线程还没注册（未就绪）
-
         HidMouseDescriptor desc;
         if (!mouse_control_get_layout(static_cast<uint8_t>(iface), &desc)) continue;
         if (!desc.usable()) continue;
@@ -855,9 +874,21 @@ static void* inject_loop(void*) {
 
         uint8_t buf[64];
         uint32_t len = 0;
-        bool ok = inject_clock_build_report(desc, g_state.button_mask.load(), st, buf, sizeof(buf),
-                                            &len);
-        if (ok) ok = sink(user, static_cast<uint8_t>(iface), buf, len);
+        const bool built = inject_clock_build_report(desc, g_state.button_mask.load(), st,
+                                                     buf, sizeof(buf), &len);
+        bool ok = false;
+        {
+            // ★ 2026-09-26：sink 调用必须持锁到返回。旧实现锁内复制指针、锁外调用 ——
+            //   terminate_eps「先摘出口再 delete 队列」只对还没取到指针的迭代有效，
+            //   已取到指针的本拍会与 Phase 3 的 delete 并发（悬空 queue/mutex ⇒ UAF）。
+            //   sink 只是入队 + notify，持锁调用不会死锁：clear_inject_sink 持同一把
+            //   锁等本拍结束后才清空，之后 delete 队列时不可能再有在途调用。
+            std::lock_guard<std::mutex> lk(g_state.inject_sink_mutex);
+            const InjectSink sink = g_state.inject_sinks[iface];
+            void* user = g_state.inject_sink_users[iface];
+            if (sink != nullptr)
+                ok = built && sink(user, static_cast<uint8_t>(iface), buf, len);
+        }
         if (!ok) {
             // 投不出去就把这一拍退回挂起量（不丢位移），下一拍重试
             if (len == 0) g_state.inject_build_fail.fetch_add(1);
@@ -941,6 +972,9 @@ bool mouse_control_merge_report(uint8_t interface_number, uint8_t* data, uint32_
 
     const InjectStep st = take_step();
     if (st.dx == 0 && st.dy == 0) {
+        // ★ 2026-09-26：take_step() 同时消费了 pending_wheel —— 这份报告不带位移，
+        //   不退回的话 AI 滚轮指令就此丢失。退回挂起量，搭下一份带位移的报告出去。
+        add_pending(g_state.pending_wheel, st.wheel);
         g_layout_diag.merge_ok.fetch_add(1);
         return false;
     }
@@ -957,6 +991,24 @@ bool mouse_control_merge_report(uint8_t interface_number, uint8_t* data, uint32_
         !hid_field_write_signed(mutable_body, body_len, lay->y, cur_y + st.dy)) {
         count_reject(kRejectLen);
         return false;
+    }
+    // ★ 合并路径原本只写回 X/Y：take_step() 消费的 pending_wheel 被静默丢弃
+    //   （物理鼠标持续上报时 AI 滚轮指令 100% 丢失）。布局有安全 wheel 字段就
+    //   顺带写入；写不了则退回挂起量，绝不吞。
+    if (st.wheel != 0) {
+        const bool wheel_writable =
+            lay->wheel.present && hid_field_is_safe(lay->wheel) &&
+            !hid_fields_overlap_bytes(lay->wheel, lay->buttons) &&
+            !hid_fields_overlap_bytes(lay->wheel, lay->x) &&
+            !hid_fields_overlap_bytes(lay->wheel, lay->y);
+        int32_t cur_w = 0;
+        if (wheel_writable &&
+            hid_field_read_signed(body, body_len, lay->wheel, &cur_w) &&
+            hid_field_write_signed(mutable_body, body_len, lay->wheel, cur_w + st.wheel)) {
+            // 已写入
+        } else {
+            add_pending(g_state.pending_wheel, st.wheel);
+        }
     }
     g_state.merge_count.fetch_add(1);
     g_layout_diag.merge_ok.fetch_add(1);

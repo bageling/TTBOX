@@ -59,12 +59,18 @@ def request(req_type: str, params: dict | None = None, timeout: float = DEFAULT_
             host, _, port = spec.rpartition(':')
             if not host:
                 host = '127.0.0.1'
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            target = (host, int(port))
+            # ★ port 解析失败（空串/尾随空格/非数字）是配置错误，要给结构化错误，
+            #   不能穿透成未处理异常（对照 api_v1.py 同名实现捕获 ValueError）。
+            try:
+                target = (host, int(port))
+            except ValueError:
+                target = None
+            if target is None:
+                raise ValueError(f'非法 TTBOX_IPC_TCP 端口: {port!r}')
         else:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             target = base
-    except (AttributeError, OSError) as exc:
+    except (AttributeError, OSError, ValueError) as exc:
         mode = 'TCP' if use_tcp else 'Unix'
         return {'status': 3, 'error': f'IPC socket 创建失败（{mode}）: {exc}'}
 
@@ -81,9 +87,11 @@ def request(req_type: str, params: dict | None = None, timeout: float = DEFAULT_
         if not buf:
             return {'status': 3, 'error': 'IPC 无响应（Core 未运行?）'}
         return json.loads(buf.decode())
+    except socket.timeout:
+        # ★ 必须在 OSError 之前：socket.timeout 是 OSError 子类（3.10 起 = TimeoutError），
+        #   排在后面就是死代码，超时永远被误报成"无法连接"。
+        return {'status': 3, 'error': 'IPC 响应超时'}
     except (FileNotFoundError, ConnectionRefusedError, AttributeError, OSError):
         return {'status': 3, 'error': '无法连接 Core IPC'}
-    except socket.timeout:
-        return {'status': 3, 'error': 'IPC 响应超时'}
     finally:
         s.close()

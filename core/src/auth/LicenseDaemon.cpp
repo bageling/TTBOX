@@ -370,7 +370,23 @@ void LicenseDaemon::restore_cloud_doc_locked() {
     }
 
     const int64_t now = now_unix_ms();
-    if (expire > 0 && now > expire) {
+    // ★ 2026-09-26 fail-closed：cloud 文档的 expire 必须 > 0（activate_cloud 明确
+    //   拒绝 ≤0，云端语义没有"永久云卡"）。旧 restore 把 0（字段缺失/解析失败落 0
+    //   都会到这）当"永久"放行 ⇒ 磁盘态异常时得到一张永远不过期、一年不复核的云授权。
+    if (expire <= 0) {
+        status_.state = LicenseState::kInvalidCard;
+        status_.last_error = "云端授权文档异常：expire_unix_ms 缺失或非法，拒绝恢复";
+        status_.expire_unix_ms = expire;
+        status_.features = normalize_features(feats);
+        status_.plan = pl.empty() ? std::string("none") : pl;
+        status_.ui_brand = sanitize_ui_brand(default_ui_brand());
+        status_.card = mask;
+        cloud_license_ = true;
+        TTBOX_LOG_WARN("[LicenseDaemon] 云端授权恢复被拒: expire_unix_ms=" +
+                       std::to_string(expire));
+        return;
+    }
+    if (now > expire) {
         status_.state = LicenseState::kExpired;
         status_.last_error = "卡密已到期";
     } else {

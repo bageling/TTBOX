@@ -6,6 +6,7 @@
 #include "common/Logger.hpp"
 
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <sstream>
@@ -104,60 +105,145 @@ void parse_card_content(const JsonValue& root, LicenseStatus& out) {
     }
 }
 
-// Parse host:port from URL (http://host:port or http://host)
-std::pair<std::string, int> parse_url_host(const std::string& url) {
-    std::string host = url;
-    int port = 80;
-    // strip scheme
-    size_t scheme_end = host.find("://");
-    if (scheme_end != std::string::npos) host = host.substr(scheme_end + 3);
-    // strip path
-    size_t path_start = host.find('/');
-    if (path_start != std::string::npos) host = host.substr(0, path_start);
-    // extract port
-    size_t colon = host.find(':');
-    if (colon != std::string::npos) {
-        port = std::stoi(host.substr(colon + 1));
-        host = host.substr(0, colon);
+// ---- 服务端地址解析（2026-09-26 第三轮审计修复）----
+//
+// ★ 旧 parse_url_host 把 base_url 的**路径段丢弃**（"https://cctv2.top:10086/ttbox"
+//   只剩 host:port），请求行永远少一截前缀。现在四元组全保留：
+//   scheme/http(s) + host + port + base_path（如 "/ttbox"）。
+//   HMAC canonical 仍签**不含 base_path** 的 path（对齐 Python cloud_client：
+//   它 sign(path_with_query)、请求 base_url + path —— 两端同一口径）。
+struct ServerEndpoint {
+    std::string scheme;    // "http" / "https"（小写）
+    std::string host;
+    int port = 0;
+    std::string base_path; // "" 或 "/ttbox" 这类前缀（保证以 / 开头或为空）
+};
+
+bool parse_server_endpoint(const std::string& url, ServerEndpoint& ep,
+                           std::string* err) {
+    const size_t scheme_end = url.find("://");
+    if (scheme_end == std::string::npos) {
+        if (err) *err = "server_url 缺 scheme: " + url;
+        return false;
     }
-    return {host, port};
+    ep.scheme = url.substr(0, scheme_end);
+    for (char& c : ep.scheme) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (ep.scheme != "http" && ep.scheme != "https") {
+        if (err) *err = "server_url scheme 仅支持 http/https: " + url;
+        return false;
+    }
+    std::string rest = url.substr(scheme_end + 3);
+    const size_t slash = rest.find('/');
+    const std::string hostport = (slash == std::string::npos) ? rest : rest.substr(0, slash);
+    ep.base_path = (slash == std::string::npos) ? std::string() : rest.substr(slash);
+    // 规整：去尾部 '/'（拼接时统一为 base + "/api/..."）
+    while (!ep.base_path.empty() && ep.base_path.back() == '/') ep.base_path.pop_back();
+    if (hostport.empty()) {
+        if (err) *err = "server_url 缺 host: " + url;
+        return false;
+    }
+    size_t colon = hostport.find(':');
+    if (colon != std::string::npos) {
+        ep.host = hostport.substr(0, colon);
+        const std::string port_str = hostport.substr(colon + 1);
+        // ★ std::stoi 对非数字端口抛未捕获异常（第三轮审计附带发现）⇒ 收敛为错误
+        try {
+            ep.port = std::stoi(port_str);
+        } catch (...) {
+            if (err) *err = "server_url 端口非法: " + port_str;
+            return false;
+        }
+        if (ep.port <= 0 || ep.port > 65535) {
+            if (err) *err = "server_url 端口越界: " + port_str;
+            return false;
+        }
+    } else {
+        ep.host = hostport;
+        ep.port = (ep.scheme == "https") ? 443 : 80;
+    }
+    if (ep.host.empty()) {
+        if (err) *err = "server_url 缺 host: " + url;
+        return false;
+    }
+    return true;
 }
 
-// Simple HTTP POST over TCP (no TLS) — used when server is HTTP
-// Returns empty on failure; body on success
-std::string http_post_plain(const std::string& host, int port,
-                             const std::string& path,
-                             const std::string& body_json,
-                             int* out_status) {
-#if defined(_WIN32)
-    WSADATA wsa{};
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return {};
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) { WSACleanup(); return {}; }
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(static_cast<u_short>(port));
-    addr.sin_addr.s_addr = inet_addr(host.c_str());
-    if (connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        closesocket(fd); WSACleanup(); return {};
-    }
+std::string build_request(const std::string& method,
+                          const std::string& full_path,
+                          const std::string& host,
+                          const std::string& body_json,
+                          const std::vector<std::pair<std::string, std::string>>& extra_headers,
+                          bool with_body) {
     std::ostringstream req;
-    req << "POST " << path << " HTTP/1.1\r\n";
+    req << method << " " << full_path << " HTTP/1.1\r\n";
     req << "Host: " << host << "\r\n";
     req << "Content-Type: application/json\r\n";
-    req << "Content-Length: " << body_json.size() << "\r\n";
+    if (with_body) req << "Content-Length: " << body_json.size() << "\r\n";
+    for (const auto& kv : extra_headers) req << kv.first << ": " << kv.second << "\r\n";
     req << "Connection: close\r\n";
     req << "\r\n";
-    req << body_json;
-    std::string reqs = req.str();
-    send(fd, reqs.c_str(), static_cast<int>(reqs.size()), 0);
-    std::string total;
+    if (with_body) req << body_json;
+    return req.str();
+}
+
+// 从原始应答解析 status 与 body（Connection: close ⇒ 读到对端关闭为止）
+bool parse_http_reply(const std::string& total, int* out_status, std::string* out_body,
+                      std::string* err) {
+    const size_t line1 = total.find("\r\n");
+    if (line1 == std::string::npos) {
+        if (err) *err = "no HTTP status line";
+        return false;
+    }
+    const std::string l1 = total.substr(0, line1);
+    const auto sp1 = l1.find(' ');
+    if (sp1 == std::string::npos) {
+        if (err) *err = "bad HTTP status line";
+        return false;
+    }
+    *out_status = std::atoi(l1.substr(sp1 + 1).c_str());
+    const size_t hdr_end = total.find("\r\n\r\n");
+    if (hdr_end == std::string::npos) {
+        if (err) *err = "no header/body separator";
+        return false;
+    }
+    *out_body = total.substr(hdr_end + 4);
+    return true;
+}
+
+// ---- 明文 TCP 传输（http://）----
+bool send_recv_plain(const std::string& host, int port, const std::string& request,
+                     std::string& out_total, std::string* err) {
+#if defined(_WIN32)
+    WSADATA wsa{};
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        if (err) *err = "WSAStartup failed";
+        return false;
+    }
+    addrinfo hints{}, *res = nullptr;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    char port_str[16];
+    std::snprintf(port_str, sizeof(port_str), "%d", port);
+    if (getaddrinfo(host.c_str(), port_str, &hints, &res) != 0 || !res) {
+        WSACleanup();
+        if (err) *err = "DNS resolve failed";
+        return false;
+    }
+    SOCKET fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (fd == INVALID_SOCKET) { freeaddrinfo(res); WSACleanup(); if (err) *err = "socket failed"; return false; }
+    if (connect(fd, res->ai_addr, static_cast<int>(res->ai_addrlen)) != 0) {
+        closesocket(fd); freeaddrinfo(res); WSACleanup();
+        if (err) *err = "connect failed";
+        return false;
+    }
+    freeaddrinfo(res);
+    send(fd, request.c_str(), static_cast<int>(request.size()), 0);
     char buf[4096];
     int n;
-    while ((n = recv(fd, buf, sizeof(buf), 0)) > 0)
-        total.append(buf, n);
+    while ((n = recv(fd, buf, sizeof(buf), 0)) > 0) out_total.append(buf, n);
     closesocket(fd);
     WSACleanup();
+    return true;
 #elif defined(__linux__) || defined(__APPLE__)
     struct addrinfo hints, *res = nullptr;
     std::memset(&hints, 0, sizeof(hints));
@@ -165,7 +251,10 @@ std::string http_post_plain(const std::string& host, int port,
     hints.ai_socktype = SOCK_STREAM;
     char port_str[16];
     std::snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(host.c_str(), port_str, &hints, &res) != 0) return {};
+    if (getaddrinfo(host.c_str(), port_str, &hints, &res) != 0) {
+        if (err) *err = "DNS resolve failed";
+        return false;
+    }
     int fd = -1;
     for (struct addrinfo* p = res; p; p = p->ai_next) {
         fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
@@ -178,44 +267,124 @@ std::string http_post_plain(const std::string& host, int port,
         close(fd); fd = -1;
     }
     freeaddrinfo(res);
-    if (fd < 0) return {};
-    std::ostringstream req;
-    req << "POST " << path << " HTTP/1.1\r\n";
-    req << "Host: " << host << "\r\n";
-    req << "Content-Type: application/json\r\n";
-    req << "Content-Length: " << body_json.size() << "\r\n";
-    req << "Connection: close\r\n";
-    req << "\r\n";
-    req << body_json;
-    std::string reqs = req.str();
+    if (fd < 0) {
+        if (err) *err = "connect failed";
+        return false;
+    }
     ssize_t sent = 0;
-    while (sent < static_cast<ssize_t>(reqs.size())) {
-        ssize_t w = send(fd, reqs.data() + sent, reqs.size() - sent, 0);
-        if (w <= 0) { close(fd); return {}; }
+    while (sent < static_cast<ssize_t>(request.size())) {
+        const ssize_t w = send(fd, request.data() + sent, request.size() - sent, 0);
+        if (w <= 0) { close(fd); if (err) *err = "send failed"; return false; }
         sent += w;
     }
-    std::string total;
     char buf[4096];
     ssize_t r;
     while ((r = recv(fd, buf, sizeof(buf), 0)) > 0)
-        total.append(buf, static_cast<size_t>(r));
+        out_total.append(buf, static_cast<size_t>(r));
     close(fd);
+    return true;
 #else
-    (void)host; (void)port; (void)path; (void)body_json; (void)out_status;
-    return {};
+    (void)host; (void)port; (void)request; (void)out_total; (void)err;
+    return false;
 #endif
-    // Parse status line
-    size_t line1 = total.find("\r\n");
-    if (line1 == std::string::npos) return {};
-    std::string l1 = total.substr(0, line1);
-    auto sp1 = l1.find(' ');
-    if (sp1 == std::string::npos) return {};
-    int status = std::atoi(l1.substr(sp1 + 1).c_str());
-    if (out_status) *out_status = status;
-    if (status != 200) return {};
-    size_t hdr_end = total.find("\r\n\r\n");
-    if (hdr_end == std::string::npos) return {};
-    return total.substr(hdr_end + 4);
+}
+
+// ---- TLS 传输（https://，OpenSSL；Linux/macOS）----
+bool send_recv_tls(const std::string& host, int port, const std::string& request,
+                   std::string& out_total, std::string* err) {
+#if defined(__linux__) || defined(__APPLE__)
+    // 复用 HttpClient.cpp 的初始化口径：系统 CA + VERIFY_PEER（不静默降级明文）。
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
+    SSL_load_error_strings();
+    SSL_CTX* ctx = SSL_CTX_new(TLS_client_method());
+    if (!ctx) {
+        if (err) *err = "SSL_CTX_new failed";
+        return false;
+    }
+    SSL_CTX_set_default_verify_paths(ctx);
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
+    SSL_CTX_set_mode(ctx, SSL_MODE_AUTO_RETRY);
+
+    std::string conn_err;
+    const int fd = []([[maybe_unused]] const std::string& h, int p, std::string* e) -> int {
+        // 与 HttpClient::tcp_connect 相同的解析/连接逻辑（含 10s 超时）
+        struct addrinfo hints, *res = nullptr;
+        std::memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        char port_str[16];
+        std::snprintf(port_str, sizeof(port_str), "%d", p);
+        if (getaddrinfo(h.c_str(), port_str, &hints, &res) != 0) {
+            if (e) *e = "DNS resolve failed";
+            return -1;
+        }
+        int f = -1;
+        for (struct addrinfo* q = res; q; q = q->ai_next) {
+            f = socket(q->ai_family, q->ai_socktype, q->ai_protocol);
+            if (f < 0) continue;
+            struct timeval tv;
+            tv.tv_sec = 10; tv.tv_usec = 0;
+            setsockopt(f, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+            setsockopt(f, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+            if (connect(f, q->ai_addr, q->ai_addrlen) == 0) break;
+            close(f); f = -1;
+        }
+        freeaddrinfo(res);
+        if (f < 0 && e) *e = "connect failed";
+        return f;
+    }(host, port, &conn_err);
+    if (fd < 0) {
+        SSL_CTX_free(ctx);
+        if (err) *err = conn_err;
+        return false;
+    }
+    SSL* ssl = SSL_new(ctx);
+    if (!ssl) {
+        close(fd); SSL_CTX_free(ctx);
+        if (err) *err = "SSL_new failed";
+        return false;
+    }
+    SSL_set_fd(ssl, fd);
+    SSL_set_tlsext_host_name(ssl, host.c_str());
+    if (SSL_connect(ssl) != 1) {
+        if (err) *err = "SSL_connect failed（证书/网络）";
+        SSL_free(ssl); close(fd); SSL_CTX_free(ctx);
+        return false;
+    }
+    if (SSL_get_verify_result(ssl) != X509_V_OK) {
+        if (err) *err = "TLS 证书校验失败";
+        SSL_shutdown(ssl); SSL_free(ssl); close(fd); SSL_CTX_free(ctx);
+        return false;
+    }
+    const char* p = request.data();
+    size_t remain = request.size();
+    while (remain > 0) {
+        const int w = SSL_write(ssl, p, static_cast<int>(remain));
+        if (w <= 0) {
+            if (err) *err = "SSL_write failed";
+            SSL_shutdown(ssl); SSL_free(ssl); close(fd); SSL_CTX_free(ctx);
+            return false;
+        }
+        p += w;
+        remain -= static_cast<size_t>(w);
+    }
+    char buf[4096];
+    for (;;) {
+        const int r = SSL_read(ssl, buf, sizeof(buf));
+        if (r > 0) out_total.append(buf, static_cast<size_t>(r));
+        else break;
+    }
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    close(fd);
+    SSL_CTX_free(ctx);
+    return true;
+#else
+    (void)host; (void)port; (void)request; (void)out_total;
+    if (err) *err = "https not implemented on this platform";
+    return false;
+#endif
 }
 
 }  // namespace
@@ -254,9 +423,12 @@ std::string TtboxLicenseClient::sign_request(const std::string& method,
     return out;
 #elif defined(_WIN32)
     // Windows: use BCrypt for HMAC-SHA256
+    // ★ 2026-09-26：BCryptOpenAlgorithmProvider 必须带 BCRYPT_ALG_HANDLE_HMAC_FLAG，
+    //   否则 BCryptCreateHash 传 pbSecret 恒返回 STATUS_INVALID_PARAMETER
+    //   ⇒ Windows 构建签名 100% 静默失败（第三轮审计）。
     BCryptAlgorithmHandle hAlg = nullptr;
     NTSTATUS nt = BCryptOpenAlgorithmProvider(&hAlg, BCRYPT_SHA256_ALGORITHM,
-                                               NULL, 0);
+                                               NULL, BCRYPT_ALG_HANDLE_HMAC_FLAG);
     if (nt != STATUS_SUCCESS || !hAlg) return {};
     BCryptHashHandle hHash = nullptr;
     nt = BCryptCreateHash(hAlg, &hHash, NULL, 0,
@@ -295,235 +467,98 @@ std::string TtboxLicenseClient::sign_request(const std::string& method,
 #endif
 }
 
+// ---- 统一签名传输 ----
+
+bool TtboxLicenseClient::signed_exchange(
+    const std::string& method,
+    const std::string& path,
+    const std::string& body_json,
+    const std::vector<std::pair<std::string, std::string>>& extra_headers,
+    HttpReply& out,
+    std::string* err) {
+    ServerEndpoint ep;
+    std::string ep_err;
+    if (!parse_server_endpoint(server_url_, ep, &ep_err)) {
+        if (err) *err = ep_err;
+        out.error = ep_err;
+        return false;
+    }
+    const std::string ts = unix_timestamp_sec();
+    const std::string nonce = generate_nonce();
+    // ★ canonical 签**不含 base_path** 的 path（对齐 Python cloud_client 契约）
+    const std::string sig = sign_request(method, path, ts, nonce, body_json);
+    if (sig.empty()) {
+        if (err) *err = "client_secret 未配置（拒签，不发请求）";
+        out.error = "unsigned";
+        return false;
+    }
+    std::vector<std::pair<std::string, std::string>> headers;
+    headers.push_back({"X-App-Key", app_key_});
+    headers.push_back({"X-Timestamp", ts});
+    headers.push_back({"X-Nonce", nonce});
+    headers.push_back({"X-Signature", sig});
+    for (const auto& kv : extra_headers) headers.push_back(kv);
+
+    const bool with_body = (method == "POST");
+    const std::string full_path = ep.base_path + path;   // ★ base 路径保留
+    const std::string reqs = build_request(method, full_path, ep.host, body_json,
+                                            headers, with_body);
+    std::string total;
+    const bool ok = (ep.scheme == "https")
+                        ? send_recv_tls(ep.host, ep.port, reqs, total, &out.error)
+                        : send_recv_plain(ep.host, ep.port, reqs, total, &out.error);
+    if (!ok) {
+        if (err && out.error.empty()) *err = "transport failed";
+        return false;
+    }
+    if (!parse_http_reply(total, &out.status, &out.body, &out.error)) {
+        if (err) *err = out.error;
+        return false;
+    }
+    return true;
+}
+
 std::string TtboxLicenseClient::api_get(const std::string& path) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32)
-    (void)path;
-    return {};
-#endif
-    auto [host, port] = parse_url_host(server_url_);
-    std::string ts = unix_timestamp_sec();
-    std::string nonce = generate_nonce();
-    std::string sig = sign_request("GET", path, ts, nonce, "");
-    if (sig.empty()) return {};   // client_secret 未配置 ⇒ 拒签，不发请求（§3.3）
-
-#if defined(_WIN32)
-    WSADATA wsa{};
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return {};
-    // Resolve hostname
-    addrinfo hints{}, *res = nullptr;
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    char port_str[16];
-    std::snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(host.c_str(), port_str, &hints, &res) != 0) {
-        WSACleanup(); return {};
+    HttpReply rep;
+    std::string err;
+    if (!signed_exchange("GET", path, "", {}, rep, &err)) {
+        TTBOX_LOG_WARN("[LicenseClient] GET " + path + " 失败: " +
+                       (rep.error.empty() ? err : rep.error));
+        return {};
     }
-    SOCKET fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (fd == INVALID_SOCKET) { freeaddrinfo(res); WSACleanup(); return {}; }
-    if (connect(fd, res->ai_addr, static_cast<int>(res->ai_addrlen)) != 0) {
-        closesocket(fd); freeaddrinfo(res); WSACleanup(); return {};
+    if (rep.status != 200) {
+        TTBOX_LOG_WARN("[LicenseClient] GET " + path + " HTTP " + std::to_string(rep.status));
+        return {};
     }
-    freeaddrinfo(res);
-    std::ostringstream req;
-    req << "GET " << path << " HTTP/1.1\r\n";
-    req << "Host: " << host << "\r\n";
-    req << "Content-Type: application/json\r\n";
-    req << "X-App-Key: " << app_key_ << "\r\n";
-    req << "X-Timestamp: " << ts << "\r\n";
-    req << "X-Nonce: " << nonce << "\r\n";
-    req << "X-Signature: " << sig << "\r\n";
-    req << "Connection: close\r\n";
-    req << "\r\n";
-    std::string reqs = req.str();
-    send(fd, reqs.c_str(), static_cast<int>(reqs.size()), 0);
-    std::string total;
-    char buf[4096];
-    int n;
-    while ((n = recv(fd, buf, sizeof(buf), 0)) > 0)
-        total.append(buf, n);
-    closesocket(fd);
-    WSACleanup();
-#elif defined(__linux__) || defined(__APPLE__)
-    struct addrinfo hints, *res = nullptr;
-    std::memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    char port_str[16];
-    std::snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(host.c_str(), port_str, &hints, &res) != 0) return {};
-    int fd = -1;
-    for (struct addrinfo* p = res; p; p = p->ai_next) {
-        fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-        if (fd < 0) continue;
-        struct timeval tv;
-        tv.tv_sec = 10; tv.tv_usec = 0;
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        if (connect(fd, p->ai_addr, p->ai_addrlen) == 0) break;
-        close(fd); fd = -1;
-    }
-    freeaddrinfo(res);
-    if (fd < 0) return {};
-    std::ostringstream req;
-    req << "GET " << path << " HTTP/1.1\r\n";
-    req << "Host: " << host << "\r\n";
-    req << "Content-Type: application/json\r\n";
-    req << "X-App-Key: " << app_key_ << "\r\n";
-    req << "X-Timestamp: " << ts << "\r\n";
-    req << "X-Nonce: " << nonce << "\r\n";
-    req << "X-Signature: " << sig << "\r\n";
-    req << "Connection: close\r\n";
-    req << "\r\n";
-    std::string reqs = req.str();
-    ssize_t sent = 0;
-    while (sent < static_cast<ssize_t>(reqs.size())) {
-        ssize_t w = send(fd, reqs.data() + sent, reqs.size() - sent, 0);
-        if (w <= 0) { close(fd); return {}; }
-        sent += w;
-    }
-    std::string total;
-    char buf[4096];
-    ssize_t r;
-    while ((r = recv(fd, buf, sizeof(buf), 0)) > 0)
-        total.append(buf, static_cast<size_t>(r));
-    close(fd);
-#else
-    (void)path; (void)host; (void)port; (void)ts; (void)nonce; (void)sig;
-    return {};
-#endif
-
-    // Parse status line
-    size_t line1 = total.find("\r\n");
-    if (line1 == std::string::npos) return {};
-    std::string l1 = total.substr(0, line1);
-    auto sp1 = l1.find(' ');
-    if (sp1 == std::string::npos) return {};
-    int status = std::atoi(l1.substr(sp1 + 1).c_str());
-    if (status != 200) return {};
-    size_t hdr_end = total.find("\r\n\r\n");
-    if (hdr_end == std::string::npos) return {};
-    return total.substr(hdr_end + 4);
+    return rep.body;
 }
 
 std::string TtboxLicenseClient::api_post(const std::string& path,
                                          const std::string& body_json) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32)
-    (void)path; (void)body_json;
-    return {};
-#endif
-    auto [host, port] = parse_url_host(server_url_);
-    std::string ts = unix_timestamp_sec();
-    std::string nonce = generate_nonce();
-    std::string sig = sign_request("POST", path, ts, nonce, body_json);
-    if (sig.empty()) return {};   // client_secret 未配置 ⇒ 拒签，不发请求（§3.3）
-
-#if defined(_WIN32)
-    WSADATA wsa{};
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return {};
-    addrinfo hints{}, *res = nullptr;
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    char port_str[16];
-    std::snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(host.c_str(), port_str, &hints, &res) != 0) {
-        WSACleanup(); return {};
+    HttpReply rep;
+    std::string err;
+    if (!signed_exchange("POST", path, body_json, {}, rep, &err)) {
+        TTBOX_LOG_WARN("[LicenseClient] POST " + path + " 失败: " +
+                       (rep.error.empty() ? err : rep.error));
+        return {};
     }
-    SOCKET fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (fd == INVALID_SOCKET) { freeaddrinfo(res); WSACleanup(); return {}; }
-    if (connect(fd, res->ai_addr, static_cast<int>(res->ai_addrlen)) != 0) {
-        closesocket(fd); freeaddrinfo(res); WSACleanup(); return {};
+    if (rep.status != 200) {
+        TTBOX_LOG_WARN("[LicenseClient] POST " + path + " HTTP " + std::to_string(rep.status));
+        return {};
     }
-    freeaddrinfo(res);
-    std::ostringstream req;
-    req << "POST " << path << " HTTP/1.1\r\n";
-    req << "Host: " << host << "\r\n";
-    req << "Content-Type: application/json\r\n";
-    req << "Content-Length: " << body_json.size() << "\r\n";
-    req << "X-App-Key: " << app_key_ << "\r\n";
-    req << "X-Timestamp: " << ts << "\r\n";
-    req << "X-Nonce: " << nonce << "\r\n";
-    req << "X-Signature: " << sig << "\r\n";
-    req << "Connection: close\r\n";
-    req << "\r\n";
-    req << body_json;
-    std::string reqs = req.str();
-    send(fd, reqs.c_str(), static_cast<int>(reqs.size()), 0);
-    std::string total;
-    char buf[4096];
-    int n;
-    while ((n = recv(fd, buf, sizeof(buf), 0)) > 0)
-        total.append(buf, n);
-    closesocket(fd);
-    WSACleanup();
-#elif defined(__linux__) || defined(__APPLE__)
-    struct addrinfo hints, *res = nullptr;
-    std::memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    char port_str[16];
-    std::snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(host.c_str(), port_str, &hints, &res) != 0) return {};
-    int fd = -1;
-    for (struct addrinfo* p = res; p; p = p->ai_next) {
-        fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-        if (fd < 0) continue;
-        struct timeval tv;
-        tv.tv_sec = 10; tv.tv_usec = 0;
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        if (connect(fd, p->ai_addr, p->ai_addrlen) == 0) break;
-        close(fd); fd = -1;
-    }
-    freeaddrinfo(res);
-    if (fd < 0) return {};
-    std::ostringstream req;
-    req << "POST " << path << " HTTP/1.1\r\n";
-    req << "Host: " << host << "\r\n";
-    req << "Content-Type: application/json\r\n";
-    req << "Content-Length: " << body_json.size() << "\r\n";
-    req << "X-App-Key: " << app_key_ << "\r\n";
-    req << "X-Timestamp: " << ts << "\r\n";
-    req << "X-Nonce: " << nonce << "\r\n";
-    req << "X-Signature: " << sig << "\r\n";
-    req << "Connection: close\r\n";
-    req << "\r\n";
-    req << body_json;
-    std::string reqs = req.str();
-    ssize_t sent = 0;
-    while (sent < static_cast<ssize_t>(reqs.size())) {
-        ssize_t w = send(fd, reqs.data() + sent, reqs.size() - sent, 0);
-        if (w <= 0) { close(fd); return {}; }
-        sent += w;
-    }
-    std::string total;
-    char buf[4096];
-    ssize_t r;
-    while ((r = recv(fd, buf, sizeof(buf), 0)) > 0)
-        total.append(buf, static_cast<size_t>(r));
-    close(fd);
-#else
-    (void)path; (void)host; (void)port; (void)ts; (void)nonce;
-    (void)sig; (void)body_json;
-    return {};
-#endif
-
-    size_t line1 = total.find("\r\n");
-    if (line1 == std::string::npos) return {};
-    std::string l1 = total.substr(0, line1);
-    auto sp1 = l1.find(' ');
-    if (sp1 == std::string::npos) return {};
-    int status = std::atoi(l1.substr(sp1 + 1).c_str());
-    if (status != 200) return {};
-    size_t hdr_end = total.find("\r\n\r\n");
-    if (hdr_end == std::string::npos) return {};
-    return total.substr(hdr_end + 4);
+    return rep.body;
 }
 
 std::pair<int, int> TtboxLicenseClient::fetch_app_info() {
-    int hb_interval = 60;
-    int hb_timeout = 180;
-    std::string body = api_get("/api/client/app-info?app_key=" + app_key_);
-    if (body.empty()) return {hb_interval, hb_timeout};
+    int hb_interval = kHeartbeatIntervalSecDefault;
+    int hb_timeout = kHeartbeatTimeoutSecDefault;
+    // ★ 2026-09-26：查询参数是 **appKey**（camelCase，cloud_client.py:270 同源）。
+    //   旧实现发 app_key= ⇒ 云端忽略 ⇒ 永远回落默认 60/180，且失败零日志。
+    std::string body = api_get("/api/client/app-info?appKey=" + app_key_);
+    if (body.empty()) {
+        TTBOX_LOG_WARN("[LicenseClient] app-info 拉取失败，心跳参数回落默认 60/180");
+        return {hb_interval, hb_timeout};
+    }
     JsonParseResult pr = json_parse(body);
     if (!pr.ok) return {hb_interval, hb_timeout};
     const auto* data = pr.value.find("data");
@@ -544,12 +579,19 @@ bool TtboxLicenseClient::do_card_login(
         "{\"appKey\":\"" + app_key_ +
         "\",\"cardKey\":\"" + card_key +
         "\",\"machineCode\":\"" + bind_device + "\"}";
-    std::string resp = api_post("/api/client/card-login", body_json);
-    if (resp.empty()) {
-        if (err) *err = "card-login: empty response";
+    HttpReply rep;
+    std::string xerr;
+    if (!signed_exchange("POST", "/api/client/card-login", body_json, {}, rep, &xerr)) {
+        if (err) *err = "card-login: " + (rep.error.empty() ? xerr : rep.error);
+        out.state = LicenseState::kNetworkError;
         return false;
     }
-    JsonParseResult pr = json_parse(resp);
+    if (rep.status != 200) {
+        if (err) *err = "card-login: HTTP " + std::to_string(rep.status);
+        out.state = LicenseState::kNetworkError;
+        return false;
+    }
+    JsonParseResult pr = json_parse(rep.body);
     if (!pr.ok) {
         if (err) *err = std::string("card-login: bad json: ") + pr.error;
         return false;
@@ -567,28 +609,44 @@ bool TtboxLicenseClient::do_card_login(
     const auto* token = data.find("clientToken");
     if (token) out.cached_token = token->as_string();
     const auto* expire = data.find("expireAt");
-    if (expire) {
-        // ★ 2026-09-23：expireAt 在契约里 **0 = 永久**（LicenseCard.hpp），
-        //   所以「没带这个字段」和「带了但解析不出来」必须区别对待。
-        //   后者原来被 `catch (...) {}` 静默吞掉、字段留 0 ⇒ 一张订阅卡会被当成
-        //   永久卡 ⇒ 之后一断网就**永久**停在 kFallback（该状态在 LicenseGate 里放行）。
-        //   解析失败按响应无效处理，绝不伪造"永久"。
+    // ★ 2026-09-26 fail-closed：card-login 的**成功响应必须携带 expireAt**
+    //   （契约同 Python cloud_client.card_login：expire_at / expire_unix_s 恒在）。
+    //   旧实现"字段整个缺失/空串 ⇒ 保持 0=永久"，桥端回归/代理剥字段时
+    //   订阅卡会被静默判成永久卡（断网后永不退出 fail-open）。
+    //   另：云端语义 expire 必须 > 0（LicenseDaemon::activate_cloud 明确拒绝 ≤0），
+    //   与离线卡的"0=永久"是两套语义，这里按云端契约 fail-closed。
+    if (expire == nullptr) {
+        if (err) *err = "card-login: 成功响应缺 expireAt";
+        out.state = LicenseState::kInvalidCard;
+        out.last_error = "expireAt missing";
+        return true;
+    }
+    if (expire->is_number()) {
+        out.expire_unix_ms = expire->as_int(0);
+    } else {
         const std::string exp_str = expire->as_string("");
-        if (expire->is_number()) {
-            out.expire_unix_ms = expire->as_int(0);
-        } else if (!exp_str.empty()) {
-            int64_t v = 0;
-            try {
-                v = std::stoll(exp_str);
-            } catch (...) {
-                if (err) *err = "card-login: expireAt 不是合法整数: " + exp_str;
-                out.state = LicenseState::kInvalidCard;
-                out.last_error = "expireAt 无法解析为整数";
-                return true;
-            }
-            out.expire_unix_ms = v;
+        if (exp_str.empty()) {
+            if (err) *err = "card-login: expireAt 为空";
+            out.state = LicenseState::kInvalidCard;
+            out.last_error = "expireAt empty";
+            return true;
         }
-        // 空串 / 非标量 ⇒ 按"服务端未提供"处理，保持 0（= 永久）的既有语义
+        int64_t v = 0;
+        try {
+            v = std::stoll(exp_str);
+        } catch (...) {
+            if (err) *err = "card-login: expireAt 不是合法整数: " + exp_str;
+            out.state = LicenseState::kInvalidCard;
+            out.last_error = "expireAt 无法解析为整数";
+            return true;
+        }
+        out.expire_unix_ms = v;
+    }
+    if (out.expire_unix_ms <= 0) {
+        if (err) *err = "card-login: expireAt 非法（云端契约要求正数到期点）";
+        out.state = LicenseState::kInvalidCard;
+        out.last_error = "expireAt non-positive";
+        return true;
     }
     // M2：签名卡内容（features / plan / uiBrand）。此处不回落也不过滤 ——
     // 回落由 apply_check_result、闭集过滤由 to_snapshot 各自负责（单一职责）。
@@ -608,152 +666,39 @@ bool TtboxLicenseClient::do_heartbeat(
     std::string body_json =
         "{\"machineCode\":\"" + bind_device +
         "\",\"clientVersion\":\"1.0.0\"}";
-    auto [host, port] = parse_url_host(server_url_);
-    std::string ts = unix_timestamp_sec();
-    std::string nonce = generate_nonce();
-    std::string sig = sign_request("POST", "/api/client/heartbeat", ts, nonce,
-                                   body_json);
-    if (sig.empty()) {   // client_secret 未配置 ⇒ 拒签，不发请求（§3.3）
-        if (err) *err = "client_secret 未配置";
+    std::vector<std::pair<std::string, std::string>> extra;
+    extra.push_back({"Authorization", "Bearer " + token});
+    HttpReply rep;
+    std::string xerr;
+    if (!signed_exchange("POST", "/api/client/heartbeat", body_json, extra, rep, &xerr)) {
+        // client_secret 未配置 / 传输失败 ⇒ 网络类失败（fail-open 由状态机裁决）
+        if (err) *err = "heartbeat: " + (rep.error.empty() ? xerr : rep.error);
         out.state = LicenseState::kNetworkError;
         return false;
     }
-
-    // Reuse the same TCP code path as api_post but add Authorization header
-    // Inline a simple version: build request with extra header
-#if defined(_WIN32)
-    WSADATA wsa{};
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        if (err) *err = "heartbeat: WSAStartup failed";
+    // ★ 2026-09-26：HTTP 状态分层（对齐 Python heartbeat_worker 契约，第三轮审计）。
+    //   旧实现非 200 一律归 kNetworkError ⇒ 云端权威否定（403=到期/禁用）被当成
+    //   "断网" ⇒ 状态机走 kFallback 永续放行，授权执法被绕过。
+    if (rep.status == 403) {
+        // 权威否定：到期/禁用 ⇒ fail-closed 锁定（不回落 card-login 也不宽限）
+        if (err) *err = "heartbeat: 403 到期/禁用（云端权威否定）";
+        out.state = LicenseState::kExpired;
+        out.last_error = "云端到期或已禁用";
+        return true;
+    }
+    if (rep.status == 401) {
+        // token 失效 ⇒ 属"需要重新登录"，verify_once 会自然回落 card-login
+        if (err) *err = "heartbeat: 401 token 失效";
+        out.state = LicenseState::kInvalidCard;
+        out.last_error = "token expired";
+        return true;
+    }
+    if (rep.status != 200) {
+        if (err) *err = "heartbeat: HTTP " + std::to_string(rep.status);
         out.state = LicenseState::kNetworkError;
         return false;
     }
-    addrinfo hints{}, *res = nullptr;
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    char port_str[16];
-    std::snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(host.c_str(), port_str, &hints, &res) != 0) {
-        WSACleanup();
-        if (err) *err = "heartbeat: DNS resolve failed";
-        out.state = LicenseState::kNetworkError;
-        return false;
-    }
-    SOCKET fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (fd == INVALID_SOCKET) { freeaddrinfo(res); WSACleanup(); return false; }
-    if (connect(fd, res->ai_addr, static_cast<int>(res->ai_addrlen)) != 0) {
-        closesocket(fd); freeaddrinfo(res); WSACleanup(); return false;
-    }
-    freeaddrinfo(res);
-    std::ostringstream req;
-    req << "POST /api/client/heartbeat HTTP/1.1\r\n";
-    req << "Host: " << host << "\r\n";
-    req << "Content-Type: application/json\r\n";
-    req << "Content-Length: " << body_json.size() << "\r\n";
-    req << "X-App-Key: " << app_key_ << "\r\n";
-    req << "X-Timestamp: " << ts << "\r\n";
-    req << "X-Nonce: " << nonce << "\r\n";
-    req << "X-Signature: " << sig << "\r\n";
-    req << "Authorization: Bearer " << token << "\r\n";
-    req << "Connection: close\r\n";
-    req << "\r\n";
-    req << body_json;
-    std::string reqs = req.str();
-    send(fd, reqs.c_str(), static_cast<int>(reqs.size()), 0);
-    std::string total;
-    char buf[4096];
-    int n;
-    while ((n = recv(fd, buf, sizeof(buf), 0)) > 0)
-        total.append(buf, n);
-    closesocket(fd);
-    WSACleanup();
-#elif defined(__linux__) || defined(__APPLE__)
-    struct addrinfo hints, *res = nullptr;
-    std::memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    char port_str[16];
-    std::snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(host.c_str(), port_str, &hints, &res) != 0) {
-        if (err) *err = "heartbeat: DNS failed";
-        out.state = LicenseState::kNetworkError;
-        return false;
-    }
-    int fd = -1;
-    for (struct addrinfo* p = res; p; p = p->ai_next) {
-        fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-        if (fd < 0) continue;
-        struct timeval tv;
-        tv.tv_sec = 10; tv.tv_usec = 0;
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        if (connect(fd, p->ai_addr, p->ai_addrlen) == 0) break;
-        close(fd); fd = -1;
-    }
-    freeaddrinfo(res);
-    if (fd < 0) {
-        if (err) *err = "heartbeat: connect failed";
-        out.state = LicenseState::kNetworkError;
-        return false;
-    }
-    std::ostringstream req;
-    req << "POST /api/client/heartbeat HTTP/1.1\r\n";
-    req << "Host: " << host << "\r\n";
-    req << "Content-Type: application/json\r\n";
-    req << "Content-Length: " << body_json.size() << "\r\n";
-    req << "X-App-Key: " << app_key_ << "\r\n";
-    req << "X-Timestamp: " << ts << "\r\n";
-    req << "X-Nonce: " << nonce << "\r\n";
-    req << "X-Signature: " << sig << "\r\n";
-    req << "Authorization: Bearer " << token << "\r\n";
-    req << "Connection: close\r\n";
-    req << "\r\n";
-    req << body_json;
-    std::string reqs = req.str();
-    ssize_t sent = 0;
-    while (sent < static_cast<ssize_t>(reqs.size())) {
-        ssize_t w = send(fd, reqs.data() + sent, reqs.size() - sent, 0);
-        if (w <= 0) { close(fd); if (err) *err = "heartbeat: send failed"; out.state = LicenseState::kNetworkError; return false; }
-        sent += w;
-    }
-    std::string total;
-    char buf[4096];
-    ssize_t r;
-    while ((r = recv(fd, buf, sizeof(buf), 0)) > 0)
-        total.append(buf, static_cast<size_t>(r));
-    close(fd);
-#else
-    (void)token; (void)bind_device; (void)out; (void)err;
-    return false;
-#endif
-
-    size_t line1 = total.find("\r\n");
-    if (line1 == std::string::npos) {
-        if (err) *err = "heartbeat: no response";
-        out.state = LicenseState::kNetworkError;
-        return false;
-    }
-    std::string l1 = total.substr(0, line1);
-    auto sp1 = l1.find(' ');
-    if (sp1 == std::string::npos) {
-        if (err) *err = "heartbeat: bad status line";
-        out.state = LicenseState::kNetworkError;
-        return false;
-    }
-    int status = std::atoi(l1.substr(sp1 + 1).c_str());
-    if (status != 200) {
-        if (err) *err = "heartbeat: HTTP " + std::to_string(status);
-        out.state = LicenseState::kNetworkError;
-        return false;
-    }
-    size_t hdr_end = total.find("\r\n\r\n");
-    if (hdr_end == std::string::npos) {
-        if (err) *err = "heartbeat: no body";
-        out.state = LicenseState::kNetworkError;
-        return false;
-    }
-    std::string body = total.substr(hdr_end + 4);
-    JsonParseResult pr = json_parse(body);
+    JsonParseResult pr = json_parse(rep.body);
     if (!pr.ok) {
         if (err) *err = std::string("heartbeat: bad json: ") + pr.error;
         out.state = LicenseState::kInvalidCard;
@@ -773,9 +718,10 @@ bool TtboxLicenseClient::do_heartbeat(
     if (t) out.cached_token = t->as_string();
     const auto* exp = pr.value.find("expireAt");
     if (exp) {
-        // 与上面 card-login 同口径：expireAt = 0 是契约里的"永久"，
-        // 但**解析失败**不能静默留 0（否则订阅卡会被误判成永久卡，断网后永不退出
-        // fail-open）。详见 TtboxLicenseClient 中同名的另一处注释。
+        // ★ 契约上心跳成功响应**不携带** expireAt（cloud_client.heartbeat 只回
+        //   server_time / heartbeat_interval / heartbeat_timeout）—— 靠 verify_once
+        //   保留 card-login 写入的 expire（那里曾把整份状态清零 ⇒ 永久卡假象）。
+        //   这里防御式保留：带了就更新，解析失败照旧按无效处理（不静默落 0）。
         const std::string exp_str = exp->as_string("");
         if (exp->is_number()) {
             out.expire_unix_ms = exp->as_int(0);
@@ -808,7 +754,12 @@ bool TtboxLicenseClient::verify_once(
     LicenseStatus& out_status, std::string* err_message) {
     // Preserve previous cached token from caller
     std::string prev_token = out_status.cached_token;
+    // ★ 2026-09-26：expire_unix_ms 必须跨调用保留 —— 心跳成功响应**不带** expireAt
+    //   （契约），旧实现在这里整份清零后心跳不回填 ⇒ 每轮 verify 都把到期点抹成
+    //   0=永久，订阅卡静默变永久卡（第三轮审计）。
+    const int64_t prev_expire = out_status.expire_unix_ms;
     out_status = LicenseStatus{};
+    out_status.expire_unix_ms = prev_expire;
     if (client_secret_.empty()) {   // §3.3：空 secret 拒签（网络类失败 ⇒ fail-open）
         out_status.state = LicenseState::kNetworkError;
         if (err_message) *err_message = "client_secret 未配置（拒绝签名）";

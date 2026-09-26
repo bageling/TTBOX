@@ -169,7 +169,7 @@ class PluginManager:
         from .standard import PluginManifest
         spec=self._items.get(plugin_id)
         manifest=PluginManifest.from_dict(json.loads((Path(record.path) / "plugin.json").read_text(encoding="utf-8")))
-        runtime=self.runtime_factory(record, spec) if self.runtime_factory else (BuiltinPluginRuntime(spec.start if spec else None, spec.stop if spec else None) if record.plugin_type=="builtin" else ProcessPluginRuntime(Path(record.path) / manifest.entry, record.path))
+        runtime=self.runtime_factory(record, spec) if self.runtime_factory else (BuiltinPluginRuntime(spec.start if spec else None, spec.stop if spec else None) if record.plugin_type=="builtin" else ProcessPluginRuntime(Path(record.path) / manifest.entry, record.path, stop_timeout=manifest.stop_timeout))
         self._runtimes[plugin_id]=runtime; return runtime
     def _declare_permissions(self, record):
         if self.security: self.security.declare(record.plugin_id, set(record.permissions))

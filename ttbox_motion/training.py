@@ -314,9 +314,22 @@ class MotionProfileStore:
         mean_speed = sum(speeds) / len(speeds)
         mean_eff = float(profile["statistics"]["path_efficiency"] or 0.0)
         quality = max(0, min(100, round(50 * min(1.0, len(samples) / 12.0) + 50 * max(0.0, min(1.0, mean_eff)))))
-        # 确定性 32 节点：按样本平均速度归一化，始终可重复。
+        # 确定性 32 节点：按样本速度分布归一化。
+        # ★ 旧实现 `(mean_speed / base) * ramp`，base=mean ⇒ 归一化项恒等于 1，
+        #   所有用户不管怎么训都得到同一条 0.72→1.00 固定斜坡（假模型）。
+        #   现改为：每样本速度 / 平均速度 的经验分位曲线（升序插值），再乘保守斜坡
+        #   0.72→1.00 —— 慢手曲线整体下压、快手整体抬升，真正反映个人速度分布。
+        speeds_sorted = sorted(speeds)
         base = max(mean_speed, 1e-6)
-        knots = [round(max(0.0, min(1.0, (mean_speed / base) * (0.72 + 0.28 * i / 31))), 6) for i in range(32)]
+        n = len(speeds_sorted)
+        knots = []
+        for i in range(32):
+            idx = (i / 31) * (n - 1)
+            lo = int(math.floor(idx))
+            hi = min(lo + 1, n - 1)
+            frac = idx - lo
+            norm = (speeds_sorted[lo] * (1 - frac) + speeds_sorted[hi] * frac) / base
+            knots.append(round(max(0.0, min(1.0, norm * (0.72 + 0.28 * i / 31))), 6))
         profile["model"] = {"schema": "ttbox.motion-model.v1", "version": 1, "knots": knots, "quality": quality, "ready": quality >= 60, "coverage": {"reaction": profile["reaction_count"], "continuous": profile["continuous_count"]}}
         self._write(profile)
         return self._public(profile)

@@ -286,10 +286,23 @@ class OtaUpdater:
         self._write_status(doc)
 
     # -- 公钥 --
+    # ★ key_id/version 由任务文件（面板 /api/ota/install）传入，属不可信输入。
+    #   两者都会拼进 root 上下文的文件路径（<keys_dir>/<key_id>.pub、
+    #   releases/<ver>.ota.staging），不做字符白名单就是路径穿越：
+    #   key_id="../../tmp/evil" 可让 root 验签加载攻击者自选公钥 ⇒ Ed25519 信任锚失效。
+    _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+    @classmethod
+    def _check_safe_id(cls, value: str, what: str) -> str:
+        v = str(value or "").strip()
+        if not cls._SAFE_ID_RE.match(v) or ".." in v:
+            raise OtaError("unsafe_field", f"非法 {what}: {value!r}")
+        return v
+
     def _load_pubkey(self, key_id: str) -> Ed25519PublicKey:
         if self._pubkey_pem:
             return serialization.load_pem_public_key(self._pubkey_pem)
-        p = self.keys_dir / f"{key_id}.pub"
+        p = self.keys_dir / f"{self._check_safe_id(key_id, 'key_id')}.pub"
         if not p.exists():
             raise OtaError("pubkey_missing", f"无该 key_id 的公钥: {key_id}")
         return serialization.load_pem_public_key(p.read_bytes())
@@ -429,6 +442,12 @@ class OtaUpdater:
             ver = str(version or signs.get("version") or "").strip()
             if not ver:
                 return self._fail("version_missing", "签名记录缺 version")
+            # ★ 任务文件的 version 未消毒就拼 releases 路径 ⇒ "../../x" 可把 staging
+            #   建到发布树之外（对比 _safe_members 对成员名做了穿越拒绝）。
+            try:
+                ver = self._check_safe_id(ver, "version")
+            except OtaError as e:
+                return self._fail(e.state, e.detail)
             self._progress(50, "校验通过，展开更新包", ver)
             # 命名注意（2026-09-18 板端实测）：release_install 的浇筑目标也是
             # releases/<ver>.staging —— 两者绝不能同名（否则其 tar 管道自拷自，
@@ -448,6 +467,11 @@ class OtaUpdater:
                 # 面板发起的 delta 安装 job 无 version 字段，从旁车签名取到
                 # "1.5.6-delta-from-1.5.5" ⇒ releases 目录名被污染）。
                 ver = str(mdoc["version"]).strip()
+                try:
+                    ver = self._check_safe_id(ver, "manifest version")
+                except OtaError as e:
+                    shutil.rmtree(staging, ignore_errors=True)
+                    return self._fail(e.state, e.detail)
             if mdoc and mdoc.get("delta"):
                 base = str(mdoc.get("base_version") or "").strip()
                 cur0 = current_version()

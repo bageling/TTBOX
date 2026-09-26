@@ -9,6 +9,7 @@
 
 #include <fstream>
 #include <jsoncpp/json/json.h>
+#include <atomic>
 #include <cstring>
 #include <linux/hid.h>
 
@@ -30,6 +31,11 @@ struct synthetic_desc {
 static int g_synth_ep_num = -1;
 // 合成模式 raw-gadget fd（注入线程使用）
 static int g_synth_fd = -1;
+// ★ 注入线程代际计数（2026-09-26）：RESET/DISCONNECT/SET_CONFIGURATION(0) 时 +1，
+//   在跑的注入线程检测到代际变化就退出。旧实现只禁端点不停线程，主机每次重枚举
+//   （休眠唤醒/换口/驱动重装）都泄漏一个 SCHED_FIFO:98 的 RT 线程，且旧线程用陈旧
+//   ep_num 空转、与新线程瓜分挂起位移（AI 位移随机丢失）。
+static std::atomic<int> g_synth_injector_gen{0};
 // HID 描述符类型（部分内核头未导出 USB_DT_HID）
 #ifndef USB_DT_HID
 #define USB_DT_HID 0x21
@@ -147,8 +153,10 @@ void* synthetic_injector_thread(void* arg) {
     apply_rt_thread_policy();  // RT：realtime=fifo:98 + CPU affinity
     int ep_num = g_synth_ep_num;
     int fd = g_synth_fd;
-    printf("synthetic_injector: ep_num=%d (rt)\n", ep_num);
-    while (!please_stop_ep0) {
+    const int my_gen = g_synth_injector_gen.load();
+    printf("synthetic_injector: ep_num=%d (rt) gen=%d\n", ep_num, my_gen);
+    if (ep_num < 0) return nullptr;   // ep enable 失败时不再空转
+    while (!please_stop_ep0 && g_synth_injector_gen.load() == my_gen) {
         uint8_t report[8];
         int len = ttbox_usbproxy::mouse_control_build_synthetic_report(report, sizeof(report));
         if (len > 0) {
@@ -158,8 +166,15 @@ void* synthetic_injector_thread(void* arg) {
             io.inner.length = static_cast<__u32>(len);
             std::memcpy(io.data, report, len);
             int rv = usb_raw_ep_write(fd, (struct usb_raw_ep_io*)&io);
-            if (rv < 0 && errno != ESHUTDOWN && errno != EINTR && errno != EINVAL) {
-                fprintf(stderr, "[injector] ep_write rv=%d errno=%d, retrying\n", rv, errno);
+            if (rv < 0) {
+                if (errno == ESHUTDOWN || errno == EINVAL || errno == EPIPE) {
+                    // 端点已禁用/失效（重枚举、解除配置）⇒ 退出，交给新一代线程
+                    break;
+                }
+                if (errno != EINTR) {
+                    fprintf(stderr, "[injector] ep_write rv=%d errno=%d, retrying\n", rv, errno);
+                    usleep(200);   // 写失败也休眠，别退化成有位移就 100% CPU 自旋
+                }
             }
         } else {
             // 无挂起位移时休眠，避免空转
@@ -247,11 +262,12 @@ void synthetic_ep0_loop(int fd) {
 
         if (event.inner.type == USB_RAW_EVENT_RESET ||
             event.inner.type == USB_RAW_EVENT_DISCONNECT) {
-            // 禁用端点，等待重新枚举
+            // 禁用端点 + 停掉当前代注入线程，等待重新枚举
             if (ep_enabled) {
                 usb_raw_ep_disable(fd, 0x81);
                 ep_enabled = false;
             }
+            g_synth_injector_gen.fetch_add(1);
             continue;
         }
         if (event.inner.type != USB_RAW_EVENT_CONTROL) continue;
@@ -334,13 +350,21 @@ void synthetic_ep0_loop(int fd) {
                     // 启用 IN 中断端点 0x81（仅首次）
                     if (!ep_enabled) {
                         struct usb_endpoint_descriptor ep = g_synth.ep;
-                        g_synth_ep_num = usb_raw_ep_enable(fd, &ep);
-                        g_synth_fd = fd;
-                        ep_enabled = true;
-                        // 启动注入线程
-                        pthread_t tid;
-                        pthread_create(&tid, nullptr, synthetic_injector_thread, nullptr);
-                        pthread_detach(tid);
+                        int epnum = usb_raw_ep_enable(fd, &ep);
+                        if (epnum >= 0) {
+                            g_synth_ep_num = epnum;
+                            g_synth_fd = fd;
+                            ep_enabled = true;
+                            // 启动注入线程
+                            pthread_t tid;
+                            pthread_create(&tid, nullptr, synthetic_injector_thread, nullptr);
+                            pthread_detach(tid);
+                        } else {
+                            // ★ enable 失败（负数是 errno）不能照存照用：
+                            // 旧实现会让注入线程拿 ep=-1 永久空转
+                            fprintf(stderr, "synthetic_ep0: usb_raw_ep_enable failed: %d\n",
+                                    epnum);
+                        }
                     }
                 } else {
                     // SET_CONFIGURATION(0) = 解除配置
@@ -348,6 +372,7 @@ void synthetic_ep0_loop(int fd) {
                         usb_raw_ep_disable(fd, 0x81);
                         ep_enabled = false;
                     }
+                    g_synth_injector_gen.fetch_add(1);   // 停当前代注入线程
                 }
                 continue;
             }

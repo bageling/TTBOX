@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import io
 import json
 import math
@@ -297,6 +298,22 @@ def collect_network_summary() -> dict:
 # IPC 通信（V-13：唯一实现 = plugins/web/lib/ipc.py，本处仅薄封装）
 # ====================================================================
 from lib import ipc as _ttbox_ipc  # noqa: E402  IPC 客户端单点实现（B-CONST-1）
+
+# ★ 配置读-改-写串行锁：Core 只保证单次 SET_CONFIG 原子，不保证跨请求的 RMW 原子。
+#   waitress 64 线程 + 标定线程并发时，A 读→B 读→A 写→B 写 ⇒ A 的修改被 B 的整份
+#   快照静默抹掉（"设置偶发不生效/被改回去"）。所有 GET_CONFIG→SET_CONFIG 序列必须持锁。
+_CFG_WRITE_LOCK = threading.RLock()
+
+
+def _config_write_serialized(fn):
+    """把整个请求处理函数包进 _CFG_WRITE_LOCK（用于短平快的配置 RMW 端点）。
+    长任务（标定 worker）不能整函数持锁，只包各 RMW 段。"""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _CFG_WRITE_LOCK:
+            return fn(*args, **kwargs)
+    wrapper.__name__ = fn.__name__
+    return wrapper
 
 
 def ipc_request(req_type: str, params: dict | None = None, timeout: float = 5) -> dict:
@@ -1205,8 +1222,13 @@ def validate_aim_profiles(profiles) -> list:
     return [_aim_profile_core_dict(p) for p in profiles]
 
 
-def web_body_to_profile(body: dict) -> dict:
-    """Web 前端保存的配置格式（collectConfig 扁平结构）→ RuntimeProfile。"""
+def web_body_to_profile(body: dict, prev_profile: dict | None = None) -> dict:
+    """Web 前端保存的配置格式（collectConfig 扁平结构）→ RuntimeProfile。
+
+    prev_profile：调用方**已读到的**当前 RuntimeProfile（merge base）。
+    ★ 旧实现在函数内部二次 GET_CONFIG 且失败时裸吞异常回落出厂默认 —— 那会把
+      真实 FOV 等字段静默重置。现在：调用方传了 prev 就直接用（消灭 TOCTOU）；
+      不传（纯函数场景，如测试）用中性默认值，绝不碰 Core。"""
     ctrl = (body.get('ai') or {}).get('controller') or {}
     mouse: dict = {}
 
@@ -1479,11 +1501,17 @@ def web_body_to_profile(body: dict) -> dict:
     #        0.99 走 enabled=True（fov_range=1.98）⇒ 滑块往小拖，圆反而几乎翻倍（非单调）；
     #      · 从不读 fov_scale，回填时又恒写 1.0 ⇒ 热键卡那个旋钮是死的，提示文案却在承诺"乘"。
     fov: dict = {}
-    try:
-        prev = _get_runtime_profile()
-        prev_fov = prev.get('fov') or {}
-    except Exception:
-        prev_fov = {}
+    # ★ 沿用值来源优先级：调用方传入的 merge base（update_config / load_preset 都已
+    #   读过 Core，绝不在翻译层里二次 GET —— 那既构成 TOCTOU，也曾把"读失败"静默
+    #   回落成出厂默认，保存一次就把真实 FOV 重置）> 直接 GET_CONFIG（测试经
+    #   monkeypatch 注入）> 读失败时的中性默认（仅限未传 prev 的纯函数场景）。
+    if prev_profile is not None:
+        prev_fov = (prev_profile or {}).get('fov') or {}
+    else:
+        try:
+            prev_fov = (_get_runtime_profile() or {}).get('fov') or {}
+        except Exception:
+            prev_fov = {}
     fov['shape'] = prev_fov.get('shape', 0)
     fov['center_x'] = prev_fov.get('center_x', 0.5)
     fov['center_y'] = prev_fov.get('center_y', 0.5)
@@ -2655,6 +2683,12 @@ def _ota_install_impl():
     body = request.get_json(silent=True) or {}
     url = str(body.get('url') or '').strip()
     key_id = str(body.get('key_id') or OTA_DEFAULT_KEY_ID).strip()
+    # ★ key_id/version 会进 root 更新器的路径拼装（<keys_dir>/<key_id>.pub、
+    #   releases/<ver>.ota.staging），与更新器 _check_safe_id 同一白名单，
+    #   源头就拒掉路径穿越（"../../tmp/evil" 可让 root 验签加载攻击者公钥）。
+    _OTA_ID_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
+    if not _OTA_ID_RE.match(key_id) or '..' in key_id:
+        return jsonify({'ok': False, 'error': '非法 key_id'}), 400
     if not url:
         return jsonify({'ok': False, 'error': 'url is required'}), 400
     if not url.startswith('https://'):
@@ -2675,6 +2709,8 @@ def _ota_install_impl():
     job = {'url': url, 'key_id': key_id, 'enqueued_at': int(time.time())}
     if str(body.get('version') or '').strip():
         job['version'] = str(body['version']).strip()
+        if not _OTA_ID_RE.match(job['version']) or '..' in job['version']:
+            return jsonify({'ok': False, 'error': '非法 version'}), 400
     name = 'job-%d.json' % int(time.time() * 1000)
     try:
         with open(os.path.join(OTA_JOBS_DIR, name), 'w', encoding='utf-8') as f:
@@ -2861,6 +2897,7 @@ def _deep_merge_profile(base: dict, patch: dict) -> dict:
 
 
 @app.put('/api/config')
+@_config_write_serialized
 def update_config():
     try:
         body = request.get_json(force=True)
@@ -2871,9 +2908,10 @@ def update_config():
     # 读当前配置：唯一来源 = Core IPC（Core 离线 ⇒ CoreUnavailableError → 503 fail-loud）
     prof = _get_runtime_profile()
     if not isinstance(body, dict) or not body:
-        return jsonify({'ok': True, 'data': profile_to_web(prof)})
+        # ★ 空 body 不是"保存空配置成功"：原实现返回 ok:true 会把"没保存"伪装成"已保存"。
+        return jsonify({'ok': False, 'error': '请求体为空，未保存'}), 400
     try:
-        translated = web_body_to_profile(body)
+        translated = web_body_to_profile(body, prev_profile=prof)
     except ConfigValidationError as exc:
         # 档位表配错（热键重叠 / 主键缺失 / 同时按下缺副键…）如实报 400 + 人话原因，
         # 而不是让它冒成 500。面板保存前也跑同一套校验（前端即时提示）；
@@ -3486,10 +3524,12 @@ def import_model():
     if r1.get('status') != 0:
         dst.unlink(missing_ok=True)
         return jsonify({'ok': False, 'error': r1.get('error', '导入失败')})
-    r2 = ipc_request('MODEL_VALIDATE', {'model_id': model_id})
+    # ★ 超时分级（api_v1.py 表）：模型加载可到分钟级，默认 5s 会把"正在加载"误判成
+    #   "Core 挂了"，操作者会反复重试。VALIDATE/ACTIVATE ≥120s、INSTALL 60s。
+    r2 = ipc_request('MODEL_VALIDATE', {'model_id': model_id}, timeout=120)
     if r2.get('status') != 0:
         return jsonify({'ok': False, 'error': r2.get('error', '校验失败')})
-    r3 = ipc_request('MODEL_INSTALL', {'model_id': model_id})
+    r3 = ipc_request('MODEL_INSTALL', {'model_id': model_id}, timeout=60)
     if r3.get('status') != 0:
         return jsonify({'ok': False, 'error': r3.get('error', '安装失败')})
     ui_meta = {}
@@ -3529,7 +3569,8 @@ def select_model():
     model_id = str(body.get('model_id') or '').strip()
     if not model_id:
         return jsonify({'ok': False, 'error': 'missing field: model_id'}), 400
-    response = ipc_request('MODEL_ACTIVATE', {'model_id': model_id})
+    # ★ 同 api_v1 超时分级：MODEL_ACTIVATE 要加载并跑通 RKNN，板端实测分钟级，默认 5s 必误判。
+    response = ipc_request('MODEL_ACTIVATE', {'model_id': model_id}, timeout=120)
     if response.get('status') != 0:
         return jsonify({'ok': False, 'error': response.get('error', '激活失败')}), 409
     status_response = ipc_request('MODEL_LIST')
@@ -3713,6 +3754,7 @@ def save_or_delete_preset():
 
 
 @app.post('/api/presets/load')
+@_config_write_serialized
 def load_preset():
     body = request.get_json(silent=True) or {}
     name = str(body.get('name', '')).strip()
@@ -3739,10 +3781,16 @@ def load_preset():
         needs_translate = True
     if needs_translate:
         try:
-            translated = web_body_to_profile(config)
+            translated = web_body_to_profile(config, prev_profile=_get_runtime_profile())
         except ConfigValidationError as exc:
             # 预设里的档位表配错 → 400 + 人话原因（与 /api/config 同一口径）
             return jsonify({'ok': False, 'error': f'预设内容非法：{exc}'}), 400
+    # ★ 预设里带保存时刻的 model_id（profile_to_web 恒输出），深合并会覆盖当前值，
+    #   Core 侧 "model_id 只能通过模型激活接口修改" 会整份拒收 ⇒ 换过模型后
+    #   加载预设 100% 失败。两种格式（Web 翻译产物 / 旧 RuntimeProfile）都统一剥掉，
+    #   model_id 只归 /api/models/select 管（与 update_config 的剥离纪律一致）。
+    if isinstance(translated, dict):
+        translated.pop('model_id', None)
     prof = _deep_merge_profile(_get_runtime_profile(), translated)
     prof = normalize_profile_capture_size(prof)
     r = ipc_request('SET_CONFIG', {'profile': prof})
@@ -3782,9 +3830,17 @@ def import_preset():
     requested = str(request.form.get('name') or '').strip()
     name = requested or str(data.get('name') or '') or Path(f.filename).stem or 'imported'
     safe = re.sub('[^\\w\\-]', '_', name)[:64]
+    # ★ 与保存端同一条纪律：_xxx.json 是 root 生成的保留名（如诊断报告 _dtbfix.json），
+    #   ttbox 只读；漏掉这个检查 → 导入名为 _xxx 的预设时覆盖 root 文件 → PermissionError
+    #   → 未捕获 500（保存端修过的坑在导入端复发）。
+    if not _is_preset_name(safe):
+        return jsonify({'ok': False, 'error': f'预设名非法（{safe} 开头的是系统保留名）'}), 400
     d = Path(PRESETS_DIR)
     d.mkdir(parents=True, exist_ok=True)
-    (d / (safe + '.json')).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    try:
+        (d / (safe + '.json')).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    except OSError as exc:
+        return jsonify({'ok': False, 'error': f'预设写入失败：{exc}'}), 500
     return jsonify({'ok': True, 'data': {'name': safe, 'preset': data}})
 
 
@@ -3871,6 +3927,10 @@ _cal = {
     'dropped_sample_count': 0,  # 被门槛丢掉的样本数（同目标/位移/count/落设备）
 }
 _cal_lock = threading.Lock()
+# ★ 配置读-改-写串行锁：Core 只保证单次 SET_CONFIG 原子，不保证跨请求的 RMW 原子。
+#   waitress 64 线程 + 标定线程并发时，A 读→B 读→A 写→B 写 ⇒ A 的修改被 B 的整份
+#   快照静默抹掉（"设置偶发不生效/被改回去"）。所有 GET_CONFIG→SET_CONFIG 序列必须持锁。
+_CFG_WRITE_LOCK = threading.RLock()
 
 
 def _calib_set(**kw):
@@ -4065,17 +4125,18 @@ def _calib_apply_gain(calib: dict) -> tuple[bool, str]:
         gain_y = float(calib.get('mouse_gain_y_px_per_count') or 0)
         if gain_x <= 0 or gain_y <= 0:
             return False, '增益必须 > 0'
-        prof = _get_runtime_profile()
-        if not prof:
-            return False, '读取 RuntimeProfile 失败'
-        mo = prof.setdefault('mouse', {})
-        mo['gain_x_px_per_count'] = round(gain_x, 4)
-        mo['gain_y_px_per_count'] = round(gain_y, 4)
-        # 拟人化抖动预算与压枪换算共用同一物理量：px/count 联动。
-        # 注意层级：personal_trajectory 是 mouse 的子对象（RuntimeProfile 序列化结构）。
-        pt = mo.setdefault('personal_trajectory', {})
-        pt['response_px_per_count'] = round(gain_y, 4)
-        r = ipc_request('SET_CONFIG', {'profile': prof})
+        with _CFG_WRITE_LOCK:
+            prof = _get_runtime_profile()
+            if not prof:
+                return False, '读取 RuntimeProfile 失败'
+            mo = prof.setdefault('mouse', {})
+            mo['gain_x_px_per_count'] = round(gain_x, 4)
+            mo['gain_y_px_per_count'] = round(gain_y, 4)
+            # 拟人化抖动预算与压枪换算共用同一物理量：px/count 联动。
+            # 注意层级：personal_trajectory 是 mouse 的子对象（RuntimeProfile 序列化结构）。
+            pt = mo.setdefault('personal_trajectory', {})
+            pt['response_px_per_count'] = round(gain_y, 4)
+            r = ipc_request('SET_CONFIG', {'profile': prof})
         return r.get('status') == 0, r.get('error', '配置已更新')
     except Exception as exc:
         return False, str(exc)
@@ -4116,22 +4177,23 @@ def _calib_apply_pid(calib: dict) -> tuple[bool, str]:
     （pid1.cpp 参考默认 0），自动调参不该覆盖业主手设的值。
     """
     try:
-        prof = _get_runtime_profile()
-        if not prof:
-            return False, '读取 RuntimeProfile 失败'
-        pid = derive_pid_params(
-            float(calib.get('mouse_gain_x_px_per_count') or 0),
-            float(calib.get('mouse_gain_y_px_per_count') or 0),
-            float(calib.get('mouse_response_delay_ms') or 0),
-            smooth=_calib_live_smooth(prof),
-        )
-        mo = prof.setdefault('mouse', {})
-        mo['kp_x'] = pid['kp']
-        mo['kp_y'] = pid['kp']
-        mo['kd_x'] = pid['kd']
-        mo['kd_y'] = pid['kd']
-        mo['predict_x'] = pid['predict']
-        r = ipc_request('SET_CONFIG', {'profile': prof})
+        with _CFG_WRITE_LOCK:
+            prof = _get_runtime_profile()
+            if not prof:
+                return False, '读取 RuntimeProfile 失败'
+            pid = derive_pid_params(
+                float(calib.get('mouse_gain_x_px_per_count') or 0),
+                float(calib.get('mouse_gain_y_px_per_count') or 0),
+                float(calib.get('mouse_response_delay_ms') or 0),
+                smooth=_calib_live_smooth(prof),
+            )
+            mo = prof.setdefault('mouse', {})
+            mo['kp_x'] = pid['kp']
+            mo['kp_y'] = pid['kp']
+            mo['kd_x'] = pid['kd']
+            mo['kd_y'] = pid['kd']
+            mo['predict_x'] = pid['predict']
+            r = ipc_request('SET_CONFIG', {'profile': prof})
         return r.get('status') == 0, r.get('error', '配置已更新')
     except Exception as exc:
         return False, str(exc)
@@ -4144,28 +4206,34 @@ def _calib_worker() -> None:
     与游戏灵敏度无关，对任意时间窗成立（不必等稳态）。参数推导见 derive_pid_params。
     注入：标定时 mouse.calibrating=true（AimThread/OutputBackend 放行 AI 移动），
     kp 输出经现有控制链驱动鼠标 → 目标在画面中位移 → aim_pos_x 反馈。"""
-    prof0 = _get_runtime_profile()
-    was_enabled = bool((prof0.get('mouse') or {}).get('enabled'))
-    mo0 = prof0.setdefault('mouse', {})
-    mo0['enabled'] = True
-    mo0['calibrating'] = True
-    # 入场清零：上一轮若异常退出（进程被杀/重启），板上可能留着非零偏置，
-    # 那会让紧接着的"稳定检测"先把目标拉偏、直接判定目标不稳。
-    mo0['calibration_bias_x'] = 0.0
-    mo0['calibration_bias_y'] = 0.0
-    # 温和档 PID（见 CALIB_PID_KP_MAX 注释）。保存用户原值：
-    # 失败/取消时在 finally 恢复；成功时推导参数会覆盖，不能回头写旧值。
-    saved_kp = mo0.get('kp_x')
-    saved_kd = mo0.get('kd_x')
-    try:
-        calib_kp = min(float(saved_kp), CALIB_PID_KP_MAX)
-    except (TypeError, ValueError):
-        calib_kp = CALIB_PID_KP_MAX
-    mo0['kp_x'] = calib_kp
-    mo0['kp_y'] = calib_kp
-    mo0['kd_x'] = calib_kp * CALIB_PID_KD_RATIO
-    mo0['kd_y'] = calib_kp * CALIB_PID_KD_RATIO
-    ipc_request('SET_CONFIG', {'profile': prof0})
+    # ★ 前置段整体持配置锁：GET→改→SET 是读-改-写，不能被用户并发保存插队。
+    with _CFG_WRITE_LOCK:
+        prof0 = _get_runtime_profile()
+        was_enabled = bool((prof0.get('mouse') or {}).get('enabled'))
+        mo0 = prof0.setdefault('mouse', {})
+        mo0['enabled'] = True
+        mo0['calibrating'] = True
+        # 入场清零：上一轮若异常退出（进程被杀/重启），板上可能留着非零偏置，
+        # 那会让紧接着的"稳定检测"先把目标拉偏、直接判定目标不稳。
+        mo0['calibration_bias_x'] = 0.0
+        mo0['calibration_bias_y'] = 0.0
+        # 温和档 PID（见 CALIB_PID_KP_MAX 注释）。保存用户原值：
+        # 失败/取消时在 finally 恢复；成功时推导参数会覆盖，不能回头写旧值。
+        saved_kp = mo0.get('kp_x')
+        saved_kd = mo0.get('kd_x')
+        try:
+            calib_kp = min(float(saved_kp), CALIB_PID_KP_MAX)
+        except (TypeError, ValueError):
+            calib_kp = CALIB_PID_KP_MAX
+        mo0['kp_x'] = calib_kp
+        mo0['kp_y'] = calib_kp
+        mo0['kd_x'] = calib_kp * CALIB_PID_KD_RATIO
+        mo0['kd_y'] = calib_kp * CALIB_PID_KD_RATIO
+        # ★ 首次 SET_CONFIG 必须查结果：失败还继续跑 = 全程用用户实战 KP 采数据，
+        #   温和档根本没写进去，gain 样本全靠 MAD 门硬滤。
+        _r0 = ipc_request('SET_CONFIG', {'profile': prof0})
+        if _r0.get('status') != 0:
+            raise RuntimeError(f'标定前置 SET_CONFIG 失败：{_r0.get("error") or "未知原因"}')
     try:
         _calib_set(state='preparing', status='running', phase='preparing', reason='准备标定环境',
                    round=0, progress=0.0, round_gains=[], candidate_count=0,
@@ -4439,26 +4507,40 @@ def _calib_worker() -> None:
         _calib_set(state='failed', status='failed', phase='error', ready=False,
                    reason=f'标定异常：{exc!r}')
     finally:
-        try:
-            prof = _get_runtime_profile()
-            mo = prof.setdefault('mouse', {})
-            mo['calibrating'] = False
-            # ★ 偏置必须一起归零：中途取消/失败时若留着 calibration_bias_*，
-            #   参考点会被永久顶偏（表现为"标定失败之后自瞄一直瞄偏"），只能靠重启清掉。
-            mo['calibration_bias_x'] = 0.0
-            mo['calibration_bias_y'] = 0.0
-            # 温和档只在标定期生效：成功路径推导参数已由 _calib_apply_pid 写入，
-            # 不能覆盖回去；失败/取消则恢复用户原 KP/KD。
-            if _cal['state'] in ('failed', 'cancelled'):
-                if saved_kp is not None:
-                    mo['kp_x'] = mo['kp_y'] = saved_kp
-                if saved_kd is not None:
-                    mo['kd_x'] = mo['kd_y'] = saved_kd
-            if not was_enabled:
-                mo['enabled'] = False
-            ipc_request('SET_CONFIG', {'profile': prof})
-        except Exception:
-            pass
+        # ★ 恢复段也是读-改-写，必须持锁，否则会覆盖用户并发保存的参数。
+        with _CFG_WRITE_LOCK:
+            try:
+                prof = _get_runtime_profile()
+                mo = prof.setdefault('mouse', {})
+                mo['calibrating'] = False
+                # ★ 偏置必须一起归零：中途取消/失败时若留着 calibration_bias_*，
+                #   参考点会被永久顶偏（表现为"标定失败之后自瞄一直瞄偏"），只能靠重启清掉。
+                mo['calibration_bias_x'] = 0.0
+                mo['calibration_bias_y'] = 0.0
+                # 温和档只在标定期生效：成功路径推导参数已由 _calib_apply_pid 写入，
+                # 不能覆盖回去；失败/取消则恢复用户原 KP/KD。
+                if _cal['state'] in ('failed', 'cancelled'):
+                    if saved_kp is not None:
+                        mo['kp_x'] = mo['kp_y'] = saved_kp
+                    if saved_kd is not None:
+                        mo['kd_x'] = mo['kd_y'] = saved_kd
+                if not was_enabled:
+                    mo['enabled'] = False
+                ipc_request('SET_CONFIG', {'profile': prof})
+            except Exception:
+                pass
+
+
+def _calib_thread_entry() -> None:
+    """线程 target（真正 target=_calib_worker 的是本函数）：
+    _calib_worker 的 except 从前置段之后的 try 才开始 —— 前置段（GET_CONFIG /
+    首次 SET_CONFIG）抛 CoreUnavailableError 时内部 except/finally 都够不着，
+    状态机会停在启动前的旧值（面板假运行）。这里兜最后一道网，落终态。"""
+    try:
+        _calib_worker()
+    except Exception as exc:
+        _calib_set(state='failed', status='failed', phase='error', ready=False,
+                   reason=f'标定异常：{exc!r}')
 
 
 def _calibration_payload() -> dict:
@@ -4604,7 +4686,7 @@ def start_auto_calibration():
         return jsonify({'ok': False, 'error': '推理服务未运行或目标反馈未就绪（请先启动推理）'}), 400
     if _calib_target() is None:
         return jsonify({'ok': False, 'error': '未识别到目标，无法开始标定（请将准星对准画面中的目标，等待检测框稳定出现）'}), 400
-    th = threading.Thread(target=_calib_worker, daemon=True)
+    th = threading.Thread(target=_calib_thread_entry, daemon=True)
     with _cal_lock:
         _cal['thread'] = th
     th.start()
@@ -5096,6 +5178,7 @@ def _mouse_apply_payload(mouse=None, applied=False, apply_error=''):
 
 
 @app.put('/api/hardware/mouse')
+@_config_write_serialized
 def update_mouse_hardware():
     body = request.get_json(silent=True) or {}
     prof = _get_runtime_profile()
@@ -5105,7 +5188,9 @@ def update_mouse_hardware():
         mouse['mode'] = body['mode']
         mouse['proxy_mode'] = body['mode']
     if 'enabled' in body:
-        mouse['enabled'] = body['enabled']
+        # ★ 强转 bool：字符串 "false" 是真值，原样写会把"关闭"存成"开启"。
+        mouse['enabled'] = bool(body['enabled']) if isinstance(body['enabled'], bool) \
+            else str(body['enabled']).strip().lower() in ('1', 'true', 'yes', 'on')
     if 'config' in body and isinstance(body['config'], dict):
         mouse.update({k: v for k, v in body['config'].items() if k in (
             'usb_vid', 'usb_pid', 'usb_manufacturer', 'usb_product', 'usb_serial',
@@ -5731,25 +5816,27 @@ def _motion_error(exc: Exception):
 
 def _apply_personal_motion_to_core(enabled: bool, profile_id: str = '', mix: dict | None = None):
     """把 TTBOX 个人模型的启用状态写入 Core RuntimeProfile，Core 是最终运行真源。"""
-    prof = _get_runtime_profile()
-    if not prof:
-        raise MotionTrainingError('读取 TTBOX Core RuntimeProfile 失败')
-    personal = prof.setdefault('mouse', {}).setdefault('personal_motion', {})
-    personal['enabled'] = bool(enabled)
-    if enabled:
-        profile = MOTION_STORE.list_profile(profile_id)
-        model = profile.get('model') or {}
-        if not model.get('ready'):
-            raise MotionTrainingError('model is not ready')
-        values = mix or MOTION_STORE._mix()
-        personal.update({
-            'curve_blend': values.get('curve', 1.0),
-            'speed_blend': values.get('speed', 1.0),
-            'reaction_blend': values.get('reaction', 0.7),
-            'max_reaction_delay_ms': values.get('max_reaction_delay_ms', 250),
-            'knots': model.get('knots', []),
-        })
-    result = ipc_request('SET_CONFIG', {'profile': prof})
+    # ★ 读-改-写持配置锁（防止与用户保存/标定恢复互相整份覆盖）。
+    with _CFG_WRITE_LOCK:
+        prof = _get_runtime_profile()
+        if not prof:
+            raise MotionTrainingError('读取 TTBOX Core RuntimeProfile 失败')
+        personal = prof.setdefault('mouse', {}).setdefault('personal_motion', {})
+        personal['enabled'] = bool(enabled)
+        if enabled:
+            profile = MOTION_STORE.list_profile(profile_id)
+            model = profile.get('model') or {}
+            if not model.get('ready'):
+                raise MotionTrainingError('model is not ready')
+            values = mix or MOTION_STORE._mix()
+            personal.update({
+                'curve_blend': values.get('curve', 1.0),
+                'speed_blend': values.get('speed', 1.0),
+                'reaction_blend': values.get('reaction', 0.7),
+                'max_reaction_delay_ms': values.get('max_reaction_delay_ms', 250),
+                'knots': model.get('knots', []),
+            })
+        result = ipc_request('SET_CONFIG', {'profile': prof})
     if result.get('status') != 0:
         raise MotionTrainingError(result.get('error', 'Core 配置更新失败'))
     return prof

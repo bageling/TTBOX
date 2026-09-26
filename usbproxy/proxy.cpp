@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <map>
 #include <atomic>
+#include <memory>
 #include <errno.h>
 #include <string.h>
 
@@ -790,9 +791,12 @@ void noop_signal_handler(int) { }
 // Multiple endpoint threads can observe the same physical disconnect at the
 // same time. Send the cleanup signal only once; otherwise the second SIGINT
 // takes the "force exiting" path before main() can release the UDC cleanly.
-static std::atomic<bool> proxy_stop_requested{false};
+// ★ 2026-09-26：去掉 static 并在 proxy.h 声明 —— device-libusb.cpp 的 hotplug
+//   回调此前无守卫地 kill(0, SIGINT)，与端点线程的断连路径并发时第二发命中
+//   usb-proxy.cpp 的 "force exiting" 强退分支，跳过 UDC/接口清理。
+std::atomic<bool> proxy_stop_requested{false};
 
-static void stop_proxy_after_physical_disconnect()
+void stop_proxy_after_physical_disconnect()
 {
 	if (proxy_stop_requested.exchange(true, std::memory_order_acq_rel))
 		return;
@@ -1430,12 +1434,23 @@ void ep0_loop(int fd) {
 		struct usb_raw_transfer_io io;
 		io.inner.ep = 0;
 		io.inner.flags = 0;
-		io.inner.length = event.ctrl.wLength;
+		// ★ 2026-09-26（第三轮审计）：wLength 是主机可控字段（uint16 最大 65535），
+		//   而 io.data 只有 MAX_TRANSFER_SIZE(4096) 字节 —— 不钳制的话
+		//   usb_raw_ep0_read/write 会让内核向栈上 io.data 越界读写
+		//   （GET_DESCRIPTOR(CONFIG) 的大 config 描述符即可触发）。
+		const uint16_t ctrl_wlen = event.ctrl.wLength;
+		const uint16_t transfer_len =
+			ctrl_wlen > MAX_TRANSFER_SIZE ? MAX_TRANSFER_SIZE : ctrl_wlen;
+		io.inner.length = transfer_len;
 
 		int injection_flags = USB_INJECTION_FLAG_NONE;
 		int nbytes = 0;
 		int result = 0;
-		unsigned char *control_data = new unsigned char[event.ctrl.wLength];
+		// ★ RAII：后面多条 continue 路径此前都跳过 delete[]（IN 被 stall 是
+		//   枚举期高频路径）⇒ 常驻进程内存持续增长，mlockall 还会把泄漏页
+		//   锁进不换页 RAM。unique_ptr 兜住所有路径。
+		std::unique_ptr<unsigned char[]> control_data_owner(new unsigned char[ctrl_wlen]);
+		unsigned char *control_data = control_data_owner.get();
 
 		// For endpoint-directed class requests, translate the gadget-side
 		// endpoint address in wIndex to the physical device's address.
@@ -1452,8 +1467,11 @@ void ep0_loop(int fd) {
 		if (event.ctrl.bRequestType & USB_DIR_IN) {
 			result = control_request(&event.ctrl, &nbytes, &control_data, USB_REQUEST_TIMEOUT);
 			if (result == 0) {
-				memcpy(&io.data[0], control_data, nbytes);
-				io.inner.length = nbytes;
+				// nbytes 可超过 MAX_TRANSFER_SIZE（大 config 描述符）⇒ 钳到栈缓冲内
+				const int copy_len =
+					nbytes > MAX_TRANSFER_SIZE ? MAX_TRANSFER_SIZE : nbytes;
+				memcpy(&io.data[0], control_data, copy_len);
+				io.inner.length = copy_len;
 
 				if (injection_enabled) {
 					injection(event, io, injection_flags);
@@ -1461,10 +1479,8 @@ void ep0_loop(int fd) {
 					case USB_INJECTION_FLAG_NONE:
 						break;
 					case USB_INJECTION_FLAG_IGNORE:
-						delete[] control_data;
 						continue;
 					case USB_INJECTION_FLAG_STALL:
-						delete[] control_data;
 						usb_raw_ep0_stall(fd);
 						continue;
 					default:
@@ -1669,10 +1685,8 @@ void ep0_loop(int fd) {
 					case USB_INJECTION_FLAG_NONE:
 						break;
 					case USB_INJECTION_FLAG_IGNORE:
-						delete[] control_data;
 						continue;
 					case USB_INJECTION_FLAG_STALL:
-						delete[] control_data;
 						usb_raw_ep0_stall(fd);
 						continue;
 					default:
@@ -1732,8 +1746,10 @@ void ep0_loop(int fd) {
 					if (verbose_level >= 2)
 						printData(io, 0x00, "control", "out");
 
-					clamp_uvc_probe_commit(&event.ctrl, io);
-					memcpy(control_data, io.data, event.ctrl.wLength);
+				clamp_uvc_probe_commit(&event.ctrl, io);
+				// ★ 用 rv（实际收到字节数），不能用 wLength：短包时会读越界 io.data
+				//   并把未初始化栈数据转发给物理设备（io.inner.length 已钳到 4096）。
+				memcpy(control_data, io.data, rv);
 
 					result = control_request(&event.ctrl, &nbytes, &control_data, USB_REQUEST_TIMEOUT);
 					if (result == 0) {
@@ -1742,8 +1758,6 @@ void ep0_loop(int fd) {
 				}
 			}
 		}
-
-		delete[] control_data;
 	}
 
 	struct raw_gadget_config *config = &host_device_desc.configs[host_device_desc.current_config];
